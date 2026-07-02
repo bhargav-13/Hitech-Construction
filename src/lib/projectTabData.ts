@@ -31,6 +31,7 @@ export interface TransactionRow {
   description: string;
   amount: string;
   balance: string;
+  [key: string]: string;
 }
 
 export function generateTransactions(projectId: string, count = 6): TransactionRow[] {
@@ -60,6 +61,7 @@ export function generateTransactions(projectId: string, count = 6): TransactionR
 export interface ProjectAttendanceRow {
   date: string;
   workers: number;
+  [key: string]: string | number;
 }
 
 export function generateProjectAttendance(projectId: string, count = 7): ProjectAttendanceRow[] {
@@ -76,6 +78,7 @@ export interface MaterialRow {
   movement: string;
   quantity: number;
   unit: string;
+  [key: string]: string | number;
 }
 
 export function generateProjectMaterials(projectId: string, count = 6): MaterialRow[] {
@@ -96,6 +99,7 @@ export interface TaskRow {
   assignedTo: string;
   dueDate: string;
   status: string;
+  [key: string]: string;
 }
 
 export function generateProjectTasks(projectId: string, count = 6): TaskRow[] {
@@ -112,6 +116,7 @@ export interface PhotoRow {
   date: string;
   caption: string;
   uploadedBy: string;
+  [key: string]: string;
 }
 
 export function generateProjectPhotos(projectId: string, count = 6): PhotoRow[] {
@@ -135,6 +140,7 @@ export interface InvoiceRow {
   date: string;
   amount: string;
   status: string;
+  [key: string]: string;
 }
 
 export function generateProjectInvoices(projectId: string, count = 5): InvoiceRow[] {

@@ -30,6 +30,10 @@ type SeedProject = Omit<
   | "orientation"
   | "dimension"
   | "scopeOfWork"
+  | "address"
+  | "inAmount"
+  | "outAmount"
+  | "todoCount"
 > &
   Partial<
     Pick<Project, "address" | "inAmount" | "outAmount" | "todoCount">
