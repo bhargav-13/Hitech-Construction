@@ -20,6 +20,8 @@ import {
   generateProjectTasks,
 } from "@/lib/projectTabData";
 
+export const runtime = "edge";
+
 // Real Onsite project workspace tabs
 const TABS = [
   "Dashboard",

@@ -16,6 +16,8 @@ import { findReport } from "@/lib/reports";
 import { getReportColumns, getReportFilters } from "@/lib/reportSchema";
 import { generateReportRows } from "@/lib/reportData";
 
+export const runtime = "edge";
+
 export default async function ReportDetailPage({
   params,
 }: {
