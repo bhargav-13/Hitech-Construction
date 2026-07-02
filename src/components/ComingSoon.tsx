@@ -6,7 +6,7 @@ export function ComingSoon({ title }: { title: string }) {
     <AppShell title={title}>
       <div className="flex h-full min-h-[420px] items-center justify-center rounded-xl border border-dashed border-gray-300 bg-white">
         <div className="flex flex-col items-center text-center">
-          <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-indigo-50 text-brand-accent">
+          <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-teal-50 text-brand-accent">
             <Construction size={28} />
           </div>
           <div className="text-base font-medium text-gray-700">{title} module coming soon</div>

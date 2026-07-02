@@ -62,7 +62,7 @@ export default function ServicesPage() {
                 {s.badge}
               </span>
             )}
-            <div className="mb-3 flex h-11 w-11 items-center justify-center rounded-full bg-indigo-50 text-brand-accent">
+            <div className="mb-3 flex h-11 w-11 items-center justify-center rounded-full bg-teal-50 text-brand-accent">
               <s.icon size={20} />
             </div>
             <div className="mb-1 text-sm font-semibold text-gray-800">{s.title}</div>

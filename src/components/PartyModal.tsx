@@ -5,7 +5,14 @@ import { Modal } from "./Modal";
 import { useAppStore } from "@/lib/store";
 import type { PartyType } from "@/lib/types";
 
-const TYPES: PartyType[] = ["Client", "Vendor", "Subcontractor"];
+const TYPES: PartyType[] = [
+  "Client",
+  "Material Supplier",
+  "Subcontractor",
+  "Labour Contractor",
+  "Equipment Vendor",
+  "Other Vendor",
+];
 
 export function PartyModal({ onClose }: { onClose: () => void }) {
   const addParty = useAppStore((s) => s.addParty);
@@ -16,7 +23,7 @@ export function PartyModal({ onClose }: { onClose: () => void }) {
 
   function save() {
     if (!name.trim()) return;
-    addParty({ name, type, phone, gstin });
+    addParty({ name, type, phone, gstin, rating: 0, toReceive: 0, toPay: 0 });
     onClose();
   }
 

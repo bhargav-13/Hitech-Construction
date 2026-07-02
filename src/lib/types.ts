@@ -65,7 +65,13 @@ export interface TimesheetEntry {
   status: "Pending" | "Approved";
 }
 
-export type PartyType = "Client" | "Vendor" | "Subcontractor";
+export type PartyType =
+  | "Client"
+  | "Material Supplier"
+  | "Subcontractor"
+  | "Labour Contractor"
+  | "Equipment Vendor"
+  | "Other Vendor";
 
 export interface Party {
   id: string;
@@ -73,7 +79,87 @@ export interface Party {
   type: PartyType;
   phone: string;
   gstin: string;
+  rating: number; // 0-5
+  toReceive: number; // they owe us
+  toPay: number; // we owe them
 }
+
+// ---- Unified finance transaction engine (mirrors Onsite's Create Transaction taxonomy) ----
+export type TxnCategory = "Payment" | "Sales" | "Expense";
+
+export type TxnType =
+  | "Payment In"
+  | "Payment Out"
+  | "Debit Note"
+  | "Credit Note"
+  | "Party to Party Payment"
+  | "Internal Transfer"
+  | "Sales Invoice"
+  | "Material Sales"
+  | "Material Purchase"
+  | "Material Return"
+  | "Material Transfer"
+  | "Sub Con Bill"
+  | "Other Expense"
+  | "Equipment Expense";
+
+export type TxnFlow = "in" | "out" | "neutral";
+
+export interface FinanceTransaction {
+  id: string;
+  type: TxnType;
+  category: TxnCategory;
+  date: string;
+  partyId: string;
+  projectId: string;
+  amount: number;
+  description: string;
+  flow: TxnFlow;
+  paid: boolean;
+}
+
+export type PaymentRequestStatus = "Paid" | "Unpaid";
+
+export interface PaymentRequest {
+  id: string;
+  number: string; // e.g. "#-30"
+  partyId: string;
+  projectId: string;
+  amount: number;
+  against: string; // "Against Labour" | "Against Subcon WO #WO-9" | "Against Petty Cash" | "Against Other"
+  status: PaymentRequestStatus;
+  date: string;
+}
+
+export interface BankAccount {
+  id: string;
+  name: string;
+  type: "Cash" | "Bank";
+  accountNo?: string;
+  balance: number;
+  isPrimary?: boolean;
+  acHolder?: string;
+  ifsc?: string;
+  upi?: string;
+  openingBalance?: number;
+}
+
+export const TXN_TYPE_META: Record<TxnType, { category: TxnCategory; flow: TxnFlow }> = {
+  "Payment In": { category: "Payment", flow: "in" },
+  "Payment Out": { category: "Payment", flow: "out" },
+  "Debit Note": { category: "Payment", flow: "in" },
+  "Credit Note": { category: "Payment", flow: "out" },
+  "Party to Party Payment": { category: "Payment", flow: "neutral" },
+  "Internal Transfer": { category: "Payment", flow: "neutral" },
+  "Sales Invoice": { category: "Sales", flow: "in" },
+  "Material Sales": { category: "Sales", flow: "in" },
+  "Material Purchase": { category: "Expense", flow: "out" },
+  "Material Return": { category: "Expense", flow: "in" },
+  "Material Transfer": { category: "Expense", flow: "neutral" },
+  "Sub Con Bill": { category: "Expense", flow: "out" },
+  "Other Expense": { category: "Expense", flow: "out" },
+  "Equipment Expense": { category: "Expense", flow: "out" },
+};
 
 export interface FinanceItem {
   id: string;

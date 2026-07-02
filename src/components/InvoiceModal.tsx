@@ -4,7 +4,6 @@ import { useState } from "react";
 import { Modal } from "./Modal";
 import { LineItemsEditor, type LineDraft } from "./LineItemsEditor";
 import { useAppStore } from "@/lib/store";
-import type { PartyType } from "@/lib/types";
 
 export function InvoiceModal({
   mode,
@@ -19,8 +18,10 @@ export function InvoiceModal({
   const addSaleInvoice = useAppStore((s) => s.addSaleInvoice);
   const addPurchaseEntry = useAppStore((s) => s.addPurchaseEntry);
 
-  const relevantType: PartyType = mode === "sale" ? "Client" : "Vendor";
-  const relevantParties = parties.filter((p) => p.type === relevantType);
+  const relevantParties =
+    mode === "sale"
+      ? parties.filter((p) => p.type === "Client")
+      : parties.filter((p) => p.type !== "Client");
 
   const [partyId, setPartyId] = useState(relevantParties[0]?.id ?? "");
   const [projectId, setProjectId] = useState(projects[0]?.id ?? "");

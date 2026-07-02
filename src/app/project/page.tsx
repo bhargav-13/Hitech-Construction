@@ -31,7 +31,7 @@ export default function ProjectsPage() {
         <KpiCard label="Approval (Pending)" value={13} icon={ThumbsUp} tint="bg-violet-100 text-violet-500" />
         <KpiCard label="Material (Pending)" value={0} icon={ShoppingCart} tint="bg-amber-100 text-amber-600" />
         <KpiCard label="To Do (Pending)" value={91} icon={CheckCircle2} tint="bg-orange-100 text-orange-500" />
-        <div className="rounded-xl bg-indigo-50 p-4">
+        <div className="rounded-xl bg-teal-50 p-4">
           <div className="mb-1 text-sm font-semibold text-gray-800">Our Services</div>
           <p className="text-xs text-gray-500">Introducing new services for you...</p>
           <button className="mt-1 text-xs font-medium text-brand-accent">Learn more &gt;</button>
@@ -121,7 +121,7 @@ export default function ProjectsPage() {
                   {formatRupee(project.inAmount)}/{formatRupee(project.outAmount)}
                 </td>
                 <td className="px-4 py-3 text-center">
-                  <span className="rounded-md bg-indigo-100 px-2 py-1 text-xs font-medium text-indigo-600">
+                  <span className="rounded-md bg-teal-100 px-2 py-1 text-xs font-medium text-teal-600">
                     {project.todoCount}
                   </span>
                 </td>

@@ -38,7 +38,8 @@ export default function NewSaleInvoicePage() {
   const projects = useAppStore((s) => s.projects);
   const items = useAppStore((s) => s.items);
   const saleInvoices = useAppStore((s) => s.saleInvoices);
-  const addSaleInvoice = useAppStore((s) => s.addSaleInvoice);
+  const transactions = useAppStore((s) => s.transactions);
+  const addTransaction = useAppStore((s) => s.addTransaction);
 
   const clients = parties.filter((p) => p.type === "Client");
   const [partyId, setPartyId] = useState(clients[0]?.id ?? "");
@@ -47,7 +48,8 @@ export default function NewSaleInvoicePage() {
   const [received, setReceived] = useState("0");
   const [lines, setLines] = useState<LineDraft[]>([{ itemId: items[0]?.id ?? "", qty: 1 }]);
 
-  const invoiceNumber = `INV-2026-${String(1000 + saleInvoices.length).padStart(4, "0")}`;
+  const salesCount = saleInvoices.length + transactions.filter((t) => t.type === "Sales Invoice").length;
+  const invoiceNumber = `INV-2026-${String(1000 + salesCount).padStart(4, "0")}`;
 
   const totals = useMemo(() => {
     const subtotal = lines.reduce((sum, l) => {
@@ -67,13 +69,28 @@ export default function NewSaleInvoicePage() {
 
   function save() {
     if (!partyId || !projectId) return;
-    addSaleInvoice({
+    const receivedAmount = Math.min(Number(received) || 0, totals.total);
+    const fullyPaid = receivedAmount >= totals.total && totals.total > 0;
+    addTransaction({
+      type: "Sales Invoice",
       partyId,
       projectId,
       date,
-      lines,
-      received: Math.min(Number(received) || 0, totals.total),
+      amount: totals.total,
+      description: `${invoiceNumber} · ${lines.length} item(s)`,
+      paid: fullyPaid,
     });
+    if (receivedAmount > 0) {
+      addTransaction({
+        type: "Payment In",
+        partyId,
+        projectId,
+        date,
+        amount: receivedAmount,
+        description: `Received against ${invoiceNumber}`,
+        paid: true,
+      });
+    }
     router.push("/finance");
   }
 
@@ -139,7 +156,7 @@ export default function NewSaleInvoicePage() {
             </div>
           </div>
 
-          <div className="mb-5 rounded-lg border border-dashed border-indigo-200 bg-indigo-50/40 p-4">
+          <div className="mb-5 rounded-lg border border-dashed border-teal-200 bg-teal-50/40 p-4">
             <LineItemsEditor items={items} lines={lines} onChange={setLines} />
           </div>
 
@@ -197,13 +214,13 @@ export default function NewSaleInvoicePage() {
               </div>
               <div className="text-right">
                 <div className="text-xs font-semibold text-gray-700">Invoice Details</div>
-                <div className="text-xs text-indigo-500">Invoice No. #{invoiceNumber.slice(-4)}</div>
+                <div className="text-xs text-teal-500">Invoice No. #{invoiceNumber.slice(-4)}</div>
                 <div className="text-xs text-gray-500">Date : {date}</div>
               </div>
             </div>
             <table className="mb-4 w-full border-collapse text-xs">
               <thead>
-                <tr className="bg-indigo-400 text-left text-white">
+                <tr className="bg-teal-400 text-left text-white">
                   <th className="px-2 py-1.5">#</th>
                   <th className="px-2 py-1.5">Item name</th>
                   <th className="px-2 py-1.5 text-right">Qty</th>
@@ -258,7 +275,7 @@ export default function NewSaleInvoicePage() {
                   <span>GST</span>
                   <span>₹ {totals.gst.toLocaleString("en-IN")}</span>
                 </div>
-                <div className="flex justify-between bg-indigo-400 px-2 py-1 font-semibold text-white">
+                <div className="flex justify-between bg-teal-400 px-2 py-1 font-semibold text-white">
                   <span>Total</span>
                   <span>₹ {totals.total.toLocaleString("en-IN")}</span>
                 </div>

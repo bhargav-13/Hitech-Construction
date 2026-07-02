@@ -1,241 +1,140 @@
 "use client";
 
 import { useState } from "react";
-import { ClipboardCheck, ClipboardList, Truck } from "lucide-react";
+import { ChevronDown, Search } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
-import { Modal } from "@/components/Modal";
-import { useAppStore } from "@/lib/store";
+import { SimpleTable } from "@/components/SimpleTable";
 import { formatRupee } from "@/lib/projectHelpers";
 
-type PoStatus = "Pending Approval" | "Approved" | "Ordered" | "Delivered";
+const TABS = ["RFQ", "Purchase Order"] as const;
+type Tab = (typeof TABS)[number];
 
-interface PurchaseOrder {
+type PoStatus = "Open" | "Closed";
+type Approval = "Approved" | "Pending" | "Rejected";
+
+interface PO {
   id: string;
   poNumber: string;
+  date: string;
   vendor: string;
-  project: string;
-  material: string;
-  qty: number;
-  unit: string;
-  estValue: number;
-  status: PoStatus;
+  deliverySite: string;
+  poStatus: PoStatus;
+  approval: Approval;
+  amount: number;
 }
 
-const STATUS_CLS: Record<PoStatus, string> = {
-  "Pending Approval": "bg-amber-100 text-amber-700",
-  Approved: "bg-blue-100 text-blue-700",
-  Ordered: "bg-indigo-100 text-indigo-700",
-  Delivered: "bg-green-100 text-green-700",
-};
-
-const NEXT_STATUS: Record<PoStatus, PoStatus | null> = {
-  "Pending Approval": "Approved",
-  Approved: "Ordered",
-  Ordered: "Delivered",
-  Delivered: null,
-};
-
-const SEED_POS: PurchaseOrder[] = [
-  { id: "po-1", poNumber: "PO-2026-0012", vendor: "Ambuja Cement Suppliers", project: "Ishwariya (Gram Panchayat) Amreli", material: "Cement OPC 53", qty: 400, unit: "Bag", estValue: 152000, status: "Pending Approval" },
-  { id: "po-2", poNumber: "PO-2026-0011", vendor: "Shree Steel Traders", project: "Raydi (Animal Husbandary EPI Center)", material: "TMT Bar 12mm", qty: 2000, unit: "Kg", estValue: 124000, status: "Approved" },
-  { id: "po-3", poNumber: "PO-2026-0010", vendor: "Shree Steel Traders", project: "Pedak Road (D.I. Pipeline)", material: "SFRC Rectangular Pipe", qty: 60, unit: "Nos", estValue: 192000, status: "Ordered" },
-  { id: "po-4", poNumber: "PO-2026-0009", vendor: "Ambuja Cement Suppliers", project: "Lakhapadar (Gram Panchayat) Amreli", material: "Black Sand (Crushed)", qty: 45, unit: "Cum", estValue: 81000, status: "Delivered" },
+const SEED_POS: PO[] = [
+  { id: "po1", poNumber: "#PO/SB/-1", date: "13 Jun 2026", vendor: "Sethi Brothers", deliverySite: "Sewerage Network Zone 8 & 9 at Ujjain", poStatus: "Closed", approval: "Approved", amount: 22608 },
+  { id: "po2", poNumber: "#PO/NEW/-1", date: "12 Jun 2026", vendor: "National Engineering Works", deliverySite: "Sewerage Network Zone 8 & 9 at Ujjain", poStatus: "Closed", approval: "Approved", amount: 84000 },
+  { id: "po3", poNumber: "#PO/SC/-1", date: "12 Jun 2026", vendor: "Sadguru CCTV", deliverySite: "Sewerage Network Zone 8 & 9 at Ujjain", poStatus: "Closed", approval: "Approved", amount: 10600 },
+  { id: "po4", poNumber: "#PO/NCP/-1", date: "8 Jun 2026", vendor: "Nakoda Cement Products", deliverySite: "Sewerage Network Zone 8 & 9 at Ujjain", poStatus: "Closed", approval: "Approved", amount: 944000 },
+  { id: "po5", poNumber: "#PO-11", date: "29 May 2026", vendor: "Signet Industries Ltd", deliverySite: "Sewerage Network Zone 8 & 9 at Ujjain", poStatus: "Open", approval: "Pending", amount: 1211624 },
 ];
 
+const RFQS = [
+  { no: "RFQ-08", date: "20 Jun 2026", title: "TMT Steel Supply", vendors: "3 vendors", status: "Responses Received" },
+  { no: "RFQ-07", date: "15 Jun 2026", title: "Cement OPC 53", vendors: "4 vendors", status: "Sent" },
+  { no: "RFQ-06", date: "10 Jun 2026", title: "SFRC Pipes", vendors: "2 vendors", status: "Closed" },
+];
+
+const STATUS_CLS: Record<PoStatus, string> = { Open: "bg-blue-100 text-blue-700", Closed: "bg-gray-100 text-gray-600" };
+const APPROVAL_CLS: Record<Approval, string> = {
+  Approved: "bg-green-100 text-green-700",
+  Pending: "bg-amber-100 text-amber-700",
+  Rejected: "bg-rose-100 text-rose-700",
+};
+
 export default function ProcurementPage() {
-  const [orders, setOrders] = useState(SEED_POS);
-  const [showAdd, setShowAdd] = useState(false);
-  const projects = useAppStore((s) => s.projects);
-  const parties = useAppStore((s) => s.parties);
-  const items = useAppStore((s) => s.items);
-
-  const pending = orders.filter((o) => o.status === "Pending Approval").length;
-  const inTransit = orders.filter((o) => o.status === "Ordered").length;
-
-  function advance(id: string) {
-    setOrders(
-      orders.map((o) => {
-        if (o.id !== id) return o;
-        const next = NEXT_STATUS[o.status];
-        return next ? { ...o, status: next } : o;
-      })
-    );
-  }
+  const [tab, setTab] = useState<Tab>("Purchase Order");
+  const [pos] = useState(SEED_POS);
 
   return (
     <AppShell title="Procurement">
-      <div className="mb-4 grid grid-cols-3 gap-4">
-        <Kpi icon={ClipboardList} label="Pending Approval" value={String(pending)} tint="bg-amber-100 text-amber-600" />
-        <Kpi icon={Truck} label="In Transit" value={String(inTransit)} tint="bg-indigo-100 text-indigo-600" />
-        <Kpi icon={ClipboardCheck} label="Total PO Value" value={formatRupee(orders.reduce((s, o) => s + o.estValue, 0))} tint="bg-green-100 text-green-600" />
+      <div className="mb-4 flex gap-6 border-b border-gray-200">
+        {TABS.map((t) => (
+          <button
+            key={t}
+            onClick={() => setTab(t)}
+            className={`border-b-2 px-1 py-2 text-sm font-medium ${
+              tab === t ? "border-brand-accent text-brand-accent" : "border-transparent text-gray-500 hover:text-gray-700"
+            }`}
+          >
+            {t}
+          </button>
+        ))}
       </div>
 
-      <div className="mb-4 flex items-center justify-between">
-        <h2 className="text-lg font-semibold text-gray-800">Purchase Orders</h2>
-        <button
-          onClick={() => setShowAdd(true)}
-          className="rounded-lg bg-brand-accent px-4 py-2 text-sm font-medium text-white hover:opacity-90"
-        >
-          + New Purchase Order
-        </button>
-      </div>
+      {tab === "Purchase Order" && (
+        <div className="space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex flex-wrap items-center gap-2">
+              {["Vendor", "Delivery Site", "Approval Status", "PO Status"].map((f) => (
+                <button key={f} className="flex items-center gap-1 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-600">
+                  {f}
+                  <ChevronDown size={13} />
+                </button>
+              ))}
+              <div className="flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2">
+                <Search size={15} className="text-gray-400" />
+                <input placeholder="Search By PO Number" className="w-40 text-sm outline-none" readOnly />
+              </div>
+            </div>
+            <button className="rounded-lg bg-brand-accent px-4 py-2.5 text-sm font-medium text-white hover:opacity-90">+ Create PO</button>
+          </div>
 
-      <div className="w-full min-w-0 overflow-x-auto rounded-xl border border-gray-200 bg-white">
-        <table className="w-full min-w-[900px] border-collapse text-sm">
-          <thead>
-            <tr className="border-b border-gray-100 bg-gray-50 text-left text-xs font-medium text-gray-500">
-              <th className="px-4 py-3">PO #</th>
-              <th className="px-4 py-3">Vendor</th>
-              <th className="px-4 py-3">Project</th>
-              <th className="px-4 py-3">Material</th>
-              <th className="px-4 py-3">Qty</th>
-              <th className="px-4 py-3">Est. Value</th>
-              <th className="px-4 py-3">Status</th>
-              <th className="px-4 py-3" />
-            </tr>
-          </thead>
-          <tbody>
-            {orders.map((o) => (
-              <tr key={o.id} className="border-b border-gray-50 last:border-b-0">
-                <td className="px-4 py-3 font-medium text-indigo-600">{o.poNumber}</td>
-                <td className="px-4 py-3 text-gray-700">{o.vendor}</td>
-                <td className="max-w-[200px] truncate px-4 py-3 text-gray-600">{o.project}</td>
-                <td className="px-4 py-3 text-gray-700">{o.material}</td>
-                <td className="px-4 py-3 whitespace-nowrap text-gray-700">
-                  {o.qty} {o.unit}
-                </td>
-                <td className="px-4 py-3 text-gray-700">{formatRupee(o.estValue)}</td>
-                <td className="px-4 py-3">
-                  <span className={`rounded-md px-2 py-1 text-xs font-medium whitespace-nowrap ${STATUS_CLS[o.status]}`}>
-                    {o.status}
-                  </span>
-                </td>
-                <td className="px-4 py-3">
-                  {NEXT_STATUS[o.status] && (
-                    <button
-                      onClick={() => advance(o.id)}
-                      className="text-xs font-medium whitespace-nowrap text-brand-accent hover:underline"
-                    >
-                      Mark {NEXT_STATUS[o.status]}
-                    </button>
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+          <div className="w-full min-w-0 overflow-x-auto rounded-xl border border-gray-200 bg-white">
+            <table className="w-full min-w-[900px] border-collapse text-sm">
+              <thead>
+                <tr className="border-b border-gray-100 bg-gray-50 text-left text-xs font-medium text-gray-500">
+                  <th className="px-4 py-3">PO #</th>
+                  <th className="px-4 py-3">Vendor Name</th>
+                  <th className="px-4 py-3">Delivery Site</th>
+                  <th className="px-4 py-3">PO Status</th>
+                  <th className="px-4 py-3">Approval</th>
+                  <th className="px-4 py-3 text-right">Amount</th>
+                </tr>
+              </thead>
+              <tbody>
+                {pos.map((po) => (
+                  <tr key={po.id} className="border-b border-gray-50 last:border-b-0">
+                    <td className="px-4 py-3">
+                      <div className="font-medium text-teal-600">{po.poNumber}</div>
+                      <div className="text-xs text-gray-400">{po.date}</div>
+                    </td>
+                    <td className="px-4 py-3 text-gray-700">{po.vendor}</td>
+                    <td className="max-w-[240px] truncate px-4 py-3 text-gray-600">{po.deliverySite}</td>
+                    <td className="px-4 py-3">
+                      <span className={`rounded-md px-2 py-1 text-xs font-medium ${STATUS_CLS[po.poStatus]}`}>{po.poStatus}</span>
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className={`rounded-md px-2 py-1 text-xs font-medium ${APPROVAL_CLS[po.approval]}`}>{po.approval}</span>
+                    </td>
+                    <td className="px-4 py-3 text-right font-medium text-gray-800">{formatRupee(po.amount)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
-      {showAdd && (
-        <NewPoModal
-          projects={projects.map((p) => p.name)}
-          vendors={parties.filter((p) => p.type === "Vendor").map((p) => p.name)}
-          materials={items.map((i) => ({ name: i.name, unit: i.unit, rate: i.rate }))}
-          onClose={() => setShowAdd(false)}
-          onSave={(po) => {
-            setOrders([po, ...orders]);
-            setShowAdd(false);
-          }}
-        />
+      {tab === "RFQ" && (
+        <div className="space-y-4">
+          <div className="flex items-center justify-end">
+            <button className="rounded-lg bg-brand-accent px-4 py-2.5 text-sm font-medium text-white hover:opacity-90">+ New RFQ</button>
+          </div>
+          <SimpleTable
+            columns={[
+              { key: "no", label: "RFQ #" },
+              { key: "date", label: "Date" },
+              { key: "title", label: "Title" },
+              { key: "vendors", label: "Vendors" },
+              { key: "status", label: "Status" },
+            ]}
+            rows={RFQS}
+          />
+        </div>
       )}
     </AppShell>
-  );
-}
-
-function Kpi({ icon: Icon, label, value, tint }: { icon: React.ComponentType<{ size?: number }>; label: string; value: string; tint: string }) {
-  return (
-    <div className="flex items-center justify-between rounded-xl border border-gray-200 bg-white p-4">
-      <div>
-        <div className="text-sm text-gray-500">{label}</div>
-        <div className="mt-1 text-xl font-semibold text-gray-800">{value}</div>
-      </div>
-      <div className={`flex h-11 w-11 items-center justify-center rounded-full ${tint}`}>
-        <Icon size={20} />
-      </div>
-    </div>
-  );
-}
-
-function NewPoModal({
-  projects,
-  vendors,
-  materials,
-  onClose,
-  onSave,
-}: {
-  projects: string[];
-  vendors: string[];
-  materials: { name: string; unit: string; rate: number }[];
-  onClose: () => void;
-  onSave: (po: PurchaseOrder) => void;
-}) {
-  const [vendor, setVendor] = useState(vendors[0] ?? "");
-  const [project, setProject] = useState(projects[0] ?? "");
-  const [materialName, setMaterialName] = useState(materials[0]?.name ?? "");
-  const [qty, setQty] = useState("1");
-
-  const material = materials.find((m) => m.name === materialName);
-  const estValue = (material?.rate ?? 0) * (Number(qty) || 0);
-
-  return (
-    <Modal onClose={onClose}>
-      <div className="p-8">
-        <h2 className="mb-6 text-lg font-semibold text-gray-800">New Purchase Order</h2>
-        <div className="space-y-4">
-          <label className="block">
-            <span className="mb-1 block text-xs font-medium text-gray-500">Vendor</span>
-            <select value={vendor} onChange={(e) => setVendor(e.target.value)} className="input">
-              {vendors.map((v) => (
-                <option key={v}>{v}</option>
-              ))}
-            </select>
-          </label>
-          <label className="block">
-            <span className="mb-1 block text-xs font-medium text-gray-500">Project</span>
-            <select value={project} onChange={(e) => setProject(e.target.value)} className="input">
-              {projects.map((p) => (
-                <option key={p}>{p}</option>
-              ))}
-            </select>
-          </label>
-          <div className="grid grid-cols-2 gap-4">
-            <label className="block">
-              <span className="mb-1 block text-xs font-medium text-gray-500">Material</span>
-              <select value={materialName} onChange={(e) => setMaterialName(e.target.value)} className="input">
-                {materials.map((m) => (
-                  <option key={m.name}>{m.name}</option>
-                ))}
-              </select>
-            </label>
-            <label className="block">
-              <span className="mb-1 block text-xs font-medium text-gray-500">Qty ({material?.unit ?? ""})</span>
-              <input type="number" min={1} value={qty} onChange={(e) => setQty(e.target.value)} className="input" />
-            </label>
-          </div>
-          <div className="flex items-center justify-between rounded-lg bg-gray-50 px-4 py-3 text-sm">
-            <span className="text-gray-500">Estimated Value</span>
-            <span className="font-semibold text-gray-800">{formatRupee(estValue)}</span>
-          </div>
-          <button
-            onClick={() =>
-              onSave({
-                id: `po-${Date.now()}`,
-                poNumber: `PO-2026-${String(Math.floor(Math.random() * 900) + 100).padStart(4, "0")}`,
-                vendor,
-                project,
-                material: materialName,
-                qty: Number(qty) || 0,
-                unit: material?.unit ?? "",
-                estValue,
-                status: "Pending Approval",
-              })
-            }
-            className="w-full rounded-lg bg-brand-accent py-2.5 text-sm font-medium text-white hover:opacity-90"
-          >
-            Create PO
-          </button>
-        </div>
-      </div>
-    </Modal>
   );
 }

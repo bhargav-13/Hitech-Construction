@@ -44,7 +44,7 @@ export default function WarehousePage() {
   return (
     <AppShell title="Warehouse">
       <div className="mb-4 grid grid-cols-3 gap-4">
-        <Kpi icon={Boxes} label="Stock Lines" value={String(visibleStock.length)} tint="bg-indigo-100 text-indigo-600" />
+        <Kpi icon={Boxes} label="Stock Lines" value={String(visibleStock.length)} tint="bg-teal-100 text-teal-600" />
         <Kpi icon={ArrowDownLeft} label="Received (30 days)" value={String(totalReceived)} tint="bg-green-100 text-green-600" />
         <Kpi icon={ArrowUpRight} label="Issued (30 days)" value={String(totalIssued)} tint="bg-rose-100 text-rose-600" />
       </div>

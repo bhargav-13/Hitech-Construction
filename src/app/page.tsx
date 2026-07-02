@@ -130,7 +130,7 @@ export default function DashboardPage() {
                         tick={{ fontSize: 10 }}
                         tickFormatter={(v) => (v === 0 ? "0" : formatLakh(v))}
                       />
-                      <Tooltip formatter={(v: number) => formatLakh(v)} />
+                      <Tooltip formatter={(v) => formatLakh(Number(v))} />
                       <Bar dataKey="expense" fill="#d6478a" radius={[3, 3, 0, 0]}>
                         <Cell />
                       </Bar>
@@ -149,7 +149,7 @@ export default function DashboardPage() {
                         tick={{ fontSize: 10 }}
                         tickFormatter={(v) => (v === 0 ? "0" : formatLakh(v))}
                       />
-                      <Tooltip formatter={(v: number) => formatLakh(v)} />
+                      <Tooltip formatter={(v) => formatLakh(Number(v))} />
                       <Bar dataKey="margin" fill="#d6478a" radius={[3, 3, 0, 0]} />
                     </BarChart>
                   </ResponsiveContainer>

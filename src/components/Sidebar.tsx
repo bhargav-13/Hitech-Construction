@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
@@ -20,7 +21,8 @@ import {
   FileSignature,
   CheckSquare,
   MessageCircle,
-  ChevronDown,
+  PanelLeftClose,
+  PanelLeftOpen,
 } from "lucide-react";
 import { NAV_ITEMS, NAV_BREAK_AFTER } from "@/lib/nav";
 
@@ -43,56 +45,86 @@ const ICONS: Record<string, React.ComponentType<{ size?: number; className?: str
 
 export function Sidebar() {
   const pathname = usePathname();
+  const [collapsed, setCollapsed] = useState(false);
 
   return (
-    <aside className="flex h-full w-64 flex-shrink-0 flex-col bg-sidebar-bg text-sidebar-text">
-      <div className="flex items-center gap-3 px-5 py-5">
-        <div className="flex h-9 w-9 items-center justify-center rounded-full bg-white text-sm font-bold text-sidebar-bg">
-          HT
-        </div>
-        <div className="flex-1 min-w-0">
-          <div className="truncate text-sm font-semibold text-white">
-            Hi-Tech Construction
-          </div>
-          <div className="text-xs text-sidebar-text">Admin</div>
-        </div>
-        <ChevronDown size={16} className="text-sidebar-text" />
+    <aside
+      className={`flex h-full flex-shrink-0 flex-col border-r border-sidebar-border bg-sidebar-bg text-sidebar-text transition-all duration-200 ${
+        collapsed ? "w-[76px]" : "w-64"
+      }`}
+    >
+      <div className={`flex items-center px-4 py-4 ${collapsed ? "justify-center" : "gap-3"}`}>
+        {!collapsed && (
+          <>
+            <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-sidebar-active text-sm font-bold text-white">
+              HT
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-sm font-semibold text-gray-800">
+                Hi-Tech Construction
+              </div>
+              <div className="truncate text-xs text-sidebar-text">Admin</div>
+            </div>
+          </>
+        )}
+        <button
+          type="button"
+          onClick={() => setCollapsed((c) => !c)}
+          className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md border border-sidebar-border text-sidebar-text transition-colors hover:bg-gray-50 hover:text-gray-700"
+          aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+        >
+          {collapsed ? <PanelLeftOpen size={15} /> : <PanelLeftClose size={15} />}
+        </button>
       </div>
 
       <nav className="flex-1 overflow-y-auto px-3 py-2">
         <ul className="space-y-1">
-          {NAV_ITEMS.map((item) => {
+          {NAV_ITEMS.flatMap((item) => {
             const Icon = ICONS[item.label] ?? LayoutGrid;
             const active =
               item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);
-            return (
-              <li key={item.href} className={NAV_BREAK_AFTER.has(item.label) ? "mb-3" : ""}>
+            const link = (
+              <li key={item.href}>
                 <Link
                   href={item.href}
-                  className={`flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors ${
+                  title={collapsed ? item.label : undefined}
+                  className={`flex items-center gap-3 rounded-r-lg border-l-[3px] py-2.5 pl-[9px] pr-3 text-sm transition-colors ${
                     active
-                      ? "bg-sidebar-active text-white"
-                      : "text-sidebar-text hover:bg-sidebar-active/50 hover:text-white"
+                      ? "border-sidebar-active bg-sidebar-active/5 font-medium text-sidebar-active"
+                      : "border-transparent text-sidebar-text hover:bg-gray-50 hover:text-gray-800"
                   }`}
                 >
-                  <Icon size={18} />
-                  <span>{item.label}</span>
+                  <Icon size={18} className="flex-shrink-0" />
+                  {!collapsed && <span className="truncate">{item.label}</span>}
                 </Link>
               </li>
             );
+            if (NAV_BREAK_AFTER.has(item.label)) {
+              return [
+                link,
+                <li key={`${item.href}-divider`} aria-hidden className="my-2 border-t border-sidebar-border" />,
+              ];
+            }
+            return [link];
           })}
         </ul>
       </nav>
 
-      <div className="grid grid-cols-3 gap-2 border-t border-white/10 px-3 py-3">
-        <QuickAction icon={FileSignature} label="MOM" />
-        <QuickAction icon={CheckSquare} label="To Do" href="/todo" />
-        <QuickAction icon={MessageCircle} label="Chat" />
+      <div
+        className={`grid gap-2 border-t border-sidebar-border px-3 py-3 ${
+          collapsed ? "grid-cols-1" : "grid-cols-3"
+        }`}
+      >
+        <QuickAction icon={FileSignature} label="MOM" collapsed={collapsed} />
+        <QuickAction icon={CheckSquare} label="To Do" href="/todo" collapsed={collapsed} />
+        <QuickAction icon={MessageCircle} label="Chat" collapsed={collapsed} />
       </div>
 
-      <div className="border-t border-white/10 px-4 py-3 text-[11px] text-sidebar-text/70">
-        © Hi-Tech Construction | v1.0.0
-      </div>
+      {!collapsed && (
+        <div className="border-t border-sidebar-border px-4 py-3 text-[11px] text-sidebar-text/70">
+          © Hi-Tech Construction | v1.0.0
+        </div>
+      )}
     </aside>
   );
 }
@@ -101,25 +133,31 @@ function QuickAction({
   icon: Icon,
   label,
   href,
+  collapsed,
 }: {
   icon: React.ComponentType<{ size?: number }>;
   label: string;
   href?: string;
+  collapsed: boolean;
 }) {
   const cls =
-    "flex flex-col items-center gap-1 rounded-lg bg-sidebar-active px-2 py-2 text-[11px] text-white hover:bg-sidebar-active/80";
+    "flex flex-col items-center gap-1 rounded-lg border border-sidebar-border px-2 py-2 text-[11px] text-sidebar-text transition-colors hover:border-sidebar-active/40 hover:text-sidebar-active";
+  const content = (
+    <>
+      <Icon size={16} />
+      {!collapsed && <span>{label}</span>}
+    </>
+  );
   if (href) {
     return (
-      <Link href={href} className={cls}>
-        <Icon size={16} />
-        <span>{label}</span>
+      <Link href={href} className={cls} title={collapsed ? label : undefined}>
+        {content}
       </Link>
     );
   }
   return (
-    <button className={cls}>
-      <Icon size={16} />
-      <span>{label}</span>
+    <button className={cls} title={collapsed ? label : undefined}>
+      {content}
     </button>
   );
 }

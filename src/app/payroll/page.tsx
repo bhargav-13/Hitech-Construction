@@ -1,184 +1,189 @@
 "use client";
 
 import { useState } from "react";
-import { IndianRupee, UserRound, Users, Wallet } from "lucide-react";
+import { ChevronLeft, ChevronRight, MapPin } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { SimpleTable } from "@/components/SimpleTable";
-import { Modal } from "@/components/Modal";
-import { CREW } from "@/lib/store";
-import { formatRupee } from "@/lib/projectHelpers";
 
-interface Worker {
+const TABS = ["People", "Attendance", "Team Leaves", "My Leaves", "Holidays"] as const;
+type Tab = (typeof TABS)[number];
+
+interface Person {
   name: string;
   role: string;
-  payrollType: "Daily Wages" | "Monthly Salary" | "Work Basis";
-  rate: number;
-  presentDays: number;
+  staff: "Office Staff" | "Site Staff";
+  selfPunch: boolean;
+  wage: number;
 }
 
-const SEED_WORKERS: Worker[] = [
-  { name: "Vishwas Bhai Ujjain", role: "Site Supervisor", payrollType: "Monthly Salary", rate: 28000, presentDays: 26 },
-  { name: "Shubham Bhai Ujjain", role: "Site Engineer", payrollType: "Monthly Salary", rate: 32000, presentDays: 25 },
-  { name: "Mahesh Bhai Chauhan", role: "Mason", payrollType: "Daily Wages", rate: 800, presentDays: 24 },
-  { name: "Ketan Bhai Vaghela", role: "Helper", payrollType: "Daily Wages", rate: 550, presentDays: 22 },
-  { name: "Ramesh Patel", role: "Electrician", payrollType: "Daily Wages", rate: 900, presentDays: 18 },
-  { name: "Suresh Bhai", role: "Plumber", payrollType: "Work Basis", rate: 0, presentDays: 15 },
+const PEOPLE: Person[] = [
+  { name: "Anil Singh", role: "Store Guard", staff: "Site Staff", selfPunch: true, wage: 387 },
+  { name: "Anil Sisodiya", role: "Supervisor", staff: "Site Staff", selfPunch: true, wage: 484 },
+  { name: "Ankit Chauhan", role: "Site Engineer", staff: "Site Staff", selfPunch: true, wage: 710 },
+  { name: "Dilip Sirondiya", role: "Supervisor", staff: "Site Staff", selfPunch: true, wage: 484 },
+  { name: "Juber Supervisor", role: "Supervisor", staff: "Site Staff", selfPunch: true, wage: 645 },
+  { name: "Kishor Kumar", role: "Supervisor", staff: "Site Staff", selfPunch: false, wage: 484 },
+  { name: "Priya Mehta", role: "Accountant", staff: "Office Staff", selfPunch: false, wage: 1200 },
+  { name: "Rakesh Shah", role: "Project Manager", staff: "Office Staff", selfPunch: false, wage: 1600 },
 ];
 
-const PAYMENTS = [
-  { date: "01-Jul-2026", worker: "Vishwas Bhai Ujjain", type: "Salary - Jun 2026", amount: 28000, mode: "Bank Transfer" },
-  { date: "01-Jul-2026", worker: "Shubham Bhai Ujjain", type: "Salary - Jun 2026", amount: 32000, mode: "Bank Transfer" },
-  { date: "28-Jun-2026", worker: "Mahesh Bhai Chauhan", type: "Weekly Wages", amount: 4800, mode: "Cash" },
-  { date: "28-Jun-2026", worker: "Ketan Bhai Vaghela", type: "Weekly Wages", amount: 3300, mode: "Cash" },
-  { date: "25-Jun-2026", worker: "Suresh Bhai", type: "Advance", amount: 5000, mode: "UPI" },
+const HOLIDAYS = [
+  { date: "15-Aug-2026", name: "Independence Day", type: "National Holiday" },
+  { date: "02-Oct-2026", name: "Gandhi Jayanti", type: "National Holiday" },
+  { date: "20-Oct-2026", name: "Diwali", type: "Festival" },
+  { date: "26-Jan-2027", name: "Republic Day", type: "National Holiday" },
+];
+
+const LEAVES = [
+  { name: "Ankit Chauhan", type: "Casual Leave", from: "10-Jul-2026", to: "11-Jul-2026", status: "Pending" },
+  { name: "Dilip Sirondiya", type: "Sick Leave", from: "05-Jul-2026", to: "05-Jul-2026", status: "Approved" },
+  { name: "Kishor Kumar", type: "Casual Leave", from: "15-Jul-2026", to: "16-Jul-2026", status: "Pending" },
 ];
 
 export default function PayrollPage() {
-  const [workers, setWorkers] = useState(SEED_WORKERS);
-  const [tab, setTab] = useState<"Workforce" | "Payments">("Workforce");
-  const [showAdd, setShowAdd] = useState(false);
-
-  const monthlyBill = workers.reduce(
-    (sum, w) => sum + (w.payrollType === "Monthly Salary" ? w.rate : w.rate * w.presentDays),
-    0
-  );
+  const [tab, setTab] = useState<Tab>("People");
+  const [staff, setStaff] = useState<"Office Staff" | "Site Staff">("Site Staff");
+  const [people, setPeople] = useState(PEOPLE);
+  const filtered = people.filter((p) => p.staff === staff);
 
   return (
     <AppShell title="Payroll">
-      <div className="mb-4 grid grid-cols-3 gap-4">
-        <Kpi icon={Users} label="Total Workforce" value={String(workers.length)} tint="bg-indigo-100 text-indigo-600" />
-        <Kpi icon={Wallet} label="Est. Monthly Payout" value={formatRupee(monthlyBill)} tint="bg-green-100 text-green-600" />
-        <Kpi icon={IndianRupee} label="Paid This Month" value={formatRupee(PAYMENTS.reduce((s, p) => s + p.amount, 0))} tint="bg-amber-100 text-amber-600" />
+      <div className="mb-4 flex gap-6 border-b border-gray-200">
+        {TABS.map((t) => (
+          <button
+            key={t}
+            onClick={() => setTab(t)}
+            className={`border-b-2 px-1 py-2 text-sm font-medium whitespace-nowrap ${
+              tab === t ? "border-brand-accent text-brand-accent" : "border-transparent text-gray-500 hover:text-gray-700"
+            }`}
+          >
+            {t}
+          </button>
+        ))}
       </div>
 
-      <div className="mb-4 flex items-center justify-between">
-        <div className="flex gap-6 border-b border-gray-200">
-          {(["Workforce", "Payments"] as const).map((t) => (
-            <button
-              key={t}
-              onClick={() => setTab(t)}
-              className={`border-b-2 px-1 py-2 text-sm font-medium ${
-                tab === t ? "border-brand-accent text-brand-accent" : "border-transparent text-gray-500 hover:text-gray-700"
-              }`}
-            >
-              {t}
-            </button>
+      {(tab === "People" || tab === "Attendance") && (
+        <div className="mb-4 flex items-center justify-between">
+          <div className="inline-flex rounded-lg border border-gray-200 bg-white p-1">
+            {(["Office Staff", "Site Staff"] as const).map((s) => (
+              <button
+                key={s}
+                onClick={() => setStaff(s)}
+                className={`rounded-md px-4 py-1.5 text-sm font-medium ${
+                  staff === s ? "bg-brand-accent text-white" : "text-gray-500"
+                }`}
+              >
+                {s}
+              </button>
+            ))}
+          </div>
+          {tab === "People" && (
+            <button className="rounded-lg bg-brand-accent px-4 py-2 text-sm font-medium text-white hover:opacity-90">+ New Payroll</button>
+          )}
+        </div>
+      )}
+
+      {tab === "People" && (
+        <div className="overflow-hidden rounded-xl border border-gray-200 bg-white">
+          <div className="grid grid-cols-[2fr_1.4fr_auto_auto] gap-4 border-b border-gray-100 bg-gray-50 px-4 py-3 text-xs font-medium text-gray-500">
+            <div>Party</div>
+            <div>Associated Projects</div>
+            <div className="text-center">Self Punch</div>
+            <div className="text-right">Payroll Type</div>
+          </div>
+          {filtered.map((p, i) => (
+            <div key={p.name} className="grid grid-cols-[2fr_1.4fr_auto_auto] items-center gap-4 border-b border-gray-50 px-4 py-3 last:border-b-0">
+              <div>
+                <div className="text-sm font-medium text-gray-800">{p.name}</div>
+                <div className="text-xs text-gray-400">{p.role}</div>
+              </div>
+              <button className="text-left text-xs font-medium text-brand-accent">+ Add (1)</button>
+              <div className="flex justify-center">
+                <button
+                  onClick={() => setPeople(people.map((x) => (x.name === p.name ? { ...x, selfPunch: !x.selfPunch } : x)))}
+                  className={`relative h-5 w-9 rounded-full transition-colors ${p.selfPunch ? "bg-brand-accent" : "bg-gray-300"}`}
+                >
+                  <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition-all ${p.selfPunch ? "left-4" : "left-0.5"}`} />
+                </button>
+              </div>
+              <div className="text-right">
+                <span className="rounded bg-green-50 px-2 py-1 text-xs font-medium text-green-700">{p.staff}</span>
+              </div>
+            </div>
           ))}
         </div>
-        {tab === "Workforce" && (
-          <button
-            onClick={() => setShowAdd(true)}
-            className="rounded-lg bg-brand-accent px-4 py-2 text-sm font-medium text-white hover:opacity-90"
-          >
-            + Add Worker
-          </button>
-        )}
-      </div>
+      )}
 
-      {tab === "Workforce" ? (
+      {tab === "Attendance" && (
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <button className="rounded-lg border border-gray-200 bg-white p-2 text-gray-500"><ChevronLeft size={15} /></button>
+              <div className="rounded-lg bg-green-500 px-4 py-2 text-center text-sm font-semibold text-white">2 Thu</div>
+              <button className="rounded-lg border border-gray-200 bg-white p-2 text-gray-500"><ChevronRight size={15} /></button>
+              <span className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-600">Jul 2026</span>
+            </div>
+            <div className="text-sm text-gray-600">
+              <span className="font-semibold text-gray-800">{filtered.length} Present</span> · 1 Absent · 0 Paid Leave · 0 Week Off
+            </div>
+          </div>
+          <div className="overflow-hidden rounded-xl border border-gray-200 bg-white">
+            <div className="grid grid-cols-[2fr_auto_1.4fr_auto_auto] gap-4 border-b border-gray-100 bg-gray-50 px-4 py-3 text-xs font-medium text-gray-500">
+              <div>Name</div>
+              <div>Wage</div>
+              <div>Punch</div>
+              <div>Shift</div>
+              <div className="text-right">Status</div>
+            </div>
+            {filtered.map((p, i) => (
+              <div key={p.name} className="grid grid-cols-[2fr_auto_1.4fr_auto_auto] items-center gap-4 border-b border-gray-50 px-4 py-3 last:border-b-0">
+                <div>
+                  <div className="text-sm font-medium text-gray-800">{p.name}</div>
+                  <div className="text-xs text-gray-400">{p.role}</div>
+                </div>
+                <div className="text-sm text-gray-700">{formatWage(p.wage)}</div>
+                <div className="flex items-center gap-1 text-sm text-gray-600">
+                  <MapPin size={12} className="text-gray-400" />
+                  {8 + (i % 2)}:{(10 + i * 4) % 60 < 10 ? "0" : ""}{(10 + i * 4) % 60} AM
+                  {i % 3 === 0 && <span className="ml-1 rounded bg-rose-50 px-1.5 py-0.5 text-[10px] text-rose-600">LATE</span>}
+                </div>
+                <div className="text-sm text-gray-500">1 Shift</div>
+                <div className="text-right">
+                  <span className="rounded-md bg-green-50 px-2 py-1 text-xs font-medium text-green-700">Present</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {(tab === "Team Leaves" || tab === "My Leaves") && (
         <SimpleTable
           columns={[
             { key: "name", label: "Name" },
-            { key: "role", label: "Role" },
-            { key: "payrollType", label: "Payroll Type" },
-            { key: "rate", label: "Rate" },
-            { key: "presentDays", label: "Present Days (Jun)" },
-            { key: "estimated", label: "Est. Payout" },
+            { key: "type", label: "Leave Type" },
+            { key: "from", label: "From" },
+            { key: "to", label: "To" },
+            { key: "status", label: "Status" },
           ]}
-          rows={workers.map((w) => ({
-            name: w.name,
-            role: w.role,
-            payrollType: w.payrollType,
-            rate: w.payrollType === "Monthly Salary" ? `${formatRupee(w.rate)}/month` : w.rate ? `${formatRupee(w.rate)}/day` : "Per work",
-            presentDays: w.presentDays,
-            estimated: formatRupee(w.payrollType === "Monthly Salary" ? w.rate : w.rate * w.presentDays),
-          }))}
-        />
-      ) : (
-        <SimpleTable
-          columns={[
-            { key: "date", label: "Date" },
-            { key: "worker", label: "Worker" },
-            { key: "type", label: "Payment Type" },
-            { key: "amount", label: "Amount" },
-            { key: "mode", label: "Mode" },
-          ]}
-          rows={PAYMENTS.map((p) => ({ ...p, amount: formatRupee(p.amount) }))}
+          rows={tab === "My Leaves" ? LEAVES.slice(0, 1) : LEAVES}
         />
       )}
 
-      {showAdd && (
-        <AddWorkerModal
-          onClose={() => setShowAdd(false)}
-          onSave={(w) => {
-            setWorkers([w, ...workers]);
-            setShowAdd(false);
-          }}
+      {tab === "Holidays" && (
+        <SimpleTable
+          columns={[
+            { key: "date", label: "Date" },
+            { key: "name", label: "Holiday" },
+            { key: "type", label: "Type" },
+          ]}
+          rows={HOLIDAYS}
         />
       )}
     </AppShell>
   );
 }
 
-function Kpi({ icon: Icon, label, value, tint }: { icon: React.ComponentType<{ size?: number }>; label: string; value: string; tint: string }) {
-  return (
-    <div className="flex items-center justify-between rounded-xl border border-gray-200 bg-white p-4">
-      <div>
-        <div className="text-sm text-gray-500">{label}</div>
-        <div className="mt-1 text-xl font-semibold text-gray-800">{value}</div>
-      </div>
-      <div className={`flex h-11 w-11 items-center justify-center rounded-full ${tint}`}>
-        <Icon size={20} />
-      </div>
-    </div>
-  );
-}
-
-function AddWorkerModal({ onClose, onSave }: { onClose: () => void; onSave: (w: Worker) => void }) {
-  const [name, setName] = useState("");
-  const [role, setRole] = useState("Helper");
-  const [payrollType, setPayrollType] = useState<Worker["payrollType"]>("Daily Wages");
-  const [rate, setRate] = useState("600");
-
-  return (
-    <Modal onClose={onClose}>
-      <div className="p-8">
-        <h2 className="mb-6 text-lg font-semibold text-gray-800">Add Worker</h2>
-        <div className="space-y-4">
-          <label className="block">
-            <span className="mb-1 block text-xs font-medium text-gray-500">Name</span>
-            <input value={name} onChange={(e) => setName(e.target.value)} className="input" />
-          </label>
-          <div className="grid grid-cols-2 gap-4">
-            <label className="block">
-              <span className="mb-1 block text-xs font-medium text-gray-500">Role</span>
-              <select value={role} onChange={(e) => setRole(e.target.value)} className="input">
-                {["Site Supervisor", "Site Engineer", "Mason", "Helper", "Electrician", "Plumber"].map((r) => (
-                  <option key={r}>{r}</option>
-                ))}
-              </select>
-            </label>
-            <label className="block">
-              <span className="mb-1 block text-xs font-medium text-gray-500">Payroll Type</span>
-              <select value={payrollType} onChange={(e) => setPayrollType(e.target.value as Worker["payrollType"])} className="input">
-                {["Daily Wages", "Monthly Salary", "Work Basis"].map((t) => (
-                  <option key={t}>{t}</option>
-                ))}
-              </select>
-            </label>
-          </div>
-          <label className="block">
-            <span className="mb-1 block text-xs font-medium text-gray-500">Rate (₹)</span>
-            <input type="number" value={rate} onChange={(e) => setRate(e.target.value)} className="input" />
-          </label>
-          <button
-            onClick={() => name.trim() && onSave({ name, role, payrollType, rate: Number(rate) || 0, presentDays: 0 })}
-            className="w-full rounded-lg bg-brand-accent py-2.5 text-sm font-medium text-white hover:opacity-90"
-          >
-            Save Worker
-          </button>
-        </div>
-      </div>
-    </Modal>
-  );
+function formatWage(n: number) {
+  return `₹${n.toLocaleString("en-IN")}`;
 }

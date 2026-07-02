@@ -22,7 +22,7 @@ const CLIENTS = [
   "Hi-Tech Construction Pvt Ltd",
 ];
 
-const PARTY_TYPES = ["Client", "Subcontractor", "Vendor"];
+const PARTY_TYPES = ["Client", "Subcontractor", "Material Supplier", "Other Vendor"];
 const SALE_TYPES = ["Tax Invoice", "Proforma Invoice", "Credit Note"];
 const STATUS_POOL = ["Approved", "Pending", "In Progress", "Completed", "Rejected"];
 const WAREHOUSES = ["Main Warehouse", "Site Store - Amreli", "Site Store - Rajkot"];

@@ -10,24 +10,24 @@ const TABS = ["Dasboard", "Transactions", "Attendance", "Materials", "Tasks", "P
 
 function PreviewPanel() {
   return (
-    <div className="relative hidden w-[46%] shrink-0 overflow-hidden rounded-r-2xl bg-indigo-700 md:block">
+    <div className="relative hidden w-[46%] shrink-0 overflow-hidden rounded-r-2xl bg-teal-700 md:block">
       <div
-        className="absolute -top-10 -right-16 h-64 w-64 rounded-[60%_40%_30%_70%/60%_30%_70%_40%] bg-indigo-500/60"
+        className="absolute -top-10 -right-16 h-64 w-64 rounded-[60%_40%_30%_70%/60%_30%_70%_40%] bg-teal-500/60"
         aria-hidden
       />
       <div
-        className="absolute bottom-[-4rem] left-[-3rem] h-56 w-56 rounded-[40%_60%_70%_30%/50%_60%_40%_50%] bg-indigo-400/50"
+        className="absolute bottom-[-4rem] left-[-3rem] h-56 w-56 rounded-[40%_60%_70%_30%/50%_60%_40%_50%] bg-teal-400/50"
         aria-hidden
       />
       <div className="absolute inset-x-6 top-16 rounded-xl bg-white p-4 shadow-lg">
         <div className="mb-3 flex items-center gap-2">
           <div className="h-8 w-8 rounded-md bg-amber-500" />
-          <div className="h-2 w-16 rounded bg-indigo-100" />
-          <div className="h-2 w-20 rounded bg-indigo-100" />
+          <div className="h-2 w-16 rounded bg-teal-100" />
+          <div className="h-2 w-20 rounded bg-teal-100" />
         </div>
         <div className="mb-3 flex gap-3 border-b border-gray-100 pb-2 text-[10px] text-gray-400">
           {TABS.map((t, i) => (
-            <span key={t} className={i === 0 ? "font-medium text-indigo-600" : ""}>
+            <span key={t} className={i === 0 ? "font-medium text-teal-600" : ""}>
               {t}
             </span>
           ))}
@@ -36,8 +36,8 @@ function PreviewPanel() {
           {[0, 1, 2].map((i) => (
             <div key={i} className="flex items-center gap-2">
               <div className="h-6 w-20 rounded bg-gray-100" />
-              <div className="h-2 flex-1 rounded bg-indigo-50" />
-              <div className="h-4 w-10 rounded-full bg-indigo-100" />
+              <div className="h-2 flex-1 rounded bg-teal-50" />
+              <div className="h-4 w-10 rounded-full bg-teal-100" />
             </div>
           ))}
         </div>
@@ -81,7 +81,7 @@ export function NewProjectModal({ onClose }: { onClose: () => void }) {
           <div className="mb-8 flex items-center gap-2">
             <div
               className={`flex h-8 w-8 items-center justify-center rounded-full border-2 text-sm ${
-                step === 1 ? "border-indigo-600 text-indigo-600" : "border-gray-300 text-gray-400"
+                step === 1 ? "border-teal-600 text-teal-600" : "border-gray-300 text-gray-400"
               }`}
             >
               1
@@ -89,7 +89,7 @@ export function NewProjectModal({ onClose }: { onClose: () => void }) {
             <div className="h-px flex-1 bg-gray-200" />
             <div
               className={`flex h-8 w-8 items-center justify-center rounded-full border-2 text-sm ${
-                step === 2 ? "border-indigo-600 text-indigo-600" : "border-gray-300 text-gray-400"
+                step === 2 ? "border-teal-600 text-teal-600" : "border-gray-300 text-gray-400"
               }`}
             >
               2
@@ -103,24 +103,24 @@ export function NewProjectModal({ onClose }: { onClose: () => void }) {
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder="Project Name"
-                className="w-full rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 text-sm outline-none focus:border-indigo-400"
+                className="w-full rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 text-sm outline-none focus:border-teal-400"
               />
               <input
                 value={address}
                 onChange={(e) => setAddress(e.target.value)}
                 placeholder="Address"
-                className="w-full rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 text-sm outline-none focus:border-indigo-400"
+                className="w-full rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 text-sm outline-none focus:border-teal-400"
               />
               <input
                 value={city}
                 onChange={(e) => setCity(e.target.value)}
                 placeholder="City"
-                className="w-full rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 text-sm outline-none focus:border-indigo-400"
+                className="w-full rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 text-sm outline-none focus:border-teal-400"
               />
               <button
                 onClick={() => setStep(2)}
                 disabled={!name.trim()}
-                className="w-full rounded-lg bg-indigo-950 py-3 text-sm font-medium text-white hover:bg-indigo-900 disabled:opacity-40"
+                className="w-full rounded-lg bg-teal-950 py-3 text-sm font-medium text-white hover:bg-teal-900 disabled:opacity-40"
               >
                 Continue
               </button>
@@ -136,7 +136,7 @@ export function NewProjectModal({ onClose }: { onClose: () => void }) {
               </div>
               <button
                 onClick={finish}
-                className="w-full rounded-lg bg-indigo-950 py-3 text-sm font-medium text-white hover:bg-indigo-900"
+                className="w-full rounded-lg bg-teal-950 py-3 text-sm font-medium text-white hover:bg-teal-900"
               >
                 Finish
               </button>

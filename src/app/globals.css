@@ -1,18 +1,20 @@
 @import "tailwindcss";
 
 :root {
-  --background: #f4f5f9;
+  --background: #f1f5f4;
   --foreground: #171717;
-  --sidebar-bg: #161447;
-  --sidebar-active: #2c2a6e;
-  --sidebar-text: #b6b4d9;
-  --brand-accent: #4f63f0;
+  --sidebar-bg: #ffffff;
+  --sidebar-border: #e7e8f0;
+  --sidebar-active: #3b6ef6;
+  --sidebar-text: #6b7080;
+  --brand-accent: #0d9488;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-sidebar-bg: var(--sidebar-bg);
+  --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-active: var(--sidebar-active);
   --color-sidebar-text: var(--sidebar-text);
   --color-brand-accent: var(--brand-accent);
@@ -28,7 +30,7 @@ body {
 
 @layer components {
   .input {
-    @apply w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 outline-none focus:border-indigo-400;
+    @apply w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 outline-none focus:border-teal-400;
   }
 
   /* Every "card" surface in the app shares this exact class combination
