@@ -1,24 +1,34 @@
 import { create } from "zustand";
 import type {
+  AppNotification,
   AttendanceDay,
   BankAccount,
+  Checkout,
+  DispatchInfo,
   FinanceItem,
   FinanceTransaction,
   FinancialMonth,
   InvoiceLine,
   MaterialReceived,
+  MaterialRequest,
   Party,
   PaymentEntry,
   PaymentRequest,
   Project,
   PurchaseEntry,
+  RequestStatus,
   SaleInvoice,
   ScheduleTask,
+  StockMovement,
   TimesheetEntry,
   TodoTask,
   TxnType,
+  User,
+  Warehouse,
+  WarehouseItem,
 } from "./types";
 import { TXN_TYPE_META } from "./types";
+import { AUTH_STORAGE_KEY } from "./auth";
 
 const RB_DIVISION = "Road and Building Division";
 
@@ -208,6 +218,14 @@ interface AppState {
   transactions: FinanceTransaction[];
   paymentRequests: PaymentRequest[];
   accounts: BankAccount[];
+  warehouses: Warehouse[];
+  warehouseItems: WarehouseItem[];
+  stockMovements: StockMovement[];
+  checkouts: Checkout[];
+  users: User[];
+  currentUserId: string | null;
+  materialRequests: MaterialRequest[];
+  notifications: AppNotification[];
   addProject: (input: { name: string; address: string; city: string }) => Project;
   updateProject: (id: string, updates: Partial<Project>) => void;
   addTimesheet: (input: Omit<TimesheetEntry, "id" | "status">) => void;
@@ -240,6 +258,45 @@ interface AppState {
   }) => FinanceTransaction;
   addPaymentRequest: (input: Omit<PaymentRequest, "id" | "number" | "status">) => PaymentRequest;
   addBankAccount: (input: Omit<BankAccount, "id">) => BankAccount;
+  addWarehouse: (input: Omit<Warehouse, "id">) => Warehouse;
+  updateWarehouse: (id: string, updates: Partial<Warehouse>) => void;
+  addWarehouseItem: (input: Omit<WarehouseItem, "id">) => WarehouseItem;
+  receiveStock: (input: { itemId: string; quantity: number; date: string; reference: string }) => void;
+  issueStock: (input: {
+    itemId: string;
+    quantity: number;
+    date: string;
+    projectId?: string;
+    issuedTo?: string;
+    reference: string;
+    requestId?: string;
+  }) => void;
+  returnCheckout: (checkoutId: string, quantity: number, date: string) => void;
+  login: (userId: string) => void;
+  logout: () => void;
+  rehydrateAuth: (userId: string) => void;
+  addMaterialRequest: (input: {
+    projectId: string;
+    warehouseId: string;
+    requestedById: string;
+    date: string;
+    neededBy?: string;
+    note?: string;
+    lines: { itemId: string; qty: number }[];
+  }) => MaterialRequest;
+  fulfillMaterialRequest: (
+    requestId: string,
+    input: {
+      dispatch: DispatchInfo;
+      issued: { itemId: string; qty: number }[];
+    }
+  ) => void;
+  returnMaterialRequest: (
+    requestId: string,
+    input: { date: string; returns: { itemId: string; qty: number }[] }
+  ) => void;
+  markNotificationRead: (id: string, userId: string) => void;
+  markAllNotificationsRead: (userId: string) => void;
 }
 
 const SEED_INVOICES: SaleInvoice[] = [
@@ -349,6 +406,130 @@ const SEED_ACCOUNTS: BankAccount[] = [
   { id: "acc-3", name: "SBI - Site Operations", type: "Bank", accountNo: "3812XXXX3456", balance: 916377, isPrimary: false, acHolder: "Hi-Tech Construction", ifsc: "SBIN0005678", upi: "", openingBalance: 250000 },
 ];
 
+const SEED_WAREHOUSES: Warehouse[] = [
+  { id: "wh-1", name: "Main Warehouse", type: "Central", location: "Rajkot HQ Yard", inCharge: "Mahesh Bhai Chauhan", isActive: true },
+  { id: "wh-2", name: "Site Store - Amreli", type: "Site Store", projectId: "proj-3", location: "Village Ishwariya, Amreli", inCharge: "Vishwas Bhai Ujjain", isActive: true },
+  { id: "wh-3", name: "Site Store - Rajkot", type: "Site Store", projectId: "proj-11", location: "Pedak Road, Rajkot", inCharge: "Ketan Bhai Vaghela", isActive: true },
+];
+
+const SEED_WAREHOUSE_ITEMS: WarehouseItem[] = [
+  // Consumables
+  { id: "wi-1", warehouseId: "wh-1", name: "Diesel", category: "Fuel", kind: "Consumable", unit: "Litre", openingStock: 1200, reorderLevel: 300, rate: 95 },
+  { id: "wi-2", warehouseId: "wh-2", name: "Diesel", category: "Fuel", kind: "Consumable", unit: "Litre", openingStock: 300, reorderLevel: 100, rate: 95 },
+  { id: "wi-3", warehouseId: "wh-2", name: "Black Sand (Crushed)", category: "Aggregate", kind: "Consumable", unit: "Cum", openingStock: 80, reorderLevel: 30, rate: 1800 },
+  { id: "wi-4", warehouseId: "wh-3", name: "SFRC Rectangular Pipe", category: "Pipes & Fittings", kind: "Consumable", unit: "Nos", openingStock: 40, reorderLevel: 20, rate: 3200 },
+  { id: "wi-5", warehouseId: "wh-1", name: "Cement OPC 53", category: "Cement", kind: "Consumable", unit: "Bag", openingStock: 150, reorderLevel: 100, rate: 380 },
+  { id: "wi-6", warehouseId: "wh-3", name: "TMT Bar 12mm", category: "Steel", kind: "Consumable", unit: "Kg", openingStock: 500, reorderLevel: 200, rate: 62 },
+  // Returnable tools / equipment
+  { id: "wi-7", warehouseId: "wh-1", name: "Concrete Vibrator", category: "Machinery", kind: "Returnable", unit: "Nos", openingStock: 6, reorderLevel: 2, rate: 18000 },
+  { id: "wi-8", warehouseId: "wh-1", name: "Safety Helmet", category: "Safety Equipment", kind: "Returnable", unit: "Nos", openingStock: 120, reorderLevel: 40, rate: 350 },
+  { id: "wi-9", warehouseId: "wh-3", name: "Theodolite (Survey)", category: "Tools", kind: "Returnable", unit: "Nos", openingStock: 3, reorderLevel: 1, rate: 45000 },
+  { id: "wi-10", warehouseId: "wh-2", name: "Scaffolding Set", category: "Machinery", kind: "Returnable", unit: "Set", openingStock: 25, reorderLevel: 8, rate: 5500 },
+];
+
+const SEED_STOCK_MOVEMENTS: StockMovement[] = [
+  // Consumable movements
+  { id: "sm-1", itemId: "wi-5", warehouseId: "wh-1", date: "30-Jun-2026", type: "Received", quantity: 200, reference: "PO-2026-0009" },
+  { id: "sm-2", itemId: "wi-1", warehouseId: "wh-1", date: "01-Jul-2026", type: "Issued", quantity: 120, projectId: "proj-11", reference: "JCB refuel" },
+  { id: "sm-3", itemId: "wi-6", warehouseId: "wh-3", date: "30-Jun-2026", type: "Issued", quantity: 350, projectId: "proj-11", reference: "Pedak Road reinforcement" },
+  { id: "sm-4", itemId: "wi-3", warehouseId: "wh-2", date: "29-Jun-2026", type: "Received", quantity: 45, reference: "Vendor delivery" },
+  { id: "sm-5", itemId: "wi-4", warehouseId: "wh-3", date: "28-Jun-2026", type: "Issued", quantity: 24, projectId: "proj-12", reference: "RMC Pipeline Phase 2" },
+  // Returnable checkouts (issues) + one partial return
+  { id: "sm-6", itemId: "wi-7", warehouseId: "wh-1", date: "27-Jun-2026", type: "Issued", quantity: 2, projectId: "proj-11", issuedTo: "Ramesh Patel", reference: "Slab casting", checkoutId: "co-1" },
+  { id: "sm-7", itemId: "wi-8", warehouseId: "wh-1", date: "26-Jun-2026", type: "Issued", quantity: 15, projectId: "proj-11", issuedTo: "Site Team - Pedak", reference: "Site safety kit", checkoutId: "co-2" },
+  { id: "sm-8", itemId: "wi-9", warehouseId: "wh-3", date: "25-Jun-2026", type: "Issued", quantity: 1, projectId: "proj-11", issuedTo: "Nikhil Trivedi", reference: "Level survey", checkoutId: "co-3" },
+  { id: "sm-9", itemId: "wi-10", warehouseId: "wh-2", date: "20-Jun-2026", type: "Issued", quantity: 10, projectId: "proj-3", issuedTo: "Suresh Bhai", reference: "Boundary wall shuttering", checkoutId: "co-4" },
+  { id: "sm-10", itemId: "wi-10", warehouseId: "wh-2", date: "30-Jun-2026", type: "Returned", quantity: 4, issuedTo: "Suresh Bhai", reference: "Partial return", checkoutId: "co-4" },
+  // Backing movements for dispatched request mr-2
+  { id: "sm-11", itemId: "wi-1", warehouseId: "wh-1", date: "28-Jun-2026", type: "Issued", quantity: 150, projectId: "proj-3", reference: "MR-2026-0002", requestId: "mr-2" },
+  { id: "sm-12", itemId: "wi-8", warehouseId: "wh-1", date: "28-Jun-2026", type: "Issued", quantity: 10, projectId: "proj-3", issuedTo: "Anil, Rakesh, Dinesh", reference: "MR-2026-0002", checkoutId: "co-5", requestId: "mr-2" },
+];
+
+const SEED_CHECKOUTS: Checkout[] = [
+  { id: "co-1", itemId: "wi-7", warehouseId: "wh-1", issuedTo: "Ramesh Patel", projectId: "proj-11", qty: 2, returnedQty: 0, date: "27-Jun-2026", status: "Out" },
+  { id: "co-2", itemId: "wi-8", warehouseId: "wh-1", issuedTo: "Site Team - Pedak", projectId: "proj-11", qty: 15, returnedQty: 0, date: "26-Jun-2026", status: "Out" },
+  { id: "co-3", itemId: "wi-9", warehouseId: "wh-3", issuedTo: "Nikhil Trivedi", projectId: "proj-11", qty: 1, returnedQty: 0, date: "25-Jun-2026", status: "Out" },
+  { id: "co-4", itemId: "wi-10", warehouseId: "wh-2", issuedTo: "Suresh Bhai", projectId: "proj-3", qty: 10, returnedQty: 4, date: "20-Jun-2026", status: "Partially Returned" },
+  { id: "co-5", itemId: "wi-8", warehouseId: "wh-1", issuedTo: "Anil, Rakesh, Dinesh", projectId: "proj-3", qty: 10, returnedQty: 0, date: "28-Jun-2026", status: "Out", requestId: "mr-2" },
+];
+
+const SEED_USERS: User[] = [
+  { id: "u-admin", name: "Rajesh Shah", role: "Admin", phone: "98250-10000" },
+  { id: "u-site-1", name: "Vishwas Bhai Ujjain", role: "Site In-charge", projectId: "proj-3", phone: "98250-20001" },
+  { id: "u-site-2", name: "Ketan Bhai Vaghela", role: "Site In-charge", projectId: "proj-11", phone: "98250-20002" },
+  { id: "u-store-1", name: "Mahesh Bhai Chauhan", role: "Store Keeper", warehouseId: "wh-1", phone: "98250-30001" },
+  { id: "u-store-2", name: "Jignesh Parmar", role: "Store Keeper", warehouseId: "wh-3", phone: "98250-30002" },
+];
+
+const SEED_MATERIAL_REQUESTS: MaterialRequest[] = [
+  {
+    id: "mr-1",
+    number: "MR-2026-0001",
+    projectId: "proj-11",
+    warehouseId: "wh-1",
+    requestedById: "u-site-2",
+    date: "01-Jul-2026",
+    neededBy: "04-Jul-2026",
+    note: "For slab casting at Pedak Road",
+    status: "Pending",
+    lines: [
+      { itemId: "wi-5", qty: 100, issuedQty: 0, returnedQty: 0 },
+      { itemId: "wi-7", qty: 1, issuedQty: 0, returnedQty: 0 },
+    ],
+  },
+  {
+    id: "mr-2",
+    number: "MR-2026-0002",
+    projectId: "proj-3",
+    warehouseId: "wh-1",
+    requestedById: "u-site-1",
+    date: "28-Jun-2026",
+    note: "Diesel + safety kit for Ishwariya site",
+    status: "Dispatched",
+    lines: [
+      { itemId: "wi-1", qty: 150, issuedQty: 150, returnedQty: 0 },
+      { itemId: "wi-8", qty: 10, issuedQty: 10, returnedQty: 0 },
+    ],
+    dispatch: {
+      workers: "Anil, Rakesh, Dinesh",
+      vehicle: "GJ-01-AB-1234 (Tata 407)",
+      driver: "Prakash Solanki",
+      date: "28-Jun-2026",
+    },
+  },
+];
+
+const SEED_NOTIFICATIONS: AppNotification[] = [
+  {
+    id: "ntf-1",
+    title: "New material request",
+    body: "MR-2026-0001 raised by Ketan Bhai Vaghela for Pedak Road (D.I. Pipeline).",
+    kind: "request",
+    audience: ["u-admin", "u-store-1"],
+    readBy: [],
+    date: "01-Jul-2026",
+    href: "/warehouse",
+  },
+  {
+    id: "ntf-2",
+    title: "Materials dispatched",
+    body: "MR-2026-0002 dispatched — Diesel & Safety Helmets sent to Ishwariya site.",
+    kind: "dispatch",
+    audience: ["u-admin", "u-site-1"],
+    readBy: ["u-admin"],
+    date: "28-Jun-2026",
+    href: "/warehouse",
+  },
+];
+
+function makeNotification(input: Omit<AppNotification, "id" | "readBy">): AppNotification {
+  return {
+    ...input,
+    id: `ntf-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+    readBy: [],
+  };
+}
+
 export const useAppStore = create<AppState>((set, get) => ({
   projects: seedProjects(),
   attendance: ATTENDANCE,
@@ -365,6 +546,14 @@ export const useAppStore = create<AppState>((set, get) => ({
   transactions: SEED_TRANSACTIONS,
   paymentRequests: SEED_PAYMENT_REQUESTS,
   accounts: SEED_ACCOUNTS,
+  warehouses: SEED_WAREHOUSES,
+  warehouseItems: SEED_WAREHOUSE_ITEMS,
+  stockMovements: SEED_STOCK_MOVEMENTS,
+  checkouts: SEED_CHECKOUTS,
+  users: SEED_USERS,
+  currentUserId: null,
+  materialRequests: SEED_MATERIAL_REQUESTS,
+  notifications: SEED_NOTIFICATIONS,
   addProject: (input) => {
     const project: Project = {
       id: `proj-${Date.now()}`,
@@ -559,5 +748,262 @@ export const useAppStore = create<AppState>((set, get) => ({
     const account: BankAccount = { ...input, id: `acc-${Date.now()}` };
     set({ accounts: [...get().accounts, account] });
     return account;
+  },
+  addWarehouse: (input) => {
+    const warehouse: Warehouse = { ...input, id: `wh-${Date.now()}` };
+    set({ warehouses: [...get().warehouses, warehouse] });
+    return warehouse;
+  },
+  updateWarehouse: (id, updates) => {
+    set({
+      warehouses: get().warehouses.map((w) => (w.id === id ? { ...w, ...updates } : w)),
+    });
+  },
+  addWarehouseItem: (input) => {
+    const item: WarehouseItem = { ...input, id: `wi-${Date.now()}` };
+    set({ warehouseItems: [item, ...get().warehouseItems] });
+    return item;
+  },
+  receiveStock: (input) => {
+    const item = get().warehouseItems.find((i) => i.id === input.itemId);
+    if (!item) return;
+    const movement: StockMovement = {
+      id: `sm-${Date.now()}`,
+      itemId: item.id,
+      warehouseId: item.warehouseId,
+      date: input.date,
+      type: "Received",
+      quantity: input.quantity,
+      reference: input.reference,
+    };
+    set({ stockMovements: [movement, ...get().stockMovements] });
+  },
+  issueStock: (input) => {
+    const item = get().warehouseItems.find((i) => i.id === input.itemId);
+    if (!item) return;
+    const now = Date.now();
+    // Returnable items open a checkout so we can track what's still out with whom.
+    const checkoutId = item.kind === "Returnable" ? `co-${now}-${item.id}` : undefined;
+    const movement: StockMovement = {
+      id: `sm-${now}-${item.id}`,
+      itemId: item.id,
+      warehouseId: item.warehouseId,
+      date: input.date,
+      type: "Issued",
+      quantity: input.quantity,
+      projectId: input.projectId,
+      issuedTo: input.issuedTo,
+      reference: input.reference,
+      checkoutId,
+      requestId: input.requestId,
+    };
+    set({ stockMovements: [movement, ...get().stockMovements] });
+    if (checkoutId) {
+      const checkout: Checkout = {
+        id: checkoutId,
+        itemId: item.id,
+        warehouseId: item.warehouseId,
+        issuedTo: input.issuedTo ?? "—",
+        projectId: input.projectId,
+        qty: input.quantity,
+        returnedQty: 0,
+        date: input.date,
+        status: "Out",
+        requestId: input.requestId,
+      };
+      set({ checkouts: [checkout, ...get().checkouts] });
+    }
+  },
+  returnCheckout: (checkoutId, quantity, date) => {
+    const checkout = get().checkouts.find((c) => c.id === checkoutId);
+    if (!checkout) return;
+    const remaining = checkout.qty - checkout.returnedQty;
+    const qty = Math.min(quantity, remaining);
+    if (qty <= 0) return;
+    const returnedQty = checkout.returnedQty + qty;
+    const status: Checkout["status"] = returnedQty >= checkout.qty ? "Returned" : "Partially Returned";
+    const movement: StockMovement = {
+      id: `sm-${Date.now()}`,
+      itemId: checkout.itemId,
+      warehouseId: checkout.warehouseId,
+      date,
+      type: "Returned",
+      quantity: qty,
+      issuedTo: checkout.issuedTo,
+      reference: "Return",
+      checkoutId,
+    };
+    set({
+      stockMovements: [movement, ...get().stockMovements],
+      checkouts: get().checkouts.map((c) =>
+        c.id === checkoutId ? { ...c, returnedQty, status } : c
+      ),
+    });
+  },
+  login: (userId) => {
+    set({ currentUserId: userId });
+    if (typeof window !== "undefined") localStorage.setItem(AUTH_STORAGE_KEY, userId);
+  },
+  logout: () => {
+    set({ currentUserId: null });
+    if (typeof window !== "undefined") localStorage.removeItem(AUTH_STORAGE_KEY);
+  },
+  rehydrateAuth: (userId) => {
+    if (get().users.some((u) => u.id === userId)) set({ currentUserId: userId });
+  },
+  addMaterialRequest: (input) => {
+    const number = `MR-2026-${String(get().materialRequests.length + 1).padStart(4, "0")}`;
+    const request: MaterialRequest = {
+      id: `mr-${Date.now()}`,
+      number,
+      projectId: input.projectId,
+      warehouseId: input.warehouseId,
+      requestedById: input.requestedById,
+      date: input.date,
+      neededBy: input.neededBy,
+      note: input.note,
+      status: "Pending",
+      lines: input.lines
+        .filter((l) => l.qty > 0)
+        .map((l) => ({ itemId: l.itemId, qty: l.qty, issuedQty: 0, returnedQty: 0 })),
+    };
+    // Notify the warehouse's store keeper(s) and admins.
+    const audience = get()
+      .users.filter(
+        (u) => u.role === "Admin" || (u.role === "Store Keeper" && u.warehouseId === input.warehouseId)
+      )
+      .map((u) => u.id)
+      .filter((id) => id !== input.requestedById);
+    const requester = get().users.find((u) => u.id === input.requestedById);
+    const project = get().projects.find((p) => p.id === input.projectId);
+    const notification = makeNotification({
+      title: "New material request",
+      body: `${number} raised by ${requester?.name ?? "a site"} for ${project?.name ?? "a project"}.`,
+      kind: "request",
+      audience,
+      date: input.date,
+      href: "/warehouse",
+    });
+    set({
+      materialRequests: [request, ...get().materialRequests],
+      notifications: [notification, ...get().notifications],
+    });
+    return request;
+  },
+  fulfillMaterialRequest: (requestId, input) => {
+    const request = get().materialRequests.find((r) => r.id === requestId);
+    if (!request) return;
+    // Issue each line from the warehouse — this drives stock + checkouts.
+    for (const line of input.issued) {
+      if (line.qty <= 0) continue;
+      get().issueStock({
+        itemId: line.itemId,
+        quantity: line.qty,
+        date: input.dispatch.date,
+        projectId: request.projectId,
+        issuedTo: input.dispatch.workers,
+        reference: request.number,
+        requestId: request.id,
+      });
+    }
+    const admins = get().users.filter((u) => u.role === "Admin").map((u) => u.id);
+    const warehouse = get().warehouses.find((w) => w.id === request.warehouseId);
+    const notification = makeNotification({
+      title: "Materials dispatched",
+      body: `${request.number} dispatched from ${warehouse?.name ?? "warehouse"} · collected by ${input.dispatch.workers} (${input.dispatch.vehicle}).`,
+      kind: "dispatch",
+      audience: [request.requestedById, ...admins],
+      date: input.dispatch.date,
+      href: "/warehouse",
+    });
+    set({
+      materialRequests: get().materialRequests.map((r) =>
+        r.id === requestId
+          ? {
+              ...r,
+              status: "Dispatched",
+              dispatch: input.dispatch,
+              lines: r.lines.map((l) => ({
+                ...l,
+                issuedQty: input.issued.find((i) => i.itemId === l.itemId)?.qty ?? l.issuedQty,
+              })),
+            }
+          : r
+      ),
+      notifications: [notification, ...get().notifications],
+    });
+  },
+  returnMaterialRequest: (requestId, input) => {
+    const request = get().materialRequests.find((r) => r.id === requestId);
+    if (!request) return;
+    const items = get().warehouseItems;
+    for (const ret of input.returns) {
+      if (ret.qty <= 0) continue;
+      const item = items.find((i) => i.id === ret.itemId);
+      if (!item) continue;
+      // A returnable item routed through this request has an open checkout — reuse
+      // the checkout return so stock + checkout status stay in sync.
+      const checkout = get().checkouts.find(
+        (c) => c.requestId === requestId && c.itemId === ret.itemId && c.status !== "Returned"
+      );
+      if (checkout) {
+        get().returnCheckout(checkout.id, ret.qty, input.date);
+      } else {
+        // Leftover consumable coming back — record a plain return movement.
+        const movement: StockMovement = {
+          id: `sm-${Date.now()}-${ret.itemId}`,
+          itemId: ret.itemId,
+          warehouseId: item.warehouseId,
+          date: input.date,
+          type: "Returned",
+          quantity: ret.qty,
+          reference: `${request.number} return`,
+          requestId,
+        };
+        set({ stockMovements: [movement, ...get().stockMovements] });
+      }
+    }
+    const newLines = request.lines.map((l) => ({
+      ...l,
+      returnedQty: l.returnedQty + (input.returns.find((i) => i.itemId === l.itemId)?.qty ?? 0),
+    }));
+    // Closed once nothing returnable is still out; otherwise partially returned.
+    const outstandingReturnable = newLines.reduce((sum, l) => {
+      const item = items.find((i) => i.id === l.itemId);
+      if (item?.kind !== "Returnable") return sum;
+      return sum + Math.max(0, l.issuedQty - l.returnedQty);
+    }, 0);
+    const status: RequestStatus = outstandingReturnable === 0 ? "Closed" : "Partially Returned";
+    const admins = get().users.filter((u) => u.role === "Admin").map((u) => u.id);
+    const notification = makeNotification({
+      title: status === "Closed" ? "Request closed" : "Items returned",
+      body: `${request.number} — items returned to warehouse${status === "Closed" ? " and request closed." : "."}`,
+      kind: "return",
+      audience: [request.requestedById, ...admins],
+      date: input.date,
+      href: "/warehouse",
+    });
+    set({
+      materialRequests: get().materialRequests.map((r) =>
+        r.id === requestId ? { ...r, lines: newLines, status } : r
+      ),
+      notifications: [notification, ...get().notifications],
+    });
+  },
+  markNotificationRead: (id, userId) => {
+    set({
+      notifications: get().notifications.map((n) =>
+        n.id === id && !n.readBy.includes(userId) ? { ...n, readBy: [...n.readBy, userId] } : n
+      ),
+    });
+  },
+  markAllNotificationsRead: (userId) => {
+    set({
+      notifications: get().notifications.map((n) =>
+        n.audience.includes(userId) && !n.readBy.includes(userId)
+          ? { ...n, readBy: [...n.readBy, userId] }
+          : n
+      ),
+    });
   },
 }));

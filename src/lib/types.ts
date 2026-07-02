@@ -232,6 +232,149 @@ export interface PaymentEntry {
   note: string;
 }
 
+// ---- Warehouse / Inventory ----
+// A construction company runs a central store plus per-site stores. Consumable
+// materials (diesel, cement) are issued once and used up; Returnable items
+// (tools, machines, safety gear) are checked out to a worker/site and later
+// brought back — tracked via Checkouts so stock stays accurate.
+
+export type WarehouseType = "Central" | "Site Store";
+
+export interface Warehouse {
+  id: string;
+  name: string;
+  type: WarehouseType;
+  projectId?: string; // site stores are tied to a project
+  location: string;
+  inCharge: string;
+  isActive: boolean;
+}
+
+export type ItemKind = "Consumable" | "Returnable";
+
+export const ITEM_CATEGORIES = [
+  "Fuel",
+  "Cement",
+  "Aggregate",
+  "Steel",
+  "Pipes & Fittings",
+  "Tools",
+  "Safety Equipment",
+  "Machinery",
+  "Electrical",
+  "Other",
+] as const;
+
+export const ITEM_UNITS = ["Litre", "Bag", "Cum", "Nos", "Kg", "Mtr", "Set"] as const;
+
+export interface WarehouseItem {
+  id: string;
+  warehouseId: string;
+  name: string;
+  category: string;
+  kind: ItemKind;
+  unit: string;
+  openingStock: number;
+  reorderLevel: number; // low-stock threshold
+  rate: number; // ₹ per unit, for stock valuation
+}
+
+export type MovementType = "Received" | "Issued" | "Returned";
+
+export interface StockMovement {
+  id: string;
+  itemId: string;
+  warehouseId: string;
+  date: string;
+  type: MovementType;
+  quantity: number;
+  projectId?: string; // site the material went to
+  issuedTo?: string; // worker who took a returnable item
+  reference: string; // PO no, note, etc.
+  checkoutId?: string; // links returnable issues/returns
+  requestId?: string; // set when part of a material request
+}
+
+export type CheckoutStatus = "Out" | "Partially Returned" | "Returned";
+
+export interface Checkout {
+  id: string;
+  itemId: string;
+  warehouseId: string;
+  issuedTo: string;
+  projectId?: string;
+  qty: number;
+  returnedQty: number;
+  date: string;
+  status: CheckoutStatus;
+  requestId?: string; // set when opened via a material request
+}
+
+// ---- Users & roles ----
+// Static roles for the demo. A Site In-charge raises material requests for
+// their site; a Store Keeper receives and dispatches them from a warehouse;
+// Admin oversees everything.
+export type UserRole = "Admin" | "Site In-charge" | "Store Keeper";
+
+export interface User {
+  id: string;
+  name: string;
+  role: UserRole;
+  projectId?: string; // site the in-charge belongs to
+  warehouseId?: string; // warehouse the store keeper manages
+  phone?: string;
+}
+
+// ---- Material request → dispatch → return workflow ----
+export type RequestStatus =
+  | "Pending"
+  | "Dispatched"
+  | "Partially Returned"
+  | "Closed"
+  | "Rejected";
+
+export interface RequestLine {
+  itemId: string;
+  qty: number; // requested
+  issuedQty: number; // dispatched by store keeper
+  returnedQty: number; // brought back
+}
+
+export interface DispatchInfo {
+  workers: string; // people who came to collect
+  vehicle: string; // truck / vehicle no.
+  driver: string;
+  date: string;
+}
+
+export interface MaterialRequest {
+  id: string;
+  number: string; // MR-2026-0001
+  projectId: string; // requesting site
+  warehouseId: string; // warehouse to fulfil from
+  requestedById: string; // user id
+  date: string;
+  neededBy?: string;
+  note?: string;
+  status: RequestStatus;
+  lines: RequestLine[];
+  dispatch?: DispatchInfo;
+}
+
+// ---- Notifications ----
+export type NotificationKind = "request" | "dispatch" | "return" | "info";
+
+export interface AppNotification {
+  id: string;
+  title: string;
+  body: string;
+  kind: NotificationKind;
+  audience: string[]; // user ids who should see it
+  readBy: string[]; // user ids who've read it
+  date: string;
+  href?: string;
+}
+
 export function statusTableLabel(status: ProjectStatus): string {
   switch (status) {
     case "Not Started":

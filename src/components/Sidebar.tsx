@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import {
   LayoutGrid,
   FileText,
@@ -23,8 +23,12 @@ import {
   MessageCircle,
   PanelLeftClose,
   PanelLeftOpen,
+  LogOut,
 } from "lucide-react";
 import { NAV_ITEMS, NAV_BREAK_AFTER } from "@/lib/nav";
+import { useAppStore } from "@/lib/store";
+import { projectAvatarColor, projectInitials } from "@/lib/projectHelpers";
+import { canAccess } from "@/lib/permissions";
 
 const ICONS: Record<string, React.ComponentType<{ size?: number; className?: string }>> = {
   Dashboard: LayoutGrid,
@@ -45,7 +49,21 @@ const ICONS: Record<string, React.ComponentType<{ size?: number; className?: str
 
 export function Sidebar() {
   const pathname = usePathname();
+  const router = useRouter();
   const [collapsed, setCollapsed] = useState(false);
+  const currentUserId = useAppStore((s) => s.currentUserId);
+  const users = useAppStore((s) => s.users);
+  const logout = useAppStore((s) => s.logout);
+  const currentUser = users.find((u) => u.id === currentUserId);
+  const navItems = currentUser
+    ? NAV_ITEMS.filter((item) => canAccess(currentUser.role, item.href))
+    : NAV_ITEMS;
+  const isAdmin = currentUser?.role === "Admin";
+
+  function handleLogout() {
+    logout();
+    router.replace("/login");
+  }
 
   return (
     <aside
@@ -63,7 +81,9 @@ export function Sidebar() {
               <div className="truncate text-sm font-semibold text-gray-800">
                 Hi-Tech Construction
               </div>
-              <div className="truncate text-xs text-sidebar-text">Admin</div>
+              <div className="truncate text-xs text-sidebar-text">
+                {currentUser?.role ?? "Admin"}
+              </div>
             </div>
           </>
         )}
@@ -79,7 +99,7 @@ export function Sidebar() {
 
       <nav className="flex-1 overflow-y-auto px-3 py-2">
         <ul className="space-y-1">
-          {NAV_ITEMS.flatMap((item) => {
+          {navItems.flatMap((item, idx) => {
             const Icon = ICONS[item.label] ?? LayoutGrid;
             const active =
               item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);
@@ -99,7 +119,7 @@ export function Sidebar() {
                 </Link>
               </li>
             );
-            if (NAV_BREAK_AFTER.has(item.label)) {
+            if (NAV_BREAK_AFTER.has(item.label) && idx < navItems.length - 1) {
               return [
                 link,
                 <li key={`${item.href}-divider`} aria-hidden className="my-2 border-t border-sidebar-border" />,
@@ -110,19 +130,48 @@ export function Sidebar() {
         </ul>
       </nav>
 
-      <div
-        className={`grid gap-2 border-t border-sidebar-border px-3 py-3 ${
-          collapsed ? "grid-cols-1" : "grid-cols-3"
-        }`}
-      >
-        <QuickAction icon={FileSignature} label="MOM" collapsed={collapsed} />
-        <QuickAction icon={CheckSquare} label="To Do" href="/todo" collapsed={collapsed} />
-        <QuickAction icon={MessageCircle} label="Chat" collapsed={collapsed} />
-      </div>
+      {isAdmin && (
+        <div
+          className={`grid gap-2 border-t border-sidebar-border px-3 py-3 ${
+            collapsed ? "grid-cols-1" : "grid-cols-3"
+          }`}
+        >
+          <QuickAction icon={FileSignature} label="MOM" collapsed={collapsed} />
+          <QuickAction icon={CheckSquare} label="To Do" href="/todo" collapsed={collapsed} />
+          <QuickAction icon={MessageCircle} label="Chat" collapsed={collapsed} />
+        </div>
+      )}
 
-      {!collapsed && (
-        <div className="border-t border-sidebar-border px-4 py-3 text-[11px] text-sidebar-text/70">
-          © Hi-Tech Construction | v1.0.0
+      {currentUser && (
+        <div className={`border-t border-sidebar-border p-3 ${collapsed ? "flex justify-center" : ""}`}>
+          {collapsed ? (
+            <button
+              onClick={handleLogout}
+              title={`Log out — ${currentUser.name}`}
+              className="flex h-9 w-9 items-center justify-center rounded-lg text-sidebar-text hover:bg-rose-50 hover:text-rose-600"
+            >
+              <LogOut size={16} />
+            </button>
+          ) : (
+            <div className="flex items-center gap-3">
+              <div
+                className={`flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full text-xs font-semibold text-white ${projectAvatarColor(currentUser.id)}`}
+              >
+                {projectInitials(currentUser.name)}
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-sm font-medium text-gray-800">{currentUser.name}</div>
+                <div className="truncate text-[11px] text-sidebar-text">{currentUser.role}</div>
+              </div>
+              <button
+                onClick={handleLogout}
+                title="Log out"
+                className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg text-sidebar-text hover:bg-rose-50 hover:text-rose-600"
+              >
+                <LogOut size={16} />
+              </button>
+            </div>
+          )}
         </div>
       )}
     </aside>
