@@ -21,6 +21,7 @@ import { AppShell } from "@/components/AppShell";
 import { SimpleTable } from "@/components/SimpleTable";
 import { ProjectSettingModal } from "@/components/ProjectSettingModal";
 import { TaskWorkspace } from "@/components/task/TaskWorkspace";
+import { ProjectMembers } from "@/components/ProjectMembers";
 import { CreateTransactionMenu } from "@/components/CreateTransactionMenu";
 import { TransactionFormModal } from "@/components/TransactionFormModal";
 import * as api from "@/lib/api";
@@ -46,6 +47,7 @@ const TABS = [
   "Transaction",
   "To Do",
   "Task",
+  "Members",
   "Attendance",
   "Material",
   "Subcon",
@@ -327,6 +329,8 @@ export default function ProjectDetailPage() {
 
       {/* Project-scoped Taskopad workspace — same surface as the Taskopad module, filtered to this project. */}
       {tab === "Task" && <TaskWorkspace projectId={params.id} />}
+
+      {tab === "Members" && <ProjectMembers projectId={params.id} />}
 
       {tab === "Attendance" && (
         <SimpleTable columns={[{ key: "date", label: "Date" }, { key: "workers", label: "Workers Present" }]} rows={attendance} />

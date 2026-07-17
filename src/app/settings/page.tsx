@@ -4,28 +4,28 @@ import { useEffect, useMemo, useState } from "react";
 import { AppShell } from "@/components/AppShell";
 import { Drawer, DrawerField } from "@/components/Drawer";
 import { Spinner } from "@/components/Spinner";
+import { Select } from "@/components/Select";
 import { projectAvatarColor } from "@/lib/projectHelpers";
 import * as api from "@/lib/api";
 import type { ModuleResponse, RoleResponse, UserResponse } from "@/lib/api";
 import { ChevronRight, MoreVertical, Search, Settings as SettingsIcon, UserRound } from "lucide-react";
 
-// Only "Roles & Access" is active while the rest of Settings is rebuilt against the real
-// backend feature by feature. The other sections are commented out (not deleted, per request)
-// below — uncomment an entry here and its matching JSX block further down to bring one back.
-const SECTIONS = [
-  // "Company",
-  "Roles & Access",
-  // "Payroll",
-  // "Holiday & Weekoff",
-  // "Workflow Controls",
-  // "Document & Fields",
-  // "Multi Level Approval",
-  // "Inspection Forms",
-  // "Notifications",
-  // "Integrations",
-  // "Subscription",
-] as const;
+// Roles & Access is the only built Settings section. Unimplemented sections used to be listed here
+// as "Coming soon" placeholders — that's been removed. The "coming soon" hint now lives in the
+// New/Manage Role permission matrix (RoleDrawer), against modules whose feature isn't built yet.
+const SECTIONS = ["Roles & Access"] as const;
 type Section = (typeof SECTIONS)[number];
+
+// Backend module codes that map to a real, usable feature. Everything else is flagged "Coming soon"
+// in the role permission matrix.
+const IMPLEMENTED_MODULES = new Set([
+  "DASHBOARD",
+  "PROJECT",
+  "TASKOPAD",
+  "AUDIT",
+  "SETTINGS",
+  "USER_MANAGEMENT",
+]);
 
 export default function SettingsPage() {
   const [section, setSection] = useState<Section>("Roles & Access");
@@ -46,12 +46,12 @@ export default function SettingsPage() {
         </div>
 
         {/* Horizontal section tabs */}
-        <div className="flex gap-5 border-b border-gray-200">
+        <div className="flex gap-5 overflow-x-auto border-b border-gray-200">
           {SECTIONS.map((s) => (
             <button
               key={s}
               onClick={() => setSection(s)}
-              className={`relative -mb-px px-0.5 pb-3 text-sm font-medium transition-colors duration-150 ${
+              className={`relative -mb-px flex items-center gap-1.5 px-0.5 pb-3 text-sm font-medium whitespace-nowrap transition-colors duration-150 ${
                 section === s ? "text-brand-accent" : "text-gray-500 hover:text-gray-800"
               }`}
             >
@@ -66,7 +66,7 @@ export default function SettingsPage() {
         </div>
 
         <div className="min-w-0 flex-1">
-          {section === "Roles & Access" && <RolesAndAccess />}
+          <RolesAndAccess />
         </div>
       </div>
     </AppShell>
@@ -502,6 +502,11 @@ function RoleDrawer({
     }
   }
 
+  // Built modules first; "coming soon" ones drop to the bottom (V8 sort is stable).
+  const orderedModules = [...modules].sort(
+    (a, b) => Number(IMPLEMENTED_MODULES.has(b.code)) - Number(IMPLEMENTED_MODULES.has(a.code))
+  );
+
   return (
     <Drawer
       title={existing ? "Manage Role" : "New Role"}
@@ -531,32 +536,46 @@ function RoleDrawer({
 
         <DrawerField label={`Module Permissions (${selected.size} selected)`}>
           <div className="space-y-3 rounded-lg border border-gray-100 p-3">
-            {modules.map((mod) => {
+            {orderedModules.map((mod) => {
+              const implemented = IMPLEMENTED_MODULES.has(mod.code);
               const allSelected = mod.permissions.every((p) => selected.has(p.id));
               return (
                 <div key={mod.id} className="border-b border-gray-50 pb-2 last:border-b-0 last:pb-0">
                   <div className="mb-1 flex items-center justify-between">
-                    <span className="text-sm font-medium text-gray-700">{mod.name}</span>
-                    <button
-                      onClick={() => toggleModule(mod)}
-                      className="text-xs font-medium text-brand-accent transition-opacity duration-150 hover:underline hover:opacity-80"
-                    >
-                      {allSelected ? "Clear" : "Select all"}
-                    </button>
+                    <span className="flex items-center gap-2 text-sm font-medium text-gray-700">
+                      {mod.name}
+                      {!implemented && (
+                        <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-600">
+                          Coming soon
+                        </span>
+                      )}
+                    </span>
+                    {implemented && (
+                      <button
+                        onClick={() => toggleModule(mod)}
+                        className="text-xs font-medium text-brand-accent transition-opacity duration-150 hover:underline hover:opacity-80"
+                      >
+                        {allSelected ? "Clear" : "Select all"}
+                      </button>
+                    )}
                   </div>
-                  <div className="flex flex-wrap gap-3">
-                    {mod.permissions.map((perm) => (
-                      <label key={perm.id} className="flex items-center gap-1.5 text-xs text-gray-600">
-                        <input
-                          type="checkbox"
-                          checked={selected.has(perm.id)}
-                          onChange={() => toggle(perm.id)}
-                          className="h-3.5 w-3.5 accent-cyan-600"
-                        />
-                        {perm.action}
-                      </label>
-                    ))}
-                  </div>
+                  {implemented ? (
+                    <div className="flex flex-wrap gap-3">
+                      {mod.permissions.map((perm) => (
+                        <label key={perm.id} className="flex items-center gap-1.5 text-xs text-gray-600">
+                          <input
+                            type="checkbox"
+                            checked={selected.has(perm.id)}
+                            onChange={() => toggle(perm.id)}
+                            className="h-3.5 w-3.5 accent-cyan-600"
+                          />
+                          {perm.action}
+                        </label>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-xs text-gray-400">Permissions unlock once this module ships.</p>
+                  )}
                 </div>
               );
             })}
@@ -657,17 +676,12 @@ function UserDrawer({
         </DrawerField>
 
         <DrawerField label="Role" required>
-          <select
-            value={roleId}
-            onChange={(e) => setRoleId(e.target.value ? Number(e.target.value) : "")}
-            className="input"
-          >
-            {roles.map((role) => (
-              <option key={role.id} value={role.id}>
-                {role.name}
-              </option>
-            ))}
-          </select>
+          <Select
+            value={roleId === "" ? "" : String(roleId)}
+            onChange={(v) => setRoleId(v ? Number(v) : "")}
+            placeholder="Select role"
+            options={roles.map((role) => ({ value: String(role.id), label: role.name }))}
+          />
         </DrawerField>
 
         {existing && (

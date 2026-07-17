@@ -20,31 +20,38 @@ import {
 import { AlarmClock, CalendarClock, CheckCircle2, ListChecks, UserRound } from "lucide-react";
 import { TaskopadShell } from "@/components/task/TaskopadShell";
 import { UserAvatar } from "@/components/task/TaskBits";
-import { useAppStore } from "@/lib/store";
+import { Select } from "@/components/Select";
+import { useAuthStore } from "@/lib/authStore";
+import { useUsers } from "@/lib/useUsers";
 import { useProjects } from "@/lib/useProjects";
+import { useProjectScope } from "@/lib/projectScope";
 import { useTaskStore } from "@/lib/taskStore";
 import { PRIORITY_STYLE, formatTaskDate, isDueToday, isOverdue, sameDay } from "@/lib/taskTypes";
 import type { Task } from "@/lib/taskTypes";
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-const TEAL = "#0891b2";
 
 export default function TaskopadDashboardPage() {
-  const tasks = useTaskStore((s) => s.tasks);
-  const linkProjects = useTaskStore((s) => s.linkProjects);
-  const users = useAppStore((s) => s.users);
+  const allTasks = useTaskStore((s) => s.tasks);
+  const load = useTaskStore((s) => s.load);
+  const { users } = useUsers();
   const { projects } = useProjects();
+  const projectScope = useProjectScope((s) => s.projectId);
+  const authUser = useAuthStore((s) => s.user);
 
   useEffect(() => {
-    if (projects.length) linkProjects(projects.map((p) => p.id));
-  }, [projects, linkProjects]);
+    load();
+  }, [load]);
 
   const [scope, setScope] = useState<"My Task" | "All Task">("All Task");
   const [range, setRange] = useState<"Monthly" | "Weekly">("Monthly");
 
-  // "My Task" is the signed-in mock admin — matches how the rest of the app resolves the user.
-  const meId = "u-admin";
-  const live = useMemo(() => tasks.filter((t) => !t.isDraft), [tasks]);
+  // "My Task" is the signed-in backend user.
+  const meId = authUser ? String(authUser.id) : "";
+  const live = useMemo(
+    () => allTasks.filter((t) => !t.isDraft && (projectScope === "all" || t.projectId === projectScope)),
+    [allTasks, projectScope]
+  );
   const scoped = useMemo(
     () => (scope === "My Task" ? live.filter((t) => t.assigneeId === meId) : live),
     [live, scope]
@@ -116,14 +123,16 @@ export default function TaskopadDashboardPage() {
             <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
               <h3 className="text-sm font-semibold text-gray-800">Statistics</h3>
               <div className="flex items-center gap-2">
-                <select
+                <Select
                   value={scope}
-                  onChange={(e) => setScope(e.target.value as "My Task" | "All Task")}
-                  className="rounded-lg border border-gray-200 px-2 py-1 text-xs text-gray-600 outline-none transition-colors duration-150 focus:border-cyan-500"
-                >
-                  <option>All Task</option>
-                  <option>My Task</option>
-                </select>
+                  onChange={(v) => setScope(v as "My Task" | "All Task")}
+                  size="sm"
+                  className="w-[110px]"
+                  options={[
+                    { value: "All Task", label: "All Task" },
+                    { value: "My Task", label: "My Task" },
+                  ]}
+                />
                 <div className="flex rounded-lg bg-gray-100 p-0.5 text-xs">
                   {(["Monthly", "Weekly"] as const).map((r) => (
                     <button

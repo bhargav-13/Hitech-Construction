@@ -1,19 +1,23 @@
 "use client";
 
-import { useState } from "react";
-import { X, Paperclip, Bell, Plus, Trash2, Send, ListTree } from "lucide-react";
+import { useRef, useState } from "react";
+import { X, Paperclip, Bell, Plus, Trash2, Send, ListTree, FileText, Loader2 } from "lucide-react";
 import { useAppStore } from "@/lib/store";
+import { useAuthStore } from "@/lib/authStore";
+import { useUsers } from "@/lib/useUsers";
 import { useProjects } from "@/lib/useProjects";
 import { useTaskStore } from "@/lib/taskStore";
 import { TASK_PRIORITIES, TASK_STATUSES, formatTaskDate, toIso } from "@/lib/taskTypes";
 import type { SubTask, Task, TaskPriority, TaskStatus } from "@/lib/taskTypes";
 import { UserAvatar } from "./TaskBits";
+import { Select } from "@/components/Select";
 
 type Panel = "Comment" | "Attachment" | "Log Activity";
 
 /**
- * Add / edit a task. TaskOPad shows this as a centre popup; we use a right slide-over to
- * match the rest of the ERP. Left = the task form, right = Comment / Attachment / Activity.
+ * Add / edit a task. TaskOPad shows this as a centre popup; we use a right slide-over to match the
+ * rest of the ERP. Left = the task form, right = Comment / Attachment / Activity — all backed by the
+ * real task API (project-service). People come from the real user-management-service.
  */
 export function TaskDrawer({
   existing,
@@ -25,11 +29,18 @@ export function TaskDrawer({
   onClose: () => void;
 }) {
   const { projects } = useProjects();
-  const users = useAppStore((s) => s.users);
+  const { users } = useUsers();
+  const authUser = useAuthStore((s) => s.user);
   const parties = useAppStore((s) => s.parties);
-  const addTask = useTaskStore((s) => s.addTask);
-  const updateTask = useTaskStore((s) => s.updateTask);
+
+  const createTask = useTaskStore((s) => s.createTask);
+  const saveTask = useTaskStore((s) => s.saveTask);
   const addComment = useTaskStore((s) => s.addComment);
+  const addAttachment = useTaskStore((s) => s.addAttachment);
+  // Re-read the live task from the store so newly added comments/attachments/activity show at once.
+  const liveTask = useTaskStore((s) => (existing ? s.tasks.find((t) => t.id === existing.id) ?? existing : undefined));
+
+  const defaultAssignee = existing?.assigneeId ?? (authUser ? String(authUser.id) : users[0]?.id ?? "");
 
   const [title, setTitle] = useState(existing?.title ?? "");
   const [description, setDescription] = useState(existing?.description ?? "");
@@ -37,19 +48,22 @@ export function TaskDrawer({
   const [status, setStatus] = useState<TaskStatus>(existing?.status ?? "Pending");
   const [priority, setPriority] = useState<TaskPriority>(existing?.priority ?? "Low");
   const [projectId, setProjectId] = useState<string>(existing?.projectId ?? defaultProjectId ?? "");
-  const [assigneeId, setAssigneeId] = useState<string>(existing?.assigneeId ?? users[0]?.id ?? "");
+  const [assigneeId, setAssigneeId] = useState<string>(defaultAssignee);
   const [followerIds, setFollowerIds] = useState<string[]>(existing?.followerIds ?? []);
-  const [clientId, setClientId] = useState<string>(existing?.clientId ?? "");
+  const [clientName, setClientName] = useState<string>(existing?.clientName ?? "");
   const [progress, setProgress] = useState(existing?.progress ?? 0);
   const [subtasks, setSubtasks] = useState<SubTask[]>(existing?.subtasks ?? []);
   const [subtaskInput, setSubtaskInput] = useState("");
   const [panel, setPanel] = useState<Panel>("Comment");
   const [commentText, setCommentText] = useState("");
   const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [sendingComment, setSendingComment] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
 
   const clients = parties.filter((p) => p.type === "Client");
 
-  function save(asDraft: boolean) {
+  async function save(asDraft: boolean) {
     if (!title.trim()) return setError("Task title is required.");
     if (!dueDate) return setError("Due date is required.");
     if (!assigneeId) return setError("An assignee is required.");
@@ -60,7 +74,7 @@ export function TaskDrawer({
       projectId: projectId || null,
       assigneeId,
       followerIds,
-      clientId: clientId || null,
+      clientName: clientName || null,
       status,
       priority,
       progress,
@@ -69,9 +83,16 @@ export function TaskDrawer({
       isDraft: asDraft,
     };
 
-    if (existing) updateTask(existing.id, payload);
-    else addTask(payload);
-    onClose();
+    setSaving(true);
+    setError("");
+    try {
+      if (existing) await saveTask(existing.id, payload);
+      else await createTask(payload);
+      onClose();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not save the task.");
+      setSaving(false);
+    }
   }
 
   function addSubtask() {
@@ -80,10 +101,32 @@ export function TaskDrawer({
     setSubtaskInput("");
   }
 
-  function sendComment() {
+  async function sendComment() {
     if (!commentText.trim() || !existing) return;
-    addComment(existing.id, assigneeId, commentText.trim());
-    setCommentText("");
+    setSendingComment(true);
+    try {
+      await addComment(existing.id, commentText.trim());
+      setCommentText("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not add comment.");
+    } finally {
+      setSendingComment(false);
+    }
+  }
+
+  async function onUploadFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file || !existing) return;
+    try {
+      await addAttachment(existing.id, {
+        name: file.name,
+        sizeLabel: formatBytes(file.size),
+        contentType: file.type || undefined,
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not attach the file.");
+    }
   }
 
   const userName = (id: string) => users.find((u) => u.id === id)?.name ?? "Unknown";
@@ -120,9 +163,6 @@ export function TaskDrawer({
             <button title="Reminder" className="rounded-md p-1.5 transition-colors duration-150 hover:bg-gray-100 hover:text-gray-600">
               <Bell size={16} />
             </button>
-            <button title="Attachment" className="rounded-md p-1.5 transition-colors duration-150 hover:bg-gray-100 hover:text-gray-600">
-              <Paperclip size={16} />
-            </button>
             <button
               onClick={onClose}
               className="rounded-full p-1.5 transition-all duration-150 hover:bg-gray-100 hover:text-gray-600 active:scale-90"
@@ -158,25 +198,19 @@ export function TaskDrawer({
                   />
                 </label>
 
-                <select
+                <Select
                   value={status}
-                  onChange={(e) => setStatus(e.target.value as TaskStatus)}
-                  className="rounded-lg border border-gray-200 px-2 py-1.5 text-sm outline-none transition-colors duration-150 focus:border-cyan-500"
-                >
-                  {TASK_STATUSES.map((s) => (
-                    <option key={s}>{s}</option>
-                  ))}
-                </select>
+                  onChange={(v) => setStatus(v as TaskStatus)}
+                  size="sm"
+                  options={TASK_STATUSES.map((s) => ({ value: s, label: s }))}
+                />
 
-                <select
+                <Select
                   value={priority}
-                  onChange={(e) => setPriority(e.target.value as TaskPriority)}
-                  className="rounded-lg border border-gray-200 px-2 py-1.5 text-sm outline-none transition-colors duration-150 focus:border-cyan-500"
-                >
-                  {TASK_PRIORITIES.map((p) => (
-                    <option key={p}>{p}</option>
-                  ))}
-                </select>
+                  onChange={(v) => setPriority(v as TaskPriority)}
+                  size="sm"
+                  options={TASK_PRIORITIES.map((p) => ({ value: p, label: p }))}
+                />
               </div>
 
               <textarea
@@ -188,35 +222,36 @@ export function TaskDrawer({
               />
 
               <Field label="Project">
-                <select value={projectId} onChange={(e) => setProjectId(e.target.value)} className="input">
-                  <option value="">No project</option>
-                  {projects.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name}
-                    </option>
-                  ))}
-                </select>
+                <Select
+                  value={projectId}
+                  onChange={setProjectId}
+                  placeholder="No project"
+                  options={[
+                    { value: "", label: "No project" },
+                    ...projects.map((p) => ({ value: p.id, label: p.name })),
+                  ]}
+                />
               </Field>
 
               <Field label="Assignee *">
-                <select value={assigneeId} onChange={(e) => setAssigneeId(e.target.value)} className="input">
-                  {users.map((u) => (
-                    <option key={u.id} value={u.id}>
-                      {u.name} · {u.role}
-                    </option>
-                  ))}
-                </select>
+                <Select
+                  value={assigneeId}
+                  onChange={setAssigneeId}
+                  placeholder="Select assignee"
+                  options={users.map((u) => ({ value: u.id, label: `${u.name} · ${u.role}` }))}
+                />
               </Field>
 
               <Field label="Client">
-                <select value={clientId} onChange={(e) => setClientId(e.target.value)} className="input">
-                  <option value="">No client</option>
-                  {clients.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name}
-                    </option>
-                  ))}
-                </select>
+                <Select
+                  value={clientName}
+                  onChange={setClientName}
+                  placeholder="No client"
+                  options={[
+                    { value: "", label: "No client" },
+                    ...clients.map((c) => ({ value: c.name, label: c.name })),
+                  ]}
+                />
               </Field>
 
               <Field label="Followers">
@@ -287,10 +322,6 @@ export function TaskDrawer({
                 </div>
               </Field>
 
-              <button className="flex items-center gap-1.5 text-sm font-medium text-brand-accent transition-opacity duration-150 hover:opacity-80">
-                <Paperclip size={14} /> Upload Document
-              </button>
-
               {error && <div className="text-xs font-medium text-rose-600">{error}</div>}
             </div>
 
@@ -298,20 +329,24 @@ export function TaskDrawer({
             <div className="flex justify-end gap-2 border-t border-gray-100 px-6 py-3">
               <button
                 onClick={onClose}
-                className="rounded-lg border border-gray-200 px-4 py-2 text-sm font-medium text-gray-600 transition-all duration-150 hover:bg-gray-50 active:scale-95"
+                disabled={saving}
+                className="rounded-lg border border-gray-200 px-4 py-2 text-sm font-medium text-gray-600 transition-all duration-150 hover:bg-gray-50 active:scale-95 disabled:opacity-50"
               >
                 Close
               </button>
               <button
                 onClick={() => save(true)}
-                className="rounded-lg border border-gray-200 px-4 py-2 text-sm font-medium text-gray-600 transition-all duration-150 hover:bg-gray-50 active:scale-95"
+                disabled={saving}
+                className="rounded-lg border border-gray-200 px-4 py-2 text-sm font-medium text-gray-600 transition-all duration-150 hover:bg-gray-50 active:scale-95 disabled:opacity-50"
               >
                 Draft
               </button>
               <button
                 onClick={() => save(false)}
-                className="rounded-lg bg-brand-accent px-5 py-2 text-sm font-medium text-white transition-all duration-150 hover:opacity-90 active:scale-95"
+                disabled={saving}
+                className="flex items-center gap-1.5 rounded-lg bg-brand-accent px-5 py-2 text-sm font-medium text-white transition-all duration-150 hover:opacity-90 active:scale-95 disabled:opacity-60"
               >
+                {saving && <Loader2 size={14} className="animate-spin" />}
                 {existing ? "Save" : "Submit"}
               </button>
             </div>
@@ -334,16 +369,16 @@ export function TaskDrawer({
             </div>
 
             <div className="flex-1 overflow-y-auto px-4 py-3">
-              {!existing ? (
+              {!existing || !liveTask ? (
                 <p className="py-10 text-center text-xs text-gray-400">
                   Save the task to start a discussion, attach files and see its activity log.
                 </p>
               ) : panel === "Comment" ? (
-                existing.comments.length === 0 ? (
+                liveTask.comments.length === 0 ? (
                   <p className="py-10 text-center text-xs text-gray-400">No comments yet.</p>
                 ) : (
                   <div className="space-y-3">
-                    {existing.comments.map((c) => (
+                    {liveTask.comments.map((c) => (
                       <div key={c.id} className="flex gap-2">
                         <UserAvatar id={c.userId} name={userName(c.userId)} size={26} />
                         <div className="min-w-0 flex-1">
@@ -356,10 +391,33 @@ export function TaskDrawer({
                   </div>
                 )
               ) : panel === "Attachment" ? (
-                <p className="py-10 text-center text-xs text-gray-400">No attachments yet.</p>
+                <div className="space-y-3">
+                  <button
+                    onClick={() => fileRef.current?.click()}
+                    className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-gray-300 py-3 text-sm text-gray-500 transition-colors duration-150 hover:border-brand-accent hover:text-brand-accent"
+                  >
+                    <Paperclip size={14} /> Upload a file
+                  </button>
+                  <input ref={fileRef} type="file" hidden onChange={onUploadFile} />
+                  {liveTask.attachments.length === 0 ? (
+                    <p className="py-6 text-center text-xs text-gray-400">No attachments yet.</p>
+                  ) : (
+                    liveTask.attachments.map((a) => (
+                      <div key={a.id} className="flex items-center gap-2 rounded-lg border border-gray-100 px-3 py-2">
+                        <FileText size={16} className="shrink-0 text-brand-accent" />
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate text-sm text-gray-700">{a.name}</div>
+                          <div className="text-[10px] text-gray-400">
+                            {a.size} · {formatTaskDate(a.at)}
+                          </div>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
               ) : (
                 <div className="space-y-3">
-                  {existing.activity.map((a) => (
+                  {liveTask.activity.map((a) => (
                     <div key={a.id} className="flex gap-2">
                       <div className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-brand-accent" />
                       <div>
@@ -372,7 +430,7 @@ export function TaskDrawer({
               )}
             </div>
 
-            {existing && panel === "Comment" && (
+            {existing && liveTask && panel === "Comment" && (
               <div className="flex items-center gap-2 border-t border-gray-100 px-3 py-2">
                 <input
                   value={commentText}
@@ -383,9 +441,10 @@ export function TaskDrawer({
                 />
                 <button
                   onClick={sendComment}
-                  className="rounded-full bg-brand-accent p-2 text-white transition-all duration-150 hover:opacity-90 active:scale-90"
+                  disabled={sendingComment}
+                  className="rounded-full bg-brand-accent p-2 text-white transition-all duration-150 hover:opacity-90 active:scale-90 disabled:opacity-60"
                 >
-                  <Send size={14} />
+                  {sendingComment ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
                 </button>
               </div>
             )}
@@ -394,6 +453,12 @@ export function TaskDrawer({
       </div>
     </div>
   );
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {

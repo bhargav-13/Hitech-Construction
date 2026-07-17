@@ -18,19 +18,18 @@ import {
   BookOpen,
   Settings,
   Layers,
-  FileSignature,
   CheckSquare,
   ListChecks,
+  ScrollText,
   MessageCircle,
   PanelLeftClose,
   PanelLeftOpen,
   LogOut,
 } from "lucide-react";
-import { NAV_ITEMS, NAV_BREAK_AFTER } from "@/lib/nav";
+import { NAV_ITEMS, NAV_BREAK_AFTER, NAV_MODULE } from "@/lib/nav";
 import { useAppStore } from "@/lib/store";
 import { useAuthStore } from "@/lib/authStore";
 import { projectAvatarColor, projectInitials } from "@/lib/projectHelpers";
-import { canAccess } from "@/lib/permissions";
 
 const ICONS: Record<string, React.ComponentType<{ size?: number; className?: string }>> = {
   Dashboard: LayoutGrid,
@@ -48,6 +47,7 @@ const ICONS: Record<string, React.ComponentType<{ size?: number; className?: str
   Setting: Settings,
   Services: Layers,
   Taskopad: ListChecks,
+  Audit: ScrollText,
 };
 
 export function Sidebar() {
@@ -65,10 +65,16 @@ export function Sidebar() {
   const currentUser = mockUser;
   const displayName = authUser?.fullName ?? mockUser?.name ?? "";
   const displayRole = authUser?.role.name ?? mockUser?.role ?? "";
-  const navItems = mockUser
-    ? NAV_ITEMS.filter((item) => canAccess(mockUser.role, item.href))
+  // Show a nav item only if the signed-in user's role has "<MODULE>:VIEW". No permission → the
+  // item isn't rendered at all (e.g. no DASHBOARD:VIEW means no Dashboard link in the sidebar).
+  const perms = authUser?.permissions ?? [];
+  const navItems = authUser
+    ? NAV_ITEMS.filter((item) => {
+        const module = NAV_MODULE[item.href];
+        return !module || perms.includes(`${module}:VIEW`);
+      })
     : NAV_ITEMS;
-  const isAdmin = mockUser?.role === "Admin" || authUser?.permissions.includes("USER_MANAGEMENT:VIEW");
+  const isAdmin = authUser?.permissions.includes("USER_MANAGEMENT:VIEW") ?? false;
 
   async function handleLogout() {
     await authLogout();
@@ -84,19 +90,20 @@ export function Sidebar() {
     >
       <div className={`flex items-center px-4 py-4 ${collapsed ? "justify-center" : "gap-3"}`}>
         {!collapsed && (
-          <>
-            <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-brand-accent text-sm font-bold text-white">
-              HT
-            </div>
-            <div className="min-w-0 flex-1">
-              <div className="truncate text-sm font-semibold text-white">
+          <div className="flex min-w-0 flex-1 items-center gap-3">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src="/logo.png"
+              alt="Hi-Tech Construction"
+              className="h-12 w-12 flex-shrink-0 rounded-xl bg-white object-contain p-1 shadow-sm"
+            />
+            <div className="min-w-0">
+              <div className="truncate text-[15px] font-semibold leading-tight text-white">
                 Hi-Tech Construction
               </div>
-              <div className="truncate text-xs text-sidebar-text">
-                {displayRole || "Admin"}
-              </div>
+              <div className="truncate text-xs text-sidebar-text">{displayRole || "Admin"}</div>
             </div>
-          </>
+          </div>
         )}
         <button
           type="button"
@@ -144,10 +151,9 @@ export function Sidebar() {
       {isAdmin && (
         <div
           className={`grid gap-2 border-t border-sidebar-border px-3 py-3 ${
-            collapsed ? "grid-cols-1" : "grid-cols-3"
+            collapsed ? "grid-cols-1" : "grid-cols-2"
           }`}
         >
-          <QuickAction icon={FileSignature} label="MOM" collapsed={collapsed} />
           <QuickAction icon={CheckSquare} label="To Do" href="/todo" collapsed={collapsed} />
           <QuickAction icon={MessageCircle} label="Chat" collapsed={collapsed} />
         </div>

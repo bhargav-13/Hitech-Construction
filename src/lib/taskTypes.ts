@@ -58,7 +58,7 @@ export interface Task {
   projectId: string | null;
   assigneeId: string;
   followerIds: string[];
-  clientId: string | null;
+  clientName: string | null;
   status: TaskStatus;
   priority: TaskPriority;
   progress: number;
@@ -69,6 +69,85 @@ export interface Task {
   comments: TaskComment[];
   attachments: TaskAttachment[];
   activity: TaskActivity[];
+}
+
+// ---- Backend enum <-> UI label conversions (project-service com.hitech.erp.task) ----
+export type TaskStatusApi = "PENDING" | "IN_PROGRESS" | "ON_HOLD" | "STUCK" | "COMPLETED";
+export type TaskPriorityApi = "LOW" | "MEDIUM" | "HIGH";
+
+const STATUS_TO_API: Record<TaskStatus, TaskStatusApi> = {
+  Pending: "PENDING",
+  "In Progress": "IN_PROGRESS",
+  "On Hold": "ON_HOLD",
+  Stuck: "STUCK",
+  Completed: "COMPLETED",
+};
+const STATUS_FROM_API: Record<TaskStatusApi, TaskStatus> = {
+  PENDING: "Pending",
+  IN_PROGRESS: "In Progress",
+  ON_HOLD: "On Hold",
+  STUCK: "Stuck",
+  COMPLETED: "Completed",
+};
+const PRIORITY_TO_API: Record<TaskPriority, TaskPriorityApi> = { Low: "LOW", Medium: "MEDIUM", High: "HIGH" };
+const PRIORITY_FROM_API: Record<TaskPriorityApi, TaskPriority> = { LOW: "Low", MEDIUM: "Medium", HIGH: "High" };
+
+export const statusToApi = (s: TaskStatus): TaskStatusApi => STATUS_TO_API[s];
+export const statusFromApi = (s: TaskStatusApi): TaskStatus => STATUS_FROM_API[s];
+export const priorityToApi = (p: TaskPriority): TaskPriorityApi => PRIORITY_TO_API[p];
+export const priorityFromApi = (p: TaskPriorityApi): TaskPriority => PRIORITY_FROM_API[p];
+
+/** yyyy-MM-dd out of an ISO datetime (backend timestamps) or a plain date string. */
+function toDateOnly(iso: string | null | undefined): string {
+  if (!iso) return "";
+  return iso.length > 10 ? iso.slice(0, 10) : iso;
+}
+
+// Deferred import type only — the concrete shape lives in tasksApi.ts.
+type ApiTask = import("./tasksApi").TaskResponse;
+
+/** Map a backend TaskResponse into the UI Task shape (string ids, label enums). */
+export function taskFromApi(t: ApiTask): Task {
+  return {
+    id: String(t.id),
+    code: t.code,
+    title: t.title,
+    description: t.description ?? "",
+    projectId: t.projectId != null ? String(t.projectId) : null,
+    assigneeId: String(t.assigneeId),
+    followerIds: (t.followerIds ?? []).map(String),
+    clientName: t.clientName ?? null,
+    status: statusFromApi(t.status),
+    priority: priorityFromApi(t.priority),
+    progress: t.progress,
+    dueDate: toDateOnly(t.dueDate),
+    createdAt: toDateOnly(t.createdAt),
+    isDraft: t.draft,
+    subtasks: (t.subtasks ?? []).map((s) => ({
+      id: String(s.id),
+      title: s.title,
+      done: s.done,
+      assigneeId: s.assigneeId != null ? String(s.assigneeId) : undefined,
+    })),
+    comments: (t.comments ?? []).map((c) => ({
+      id: String(c.id),
+      userId: String(c.authorId),
+      text: c.text,
+      at: c.at,
+    })),
+    attachments: (t.attachments ?? []).map((a) => ({
+      id: String(a.id),
+      name: a.name,
+      size: a.sizeLabel ?? "",
+      at: a.at,
+    })),
+    activity: (t.activity ?? []).map((a) => ({
+      id: String(a.id),
+      text: a.text,
+      at: a.at,
+      userId: a.actorId != null ? String(a.actorId) : "",
+    })),
+  };
 }
 
 export function isOverdue(task: Task, today = new Date()): boolean {

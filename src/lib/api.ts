@@ -147,6 +147,13 @@ function redirectToLogin() {
   }
 }
 
+export async function apiRequest<T>(
+  path: string,
+  options: { method?: string; body?: unknown; auth?: boolean } = {}
+): Promise<T> {
+  return request<T>(path, options);
+}
+
 async function request<T>(
   path: string,
   options: { method?: string; body?: unknown; auth?: boolean } = {}
@@ -237,7 +244,19 @@ export function getPermissions() {
   return request<PermissionResponse[]>("/api/v1/permissions");
 }
 
-// ---- Users ----
+// ---- Team directory (minimal, any authenticated user) ----
+export interface TeamMemberResponse {
+  id: number;
+  fullName: string;
+  roleName: string;
+  active: boolean;
+}
+
+export function getTeam() {
+  return request<TeamMemberResponse[]>("/api/v1/team");
+}
+
+// ---- Users (admin User Management, gated by USER_MANAGEMENT:VIEW) ----
 export function getUsers(page = 0, size = 20) {
   return request<UserPageResponse>(`/api/v1/users?page=${page}&size=${size}`);
 }

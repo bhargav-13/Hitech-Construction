@@ -6,12 +6,15 @@ import {
   Columns3,
   Filter as FilterIcon,
   List as ListIcon,
+  Loader2,
   Search,
   SlidersHorizontal,
   X,
 } from "lucide-react";
-import { useAppStore } from "@/lib/store";
+import { Select } from "@/components/Select";
+import { useUsers } from "@/lib/useUsers";
 import { useProjects } from "@/lib/useProjects";
+import { useProjectScope } from "@/lib/projectScope";
 import { useTaskStore } from "@/lib/taskStore";
 import {
   TASK_PRIORITIES,
@@ -22,7 +25,7 @@ import {
   toIso,
 } from "@/lib/taskTypes";
 import type { Task, TaskPriority, TaskStatus } from "@/lib/taskTypes";
-import { PriorityChip, ProgressBar, StatusChip, UserAvatar } from "./TaskBits";
+import { PriorityChip, PrioritySelect, ProgressBar, StatusChip, StatusSelect, UserAvatar } from "./TaskBits";
 import { TaskDrawer } from "./TaskDrawer";
 
 type View = "List" | "Kanban" | "Calendar";
@@ -31,20 +34,28 @@ type SortKey = "Default" | "Due Date" | "Priority" | "Status";
 const PRIORITY_RANK: Record<TaskPriority, number> = { High: 0, Medium: 1, Low: 2 };
 
 /**
- * The Tasks surface. Used standalone in the Taskopad module (all projects) and embedded in
- * the project workspace scoped to one project via `projectId`.
+ * The Tasks surface. Used standalone in the Taskopad module (all accessible projects, optionally
+ * narrowed by the header project dropdown) and embedded in the project workspace scoped to one
+ * project via `projectId`.
  */
 export function TaskWorkspace({ projectId }: { projectId?: string }) {
   const allTasks = useTaskStore((s) => s.tasks);
-  const updateTask = useTaskStore((s) => s.updateTask);
-  const linkProjects = useTaskStore((s) => s.linkProjects);
-  const users = useAppStore((s) => s.users);
-  const { projects } = useProjects();
+  const loading = useTaskStore((s) => s.loading);
+  const loaded = useTaskStore((s) => s.loaded);
+  const error = useTaskStore((s) => s.error);
+  const load = useTaskStore((s) => s.load);
+  const patchTask = useTaskStore((s) => s.patchTask);
 
-  // Attach seeded tasks to real projects once the project list arrives.
+  const { users } = useUsers();
+  const { projects } = useProjects();
+  const scope = useProjectScope((s) => s.projectId);
+
   useEffect(() => {
-    if (projects.length) linkProjects(projects.map((p) => p.id));
-  }, [projects, linkProjects]);
+    load();
+  }, [load]);
+
+  // Embedded (project page) → hard-scope to that project. Otherwise honour the header dropdown.
+  const effectiveProjectId = projectId ?? (scope !== "all" ? scope : undefined);
 
   const [view, setView] = useState<View>("List");
   const [search, setSearch] = useState("");
@@ -61,7 +72,7 @@ export function TaskWorkspace({ projectId }: { projectId?: string }) {
   const projectName = (id: string | null) => (id ? projects.find((p) => p.id === id)?.name ?? "—" : "—");
 
   const tasks = useMemo(() => {
-    let list = allTasks.filter((t) => (projectId ? t.projectId === projectId : true));
+    let list = allTasks.filter((t) => (effectiveProjectId ? t.projectId === effectiveProjectId : true));
     list = list.filter((t) => (showDrafts ? t.isDraft : !t.isDraft));
     if (statusFilter !== "All") list = list.filter((t) => t.status === statusFilter);
     if (priorityFilter !== "All") list = list.filter((t) => t.priority === priorityFilter);
@@ -77,10 +88,13 @@ export function TaskWorkspace({ projectId }: { projectId?: string }) {
     if (sort === "Priority") sorted.sort((a, b) => PRIORITY_RANK[a.priority] - PRIORITY_RANK[b.priority]);
     if (sort === "Status") sorted.sort((a, b) => a.status.localeCompare(b.status));
     return sorted;
-  }, [allTasks, projectId, showDrafts, statusFilter, priorityFilter, assigneeFilter, search, sort]);
+  }, [allTasks, effectiveProjectId, showDrafts, statusFilter, priorityFilter, assigneeFilter, search, sort]);
 
   const activeFilters =
     (statusFilter !== "All" ? 1 : 0) + (priorityFilter !== "All" ? 1 : 0) + (assigneeFilter !== "All" ? 1 : 0);
+
+  const onPatchStatus = (t: Task, status: TaskStatus) => void patchTask(t.id, { status });
+  const onPatchPriority = (t: Task, priority: TaskPriority) => void patchTask(t.id, { priority });
 
   return (
     <div className="space-y-4">
@@ -112,17 +126,15 @@ export function TaskWorkspace({ projectId }: { projectId?: string }) {
           )}
         </button>
 
-        <select
+        <Select
           value={sort}
-          onChange={(e) => setSort(e.target.value as SortKey)}
-          className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-600 outline-none transition-colors duration-150 focus:border-cyan-500"
-        >
-          {(["Default", "Due Date", "Priority", "Status"] as SortKey[]).map((s) => (
-            <option key={s} value={s}>
-              Sort: {s}
-            </option>
-          ))}
-        </select>
+          onChange={(v) => setSort(v as SortKey)}
+          className="w-[150px]"
+          options={(["Default", "Due Date", "Priority", "Status"] as SortKey[]).map((s) => ({
+            value: s,
+            label: `Sort: ${s}`,
+          }))}
+        />
 
         <button
           onClick={() => setShowDrafts((d) => !d)}
@@ -200,10 +212,22 @@ export function TaskWorkspace({ projectId }: { projectId?: string }) {
             </button>
           ))}
         </div>
-        <span className="pb-2 text-xs text-gray-400">{tasks.length} tasks</span>
+        <span className="pb-2 text-xs text-gray-400">
+          {loading && !loaded ? "Loading…" : `${tasks.length} tasks`}
+        </span>
       </div>
 
-      {tasks.length === 0 ? (
+      {error && (
+        <div className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-2 text-sm text-rose-700">
+          {error}
+        </div>
+      )}
+
+      {loading && !loaded ? (
+        <div className="flex min-h-[280px] items-center justify-center rounded-xl border border-gray-200 bg-white text-gray-400">
+          <Loader2 className="mr-2 animate-spin" size={18} /> Loading tasks…
+        </div>
+      ) : tasks.length === 0 ? (
         <EmptyTasks onAdd={() => setCreating(true)} draft={showDrafts} />
       ) : view === "List" ? (
         <ListView
@@ -212,17 +236,17 @@ export function TaskWorkspace({ projectId }: { projectId?: string }) {
           projectName={projectName}
           showProject={!projectId}
           onOpen={setEditing}
-          onToggleDone={(t) =>
-            updateTask(t.id, { status: t.status === "Completed" ? "Pending" : "Completed" })
-          }
+          onToggleDone={(t) => void patchTask(t.id, { status: t.status === "Completed" ? "Pending" : "Completed" })}
+          onStatus={onPatchStatus}
+          onPriority={onPatchPriority}
         />
       ) : view === "Kanban" ? (
-        <KanbanView tasks={tasks} userName={userName} onOpen={setEditing} onMove={(t, s) => updateTask(t.id, { status: s })} />
+        <KanbanView tasks={tasks} userName={userName} onOpen={setEditing} onMove={(t, s) => void patchTask(t.id, { status: s })} />
       ) : (
         <CalendarView tasks={tasks} onOpen={setEditing} />
       )}
 
-      {creating && <TaskDrawer defaultProjectId={projectId ?? null} onClose={() => setCreating(false)} />}
+      {creating && <TaskDrawer defaultProjectId={effectiveProjectId ?? null} onClose={() => setCreating(false)} />}
       {editing && <TaskDrawer existing={editing} onClose={() => setEditing(null)} />}
     </div>
   );
@@ -244,17 +268,13 @@ function FilterSelect({
   return (
     <label className="flex items-center gap-1.5">
       <span className="text-xs text-gray-400">{label}</span>
-      <select
+      <Select
         value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="rounded-lg border border-gray-200 px-2 py-1.5 text-sm text-gray-600 outline-none transition-colors duration-150 focus:border-cyan-500"
-      >
-        {options.map((o) => (
-          <option key={o} value={o}>
-            {render ? render(o) : o}
-          </option>
-        ))}
-      </select>
+        onChange={onChange}
+        size="sm"
+        className="min-w-[120px]"
+        options={options.map((o) => ({ value: o, label: render ? render(o) : o }))}
+      />
     </label>
   );
 }
@@ -290,6 +310,8 @@ function ListView({
   showProject,
   onOpen,
   onToggleDone,
+  onStatus,
+  onPriority,
 }: {
   tasks: Task[];
   userName: (id: string) => string;
@@ -297,6 +319,8 @@ function ListView({
   showProject: boolean;
   onOpen: (t: Task) => void;
   onToggleDone: (t: Task) => void;
+  onStatus: (t: Task, s: TaskStatus) => void;
+  onPriority: (t: Task, p: TaskPriority) => void;
 }) {
   return (
     <div className="animate-fade-in overflow-x-auto rounded-xl border border-gray-200 bg-white">
@@ -350,11 +374,12 @@ function ListView({
                   {formatTaskDate(t.dueDate)}
                   {overdue && <span className="ml-1 text-xs">· overdue</span>}
                 </td>
-                <td className="px-4 py-2.5">
-                  <PriorityChip priority={t.priority} />
+                {/* Inline editors — change priority/status without opening the task. */}
+                <td className="px-4 py-2.5" onClick={(e) => e.stopPropagation()}>
+                  <PrioritySelect priority={t.priority} onChange={(p) => onPriority(t, p)} />
                 </td>
-                <td className="px-4 py-2.5">
-                  <StatusChip status={t.status} />
+                <td className="px-4 py-2.5" onClick={(e) => e.stopPropagation()}>
+                  <StatusSelect status={t.status} onChange={(s) => onStatus(t, s)} />
                 </td>
                 <td className="px-4 py-2.5">
                   <ProgressBar value={t.progress} />
