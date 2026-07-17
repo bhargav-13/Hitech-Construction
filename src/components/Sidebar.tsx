@@ -20,6 +20,7 @@ import {
   Layers,
   CheckSquare,
   ListChecks,
+  ScrollText,
   MessageCircle,
   PanelLeftClose,
   PanelLeftOpen,
@@ -46,6 +47,7 @@ const ICONS: Record<string, React.ComponentType<{ size?: number; className?: str
   Setting: Settings,
   Services: Layers,
   Taskopad: ListChecks,
+  Audit: ScrollText,
 };
 
 export function Sidebar() {
@@ -88,19 +90,20 @@ export function Sidebar() {
     >
       <div className={`flex items-center px-4 py-4 ${collapsed ? "justify-center" : "gap-3"}`}>
         {!collapsed && (
-          <>
-            <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-brand-accent text-sm font-bold text-white">
-              HT
-            </div>
-            <div className="min-w-0 flex-1">
-              <div className="truncate text-sm font-semibold text-white">
+          <div className="flex min-w-0 flex-1 items-center gap-3">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src="/logo.png"
+              alt="Hi-Tech Construction"
+              className="h-12 w-12 flex-shrink-0 rounded-xl bg-white object-contain p-1 shadow-sm"
+            />
+            <div className="min-w-0">
+              <div className="truncate text-[15px] font-semibold leading-tight text-white">
                 Hi-Tech Construction
               </div>
-              <div className="truncate text-xs text-sidebar-text">
-                {displayRole || "Admin"}
-              </div>
+              <div className="truncate text-xs text-sidebar-text">{displayRole || "Admin"}</div>
             </div>
-          </>
+          </div>
         )}
         <button
           type="button"

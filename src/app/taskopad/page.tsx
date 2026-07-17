@@ -20,6 +20,7 @@ import {
 import { AlarmClock, CalendarClock, CheckCircle2, ListChecks, UserRound } from "lucide-react";
 import { TaskopadShell } from "@/components/task/TaskopadShell";
 import { UserAvatar } from "@/components/task/TaskBits";
+import { Select } from "@/components/Select";
 import { useAuthStore } from "@/lib/authStore";
 import { useUsers } from "@/lib/useUsers";
 import { useProjects } from "@/lib/useProjects";
@@ -122,14 +123,16 @@ export default function TaskopadDashboardPage() {
             <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
               <h3 className="text-sm font-semibold text-gray-800">Statistics</h3>
               <div className="flex items-center gap-2">
-                <select
+                <Select
                   value={scope}
-                  onChange={(e) => setScope(e.target.value as "My Task" | "All Task")}
-                  className="rounded-lg border border-gray-200 px-2 py-1 text-xs text-gray-600 outline-none transition-colors duration-150 focus:border-cyan-500"
-                >
-                  <option>All Task</option>
-                  <option>My Task</option>
-                </select>
+                  onChange={(v) => setScope(v as "My Task" | "All Task")}
+                  size="sm"
+                  className="w-[110px]"
+                  options={[
+                    { value: "All Task", label: "All Task" },
+                    { value: "My Task", label: "My Task" },
+                  ]}
+                />
                 <div className="flex rounded-lg bg-gray-100 p-0.5 text-xs">
                   {(["Monthly", "Weekly"] as const).map((r) => (
                     <button

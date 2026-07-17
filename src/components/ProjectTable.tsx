@@ -45,20 +45,20 @@ export function ProjectTable({ projects }: { projects: Project[] }) {
       <div className="w-full min-w-0 overflow-x-auto">
         <table className="w-full min-w-[1100px] border-collapse text-sm">
           <thead>
-            <tr className="border-b border-teal-100 bg-gray-50 text-left text-gray-500">
-              <th className="border-r border-teal-100 px-3 py-2 w-10">
-                <LayoutList size={13} className="text-teal-300" />
+            <tr className="border-b border-cyan-100 bg-gray-50 text-left text-gray-500">
+              <th className="border-r border-cyan-100 px-3 py-2 w-10">
+                <LayoutList size={13} className="text-cyan-300" />
               </th>
               {COLUMNS.map((col) => (
                 <th
                   key={col.label}
-                  className="border-r border-teal-100 px-3 py-2 font-medium whitespace-nowrap last:border-r-0"
+                  className="border-r border-cyan-100 px-3 py-2 font-medium whitespace-nowrap last:border-r-0"
                 >
                   <span className="inline-flex items-center gap-1.5">
                     {col.icon === "date" ? (
-                      <Calendar size={13} className="text-teal-300" />
+                      <Calendar size={13} className="text-cyan-300" />
                     ) : (
-                      <Type size={13} className="text-teal-300" />
+                      <Type size={13} className="text-cyan-300" />
                     )}
                     {col.label}
                     {col.sortable && <ArrowDown size={12} className="text-gray-400" />}
@@ -69,13 +69,13 @@ export function ProjectTable({ projects }: { projects: Project[] }) {
           </thead>
           <tbody>
             {projects.map((project, i) => (
-              <tr key={project.id} className="border-b border-teal-50">
-                <td className="border-r border-teal-50 px-3 py-2 text-gray-400">{i + 1}</td>
+              <tr key={project.id} className="border-b border-cyan-50">
+                <td className="border-r border-cyan-50 px-3 py-2 text-gray-400">{i + 1}</td>
                 {COLUMNS.map((col) => (
                   <td
                     key={col.label}
-                    className={`border-r border-teal-50 px-3 py-2 whitespace-nowrap last:border-r-0 ${
-                      col.key === "stage" || col.key === "name" ? "text-teal-600" : "text-gray-700"
+                    className={`border-r border-cyan-50 px-3 py-2 whitespace-nowrap last:border-r-0 ${
+                      col.key === "stage" || col.key === "name" ? "text-cyan-600" : "text-gray-700"
                     }`}
                   >
                     {cellValue(project, col.key)}

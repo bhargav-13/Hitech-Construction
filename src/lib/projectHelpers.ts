@@ -7,10 +7,15 @@ const AVATAR_COLORS = [
 ];
 
 export function projectInitials(name: string): string {
-  const words = name.trim().split(/\s+/);
-  const first = words[0]?.[0] ?? "";
-  const second = words[1]?.[0] ?? "";
-  return (first + second).toUpperCase();
+  // Strip brackets/punctuation (e.g. "(Gram Panchayat)") so initials stay letters only.
+  const words = name
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  if (words.length === 0) return "?";
+  if (words.length === 1) return words[0].slice(0, 2).toUpperCase();
+  return (words[0][0] + words[1][0]).toUpperCase();
 }
 
 export function projectAvatarColor(id: string): string {

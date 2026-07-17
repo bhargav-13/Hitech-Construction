@@ -10,6 +10,7 @@ import { useTaskStore } from "@/lib/taskStore";
 import { TASK_PRIORITIES, TASK_STATUSES, formatTaskDate, toIso } from "@/lib/taskTypes";
 import type { SubTask, Task, TaskPriority, TaskStatus } from "@/lib/taskTypes";
 import { UserAvatar } from "./TaskBits";
+import { Select } from "@/components/Select";
 
 type Panel = "Comment" | "Attachment" | "Log Activity";
 
@@ -197,25 +198,19 @@ export function TaskDrawer({
                   />
                 </label>
 
-                <select
+                <Select
                   value={status}
-                  onChange={(e) => setStatus(e.target.value as TaskStatus)}
-                  className="rounded-lg border border-gray-200 px-2 py-1.5 text-sm outline-none transition-colors duration-150 focus:border-cyan-500"
-                >
-                  {TASK_STATUSES.map((s) => (
-                    <option key={s}>{s}</option>
-                  ))}
-                </select>
+                  onChange={(v) => setStatus(v as TaskStatus)}
+                  size="sm"
+                  options={TASK_STATUSES.map((s) => ({ value: s, label: s }))}
+                />
 
-                <select
+                <Select
                   value={priority}
-                  onChange={(e) => setPriority(e.target.value as TaskPriority)}
-                  className="rounded-lg border border-gray-200 px-2 py-1.5 text-sm outline-none transition-colors duration-150 focus:border-cyan-500"
-                >
-                  {TASK_PRIORITIES.map((p) => (
-                    <option key={p}>{p}</option>
-                  ))}
-                </select>
+                  onChange={(v) => setPriority(v as TaskPriority)}
+                  size="sm"
+                  options={TASK_PRIORITIES.map((p) => ({ value: p, label: p }))}
+                />
               </div>
 
               <textarea
@@ -227,35 +222,36 @@ export function TaskDrawer({
               />
 
               <Field label="Project">
-                <select value={projectId} onChange={(e) => setProjectId(e.target.value)} className="input">
-                  <option value="">No project</option>
-                  {projects.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name}
-                    </option>
-                  ))}
-                </select>
+                <Select
+                  value={projectId}
+                  onChange={setProjectId}
+                  placeholder="No project"
+                  options={[
+                    { value: "", label: "No project" },
+                    ...projects.map((p) => ({ value: p.id, label: p.name })),
+                  ]}
+                />
               </Field>
 
               <Field label="Assignee *">
-                <select value={assigneeId} onChange={(e) => setAssigneeId(e.target.value)} className="input">
-                  {users.map((u) => (
-                    <option key={u.id} value={u.id}>
-                      {u.name} · {u.role}
-                    </option>
-                  ))}
-                </select>
+                <Select
+                  value={assigneeId}
+                  onChange={setAssigneeId}
+                  placeholder="Select assignee"
+                  options={users.map((u) => ({ value: u.id, label: `${u.name} · ${u.role}` }))}
+                />
               </Field>
 
               <Field label="Client">
-                <select value={clientName} onChange={(e) => setClientName(e.target.value)} className="input">
-                  <option value="">No client</option>
-                  {clients.map((c) => (
-                    <option key={c.id} value={c.name}>
-                      {c.name}
-                    </option>
-                  ))}
-                </select>
+                <Select
+                  value={clientName}
+                  onChange={setClientName}
+                  placeholder="No client"
+                  options={[
+                    { value: "", label: "No client" },
+                    ...clients.map((c) => ({ value: c.name, label: c.name })),
+                  ]}
+                />
               </Field>
 
               <Field label="Followers">

@@ -82,7 +82,7 @@ export default async function ReportDetailPage({
       <div className="w-full min-w-0 overflow-x-auto rounded-xl border border-gray-200">
         <table className="w-full min-w-[900px] border-collapse text-sm">
           <thead>
-            <tr className="bg-teal-500 text-left text-white">
+            <tr className="bg-cyan-500 text-left text-white">
               <th className="w-10 border-r border-white/20 px-3 py-2" />
               {columns.map((col, i) => (
                 <th

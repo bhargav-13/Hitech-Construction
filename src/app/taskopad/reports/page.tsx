@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { TaskopadShell } from "@/components/task/TaskopadShell";
 import { PriorityChip, StatusChip, UserAvatar, ProgressBar } from "@/components/task/TaskBits";
+import { Select as UiSelect } from "@/components/Select";
 import { useUsers } from "@/lib/useUsers";
 import { useProjects } from "@/lib/useProjects";
 import { useProjectScope } from "@/lib/projectScope";
@@ -175,28 +176,33 @@ function ReportDetail({
 
       {/* Filter bar */}
       <div className="flex flex-wrap items-end gap-3 rounded-xl border border-gray-200 bg-white p-3">
-        <Select label="Project" value={projectFilter} onChange={setProjectFilter}>
-          <option value="All">All projects</option>
-          {projects.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.name}
-            </option>
-          ))}
-        </Select>
-        <Select label="User" value={userFilter} onChange={setUserFilter}>
-          <option value="All">All users</option>
-          {users.map((u) => (
-            <option key={u.id} value={u.id}>
-              {u.name}
-            </option>
-          ))}
-        </Select>
-        <Select label="Status" value={statusFilter} onChange={(v) => setStatusFilter(v as TaskStatus | "All")}>
-          <option value="All">All statuses</option>
-          {TASK_STATUSES.map((s) => (
-            <option key={s}>{s}</option>
-          ))}
-        </Select>
+        <FilterSelect
+          label="Project"
+          value={projectFilter}
+          onChange={setProjectFilter}
+          options={[
+            { value: "All", label: "All projects" },
+            ...projects.map((p) => ({ value: p.id, label: p.name })),
+          ]}
+        />
+        <FilterSelect
+          label="User"
+          value={userFilter}
+          onChange={setUserFilter}
+          options={[
+            { value: "All", label: "All users" },
+            ...users.map((u) => ({ value: u.id, label: u.name })),
+          ]}
+        />
+        <FilterSelect
+          label="Status"
+          value={statusFilter}
+          onChange={(v) => setStatusFilter(v as TaskStatus | "All")}
+          options={[
+            { value: "All", label: "All statuses" },
+            ...TASK_STATUSES.map((s) => ({ value: s, label: s })),
+          ]}
+        />
         <label className="block">
           <span className="mb-1 block text-[11px] font-medium tracking-wide text-gray-400 uppercase">From</span>
           <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="input" />
@@ -235,23 +241,21 @@ function ReportDetail({
   );
 }
 
-function Select({
+function FilterSelect({
   label,
   value,
   onChange,
-  children,
+  options,
 }: {
   label: string;
   value: string;
   onChange: (v: string) => void;
-  children: React.ReactNode;
+  options: { value: string; label: string }[];
 }) {
   return (
     <label className="block">
       <span className="mb-1 block text-[11px] font-medium tracking-wide text-gray-400 uppercase">{label}</span>
-      <select value={value} onChange={(e) => onChange(e.target.value)} className="input min-w-[150px]">
-        {children}
-      </select>
+      <UiSelect value={value} onChange={onChange} options={options} className="min-w-[150px]" />
     </label>
   );
 }

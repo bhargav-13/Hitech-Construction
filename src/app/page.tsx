@@ -1,15 +1,21 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { AppShell } from "@/components/AppShell";
 import { BubbleCluster } from "@/components/BubbleCluster";
 import { ProjectTable } from "@/components/ProjectTable";
+import { Spinner } from "@/components/Spinner";
+import { Select } from "@/components/Select";
 import { useAppStore } from "@/lib/store";
+import { useProjectScope } from "@/lib/projectScope";
+import * as api from "@/lib/api";
 import { formatLakh } from "@/lib/format";
+import type { Project, ProjectHealth, ProjectStatus } from "@/lib/types";
 import {
   ArrowUpDown,
   BarChart3,
   Calendar,
+  FlaskConical,
   Maximize2,
   MoreVertical,
   RefreshCw,
@@ -33,12 +39,77 @@ const HEALTH_COLORS: Record<string, string> = {
   "At Risk": "#f08a8a",
 };
 
+const STATUS_LABEL: Record<api.ProjectStatus, ProjectStatus> = {
+  NOT_STARTED: "Not Started",
+  ONGOING: "Ongoing",
+  ONHOLD: "Onhold",
+  COMPLETED: "Completed",
+};
+const HEALTH_LABEL: Record<api.ProjectHealth, ProjectHealth> = {
+  HEALTHY: "Healthy",
+  AT_RISK: "At Risk",
+};
+
+function toProject(p: api.ProjectResponse): Project {
+  return {
+    id: String(p.id),
+    name: p.name,
+    category: p.category ?? "",
+    keyPersonnel: p.keyPersonnel ?? "",
+    status: STATUS_LABEL[p.status] ?? "Not Started",
+    health: HEALTH_LABEL[p.health] ?? "Healthy",
+    startDate: p.startDate ?? "",
+    endDate: p.endDate ?? "",
+    progress: p.progress,
+    customerName: p.customerName ?? "",
+    stage: p.stage ?? "",
+    address: p.address ?? "",
+    city: p.city ?? "",
+    inAmount: p.inAmount,
+    outAmount: p.outAmount,
+    todoCount: p.todoCount,
+    projectCode: p.projectCode ?? "",
+    companyBranch: p.companyBranch ?? "",
+    attendanceRadius: p.attendanceRadius,
+    projectValue: p.projectValue,
+    orientation: p.orientation ?? "",
+    dimension: p.dimension ?? "",
+    scopeOfWork: p.scopeOfWork ?? "",
+  };
+}
+
 export default function DashboardPage() {
-  const projects = useAppStore((s) => s.projects);
+  // Sample/mock data — no backend yet for finance, attendance or materials.
   const attendance = useAppStore((s) => s.attendance);
   const materials = useAppStore((s) => s.materials);
   const financials = useAppStore((s) => s.financials);
   const [tab, setTab] = useState<"Operational" | "Financial">("Operational");
+
+  // Projects ARE real (project-service) and honour the global project scope.
+  const scopeId = useProjectScope((s) => s.projectId);
+  const [allProjects, setAllProjects] = useState<Project[]>([]);
+  const [projectsLoading, setProjectsLoading] = useState(true);
+
+  const loadProjects = useCallback(async () => {
+    setProjectsLoading(true);
+    try {
+      const res = await api.getProjects({ size: 500 });
+      setAllProjects(res.content.map(toProject));
+    } catch {
+      setAllProjects([]);
+    } finally {
+      setProjectsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadProjects();
+  }, [loadProjects]);
+
+  const projects = useMemo(
+    () => (scopeId === "all" ? allProjects : allProjects.filter((p) => p.id === scopeId)),
+    [allProjects, scopeId]
+  );
 
   const counts = useMemo(() => {
     const base = { "Not Started": 0, Ongoing: 0, Onhold: 0, Completed: 0 };
@@ -63,14 +134,31 @@ export default function DashboardPage() {
   return (
     <AppShell title="Dashboard">
       <div className="mb-4 flex items-center justify-between">
-        <h2 className="text-xl font-semibold text-gray-800">Company Dashboard</h2>
         <div className="flex items-center gap-2">
-          <button className="rounded-lg border border-gray-200 bg-white p-2 text-gray-500 hover:bg-gray-50">
+          <h2 className="text-xl font-semibold text-gray-800">Company Dashboard</h2>
+          {projectsLoading && <Spinner size={15} className="text-brand-accent" />}
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => loadProjects()}
+            className="rounded-lg border border-gray-200 bg-white p-2 text-gray-500 hover:bg-gray-50"
+            title="Reload projects"
+          >
             <RefreshCw size={16} />
           </button>
           <button className="rounded-lg border border-gray-200 bg-white p-2 text-gray-500 hover:bg-gray-50">
             <Upload size={16} />
           </button>
+        </div>
+      </div>
+
+      {/* Honesty banner: which parts are live vs. placeholder. */}
+      <div className="mb-4 flex items-start gap-2.5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm text-amber-800">
+        <FlaskConical size={16} className="mt-0.5 shrink-0 text-amber-500" />
+        <div>
+          <span className="font-medium">Project status, health and the summary table are live.</span>{" "}
+          Financials, attendance and materials below are <span className="font-medium">sample data</span> — those
+          modules aren&apos;t connected to the backend yet.
         </div>
       </div>
 
@@ -93,6 +181,10 @@ export default function DashboardPage() {
 
         {tab === "Financial" ? (
           <div className="space-y-4 bg-gray-50 p-4">
+            <div className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50/60 px-3 py-2 text-xs text-amber-700">
+              <FlaskConical size={14} className="shrink-0 text-amber-500" />
+              This tab shows sample data — the Finance module isn&apos;t connected to the backend yet.
+            </div>
             <div className="grid grid-cols-2 gap-4">
               <FilterSelect label="Project Name" />
               <div>
@@ -268,9 +360,10 @@ export default function DashboardPage() {
 
             <div className="grid grid-cols-2 gap-4">
               <div className="rounded-xl border border-gray-200 bg-white p-4">
-                <h3 className="mb-2 text-sm font-semibold text-gray-700">
-                  Last 7 Days Attendance
-                </h3>
+                <div className="mb-2 flex items-center justify-between">
+                  <h3 className="text-sm font-semibold text-gray-700">Last 7 Days Attendance</h3>
+                  <SampleBadge />
+                </div>
                 <div className="mb-3 grid grid-cols-2 gap-3">
                   <FilterSelect label="Payroll Type" compact />
                   <FilterSelect label="Workforce Name" compact />
@@ -300,9 +393,10 @@ export default function DashboardPage() {
               </div>
 
               <div className="rounded-xl border border-gray-200 bg-white p-4">
-                <h3 className="mb-2 text-sm font-semibold text-gray-700">
-                  Last 7 Days Material Received
-                </h3>
+                <div className="mb-2 flex items-center justify-between">
+                  <h3 className="text-sm font-semibold text-gray-700">Last 7 Days Material Received</h3>
+                  <SampleBadge />
+                </div>
                 <div className="mb-3 grid grid-cols-2 gap-3">
                   <FilterSelect label="Material name" compact />
                   <FilterSelect label="Material Category" compact />
@@ -316,6 +410,14 @@ export default function DashboardPage() {
         )}
       </div>
     </AppShell>
+  );
+}
+
+function SampleBadge() {
+  return (
+    <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-700">
+      <FlaskConical size={10} /> Sample data
+    </span>
   );
 }
 
@@ -340,13 +442,12 @@ function FilterSelect({ label, compact }: { label: string; compact?: boolean }) 
   return (
     <div>
       <label className="mb-1 block text-xs text-gray-500">{label}:</label>
-      <select
-        className={`w-full rounded-md border border-gray-300 bg-white text-gray-700 ${
-          compact ? "px-2 py-1 text-xs" : "px-3 py-1.5 text-sm"
-        }`}
-      >
-        <option>All</option>
-      </select>
+      <Select
+        value="all"
+        onChange={() => {}}
+        size={compact ? "sm" : "md"}
+        options={[{ value: "all", label: "All" }]}
+      />
     </div>
   );
 }

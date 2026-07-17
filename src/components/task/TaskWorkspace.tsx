@@ -11,6 +11,7 @@ import {
   SlidersHorizontal,
   X,
 } from "lucide-react";
+import { Select } from "@/components/Select";
 import { useUsers } from "@/lib/useUsers";
 import { useProjects } from "@/lib/useProjects";
 import { useProjectScope } from "@/lib/projectScope";
@@ -125,17 +126,15 @@ export function TaskWorkspace({ projectId }: { projectId?: string }) {
           )}
         </button>
 
-        <select
+        <Select
           value={sort}
-          onChange={(e) => setSort(e.target.value as SortKey)}
-          className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-600 outline-none transition-colors duration-150 focus:border-cyan-500"
-        >
-          {(["Default", "Due Date", "Priority", "Status"] as SortKey[]).map((s) => (
-            <option key={s} value={s}>
-              Sort: {s}
-            </option>
-          ))}
-        </select>
+          onChange={(v) => setSort(v as SortKey)}
+          className="w-[150px]"
+          options={(["Default", "Due Date", "Priority", "Status"] as SortKey[]).map((s) => ({
+            value: s,
+            label: `Sort: ${s}`,
+          }))}
+        />
 
         <button
           onClick={() => setShowDrafts((d) => !d)}
@@ -269,17 +268,13 @@ function FilterSelect({
   return (
     <label className="flex items-center gap-1.5">
       <span className="text-xs text-gray-400">{label}</span>
-      <select
+      <Select
         value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="rounded-lg border border-gray-200 px-2 py-1.5 text-sm text-gray-600 outline-none transition-colors duration-150 focus:border-cyan-500"
-      >
-        {options.map((o) => (
-          <option key={o} value={o}>
-            {render ? render(o) : o}
-          </option>
-        ))}
-      </select>
+        onChange={onChange}
+        size="sm"
+        className="min-w-[120px]"
+        options={options.map((o) => ({ value: o, label: render ? render(o) : o }))}
+      />
     </label>
   );
 }

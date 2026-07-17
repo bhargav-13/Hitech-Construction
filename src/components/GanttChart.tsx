@@ -109,10 +109,10 @@ export function GanttChart({ tasks, crew }: { tasks: ScheduleTask[]; crew: strin
         <div
           key={`t-bar-${task.id}`}
           style={{ gridColumn: `${3 + task.startMonth} / span ${task.span}`, gridRow: rowIndex }}
-          className="relative m-1 flex h-7 items-center justify-center overflow-hidden rounded bg-teal-500 text-xs font-medium text-white"
+          className="relative m-1 flex h-7 items-center justify-center overflow-hidden rounded bg-cyan-500 text-xs font-medium text-white"
         >
           <div
-            className="absolute top-0 left-0 h-full bg-teal-700/70"
+            className="absolute top-0 left-0 h-full bg-cyan-700/70"
             style={{ width: `${task.progress}%` }}
           />
           <span className="relative z-10">{task.progress}%</span>

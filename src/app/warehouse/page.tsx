@@ -56,7 +56,7 @@ const KIND_BADGE: Record<ItemKind, string> = {
 const MOVE_BADGE: Record<string, string> = {
   Received: "bg-green-50 text-green-600",
   Issued: "bg-rose-50 text-rose-600",
-  Returned: "bg-teal-50 text-teal-600",
+  Returned: "bg-cyan-50 text-cyan-600",
 };
 
 const CHECKOUT_BADGE: Record<Checkout["status"], string> = {
@@ -141,7 +141,7 @@ export default function WarehousePage() {
     <AppShell title="Warehouse">
       {/* KPIs */}
       <div className="mb-5 grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <Kpi icon={Boxes} label="Total Items" value={String(kpis.totalItems)} tint="bg-teal-100 text-teal-600" />
+        <Kpi icon={Boxes} label="Total Items" value={String(kpis.totalItems)} tint="bg-cyan-100 text-cyan-600" />
         <Kpi icon={IndianRupee} label="Stock Value" value={formatRupee(kpis.value)} tint="bg-green-100 text-green-600" />
         <Kpi
           icon={AlertTriangle}
@@ -449,7 +449,7 @@ export default function WarehousePage() {
                     <div className="flex items-center gap-3">
                       <div
                         className={`flex h-11 w-11 items-center justify-center rounded-lg ${
-                          w.type === "Central" ? "bg-teal-50 text-teal-600" : "bg-indigo-50 text-indigo-600"
+                          w.type === "Central" ? "bg-cyan-50 text-cyan-600" : "bg-indigo-50 text-indigo-600"
                         }`}
                       >
                         <WarehouseIcon size={22} />
@@ -458,7 +458,7 @@ export default function WarehousePage() {
                         <div className="text-sm font-semibold text-gray-800">{w.name}</div>
                         <span
                           className={`mt-0.5 inline-block rounded px-1.5 py-0.5 text-[10px] font-medium ${
-                            w.type === "Central" ? "bg-teal-50 text-teal-600" : "bg-indigo-50 text-indigo-600"
+                            w.type === "Central" ? "bg-cyan-50 text-cyan-600" : "bg-indigo-50 text-indigo-600"
                           }`}
                         >
                           {w.type}
