@@ -1,7 +1,21 @@
 "use client";
 
-import { useRef, useState } from "react";
-import { X, Paperclip, Bell, Plus, Trash2, Send, ListTree, FileText, Loader2 } from "lucide-react";
+import { useLayoutEffect, useRef, useState } from "react";
+import {
+  X,
+  Paperclip,
+  Bell,
+  Plus,
+  Trash2,
+  Send,
+  ListTree,
+  FileText,
+  Loader2,
+  CheckCircle2,
+  Image as ImageIcon,
+  MessageSquare,
+  ClipboardCheck,
+} from "lucide-react";
 import { useAppStore } from "@/lib/store";
 import { useAuthStore } from "@/lib/authStore";
 import { useUsers } from "@/lib/useUsers";
@@ -13,6 +27,91 @@ import { UserAvatar } from "./TaskBits";
 import { Select } from "@/components/Select";
 
 type Panel = "Comment" | "Attachment" | "Log Activity";
+
+type ActivityItem = { id: number | string; text: string; at: string };
+
+function activityIcon(text: string) {
+  const t = text.toLowerCase();
+  if (t.includes("attach")) return ImageIcon;
+  if (t.includes("comment")) return MessageSquare;
+  if (t.includes("creat")) return ClipboardCheck;
+  return CheckCircle2;
+}
+
+/** Builds one smooth S-curve through the node centres (right → left → right …). */
+function snakePath(pts: { x: number; y: number }[]) {
+  if (pts.length < 2) return "";
+  let d = `M ${pts[0].x} ${pts[0].y}`;
+  for (let i = 1; i < pts.length; i++) {
+    const p0 = pts[i - 1];
+    const p1 = pts[i];
+    const my = (p0.y + p1.y) / 2;
+    d += ` C ${p0.x} ${my}, ${p1.x} ${my}, ${p1.x} ${p1.y}`;
+  }
+  return d;
+}
+
+/**
+ * Log-activity timeline where entries alternate sides and are joined by a flowing curve.
+ * Node positions are measured after layout so the curve tracks real (variable-height) rows.
+ */
+function CurvyActivityTimeline({ items }: { items: ActivityItem[] }) {
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const nodeRefs = useRef<(HTMLDivElement | null)[]>([]);
+  const [pts, setPts] = useState<{ x: number; y: number }[]>([]);
+
+  useLayoutEffect(() => {
+    function measure() {
+      const wrap = wrapRef.current;
+      if (!wrap) return;
+      const wb = wrap.getBoundingClientRect();
+      setPts(
+        nodeRefs.current.slice(0, items.length).map((n) => {
+          if (!n) return { x: 0, y: 0 };
+          const b = n.getBoundingClientRect();
+          return { x: b.left - wb.left + b.width / 2, y: b.top - wb.top + b.height / 2 };
+        })
+      );
+    }
+    measure();
+    const ro = new ResizeObserver(measure);
+    if (wrapRef.current) ro.observe(wrapRef.current);
+    return () => ro.disconnect();
+  }, [items]);
+
+  if (items.length === 0) {
+    return <p className="py-10 text-center text-xs text-gray-400">No activity yet.</p>;
+  }
+
+  return (
+    <div ref={wrapRef} className="relative py-1">
+      <svg className="pointer-events-none absolute inset-0 h-full w-full" fill="none" aria-hidden>
+        <path d={snakePath(pts)} className="stroke-cyan-300" strokeWidth={2} strokeLinecap="round" />
+      </svg>
+      {items.map((a, i) => {
+        const right = i % 2 === 0;
+        const Icon = activityIcon(a.text);
+        return (
+          <div key={a.id} className="relative min-h-[62px]">
+            <div
+              ref={(el) => {
+                nodeRefs.current[i] = el;
+              }}
+              className="absolute top-3 z-10 flex h-7 w-7 -translate-x-1/2 items-center justify-center rounded-full border border-cyan-200 bg-white text-brand-accent shadow-sm"
+              style={{ left: right ? "78%" : "22%" }}
+            >
+              <Icon size={14} />
+            </div>
+            <div className={right ? "pr-[27%] text-right" : "pl-[27%] text-left"}>
+              <div className="text-sm leading-snug text-gray-700">{a.text}</div>
+              <div className="mt-0.5 text-[10px] text-gray-400">{formatTaskDate(a.at)}</div>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
 
 /**
  * Add / edit a task. TaskOPad shows this as a centre popup; we use a right slide-over to match the
@@ -416,17 +515,7 @@ export function TaskDrawer({
                   )}
                 </div>
               ) : (
-                <div className="space-y-3">
-                  {liveTask.activity.map((a) => (
-                    <div key={a.id} className="flex gap-2">
-                      <div className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-brand-accent" />
-                      <div>
-                        <div className="text-sm text-gray-600">{a.text}</div>
-                        <div className="text-[10px] text-gray-400">{formatTaskDate(a.at)}</div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
+                <CurvyActivityTimeline items={liveTask.activity} />
               )}
             </div>
 
