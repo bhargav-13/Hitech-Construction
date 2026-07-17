@@ -28,7 +28,7 @@ import { Select } from "@/components/Select";
 
 type Panel = "Comment" | "Attachment" | "Log Activity";
 
-type ActivityItem = { id: number | string; text: string; at: string };
+type ActivityItem = { id: number | string; text: string; at: string; userId?: string };
 
 function activityIcon(text: string) {
   const t = text.toLowerCase();
@@ -38,7 +38,10 @@ function activityIcon(text: string) {
   return CheckCircle2;
 }
 
-/** Builds one smooth S-curve through the node centres (right → left → right …). */
+/**
+ * Builds a mostly-straight snake through the node centres: a vertical drop, a short
+ * horizontal hop to the next side, joined only by small rounded corners at the turns.
+ */
 function snakePath(pts: { x: number; y: number }[]) {
   if (pts.length < 2) return "";
   let d = `M ${pts[0].x} ${pts[0].y}`;
@@ -46,7 +49,14 @@ function snakePath(pts: { x: number; y: number }[]) {
     const p0 = pts[i - 1];
     const p1 = pts[i];
     const my = (p0.y + p1.y) / 2;
-    d += ` C ${p0.x} ${my}, ${p1.x} ${my}, ${p1.x} ${p1.y}`;
+    const dir = Math.sign(p1.x - p0.x) || 1;
+    const r = Math.min(14, Math.abs(p1.x - p0.x) / 2, (p1.y - p0.y) / 2);
+    // straight down, round into the horizontal, straight across, round back into the vertical
+    d += ` L ${p0.x} ${my - r}`;
+    d += ` Q ${p0.x} ${my} ${p0.x + dir * r} ${my}`;
+    d += ` L ${p1.x - dir * r} ${my}`;
+    d += ` Q ${p1.x} ${my} ${p1.x} ${my + r}`;
+    d += ` L ${p1.x} ${p1.y}`;
   }
   return d;
 }
@@ -55,10 +65,17 @@ function snakePath(pts: { x: number; y: number }[]) {
  * Log-activity timeline where entries alternate sides and are joined by a flowing curve.
  * Node positions are measured after layout so the curve tracks real (variable-height) rows.
  */
-function CurvyActivityTimeline({ items }: { items: ActivityItem[] }) {
+function CurvyActivityTimeline({
+  items,
+  userName,
+}: {
+  items: ActivityItem[];
+  userName?: (id: string) => string;
+}) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const nodeRefs = useRef<(HTMLDivElement | null)[]>([]);
   const [pts, setPts] = useState<{ x: number; y: number }[]>([]);
+  const [hovered, setHovered] = useState<number | null>(null);
 
   useLayoutEffect(() => {
     function measure() {
@@ -86,25 +103,69 @@ function CurvyActivityTimeline({ items }: { items: ActivityItem[] }) {
   return (
     <div ref={wrapRef} className="relative py-1">
       <svg className="pointer-events-none absolute inset-0 h-full w-full" fill="none" aria-hidden>
-        <path d={snakePath(pts)} className="stroke-cyan-300" strokeWidth={2} strokeLinecap="round" />
+        <path
+          d={snakePath(pts)}
+          className="stroke-cyan-300"
+          strokeWidth={2}
+          strokeLinecap="round"
+          strokeDasharray="1 6"
+        />
       </svg>
       {items.map((a, i) => {
         const right = i % 2 === 0;
         const Icon = activityIcon(a.text);
+        const isHovered = hovered === i;
+        const actor = a.userId && userName ? userName(a.userId) : null;
         return (
-          <div key={a.id} className="relative min-h-[62px]">
+          <div
+            key={a.id}
+            className="group relative min-h-[62px]"
+            onMouseEnter={() => setHovered(i)}
+            onMouseLeave={() => setHovered((h) => (h === i ? null : h))}
+          >
             <div
               ref={(el) => {
                 nodeRefs.current[i] = el;
               }}
-              className="absolute top-3 z-10 flex h-7 w-7 -translate-x-1/2 items-center justify-center rounded-full border border-cyan-200 bg-white text-brand-accent shadow-sm"
+              className={`absolute top-3 z-10 flex h-7 w-7 -translate-x-1/2 items-center justify-center rounded-full border bg-white text-brand-accent shadow-sm transition-all duration-300 ${
+                isHovered
+                  ? "scale-125 border-cyan-400 shadow-md ring-4 ring-cyan-100"
+                  : "border-cyan-200"
+              }`}
               style={{ left: right ? "78%" : "22%" }}
             >
               <Icon size={14} />
             </div>
-            <div className={right ? "pr-[27%] text-right" : "pl-[27%] text-left"}>
+            <div
+              className={`transition-transform duration-300 ${
+                right ? "pr-[27%] text-right" : "pl-[27%] text-left"
+              } ${isHovered ? (right ? "-translate-x-1" : "translate-x-1") : ""}`}
+            >
               <div className="text-sm leading-snug text-gray-700">{a.text}</div>
               <div className="mt-0.5 text-[10px] text-gray-400">{formatTaskDate(a.at)}</div>
+            </div>
+
+            {/* Hover detail card */}
+            <div
+              className={`pointer-events-none absolute top-1 z-20 w-52 rounded-lg border border-cyan-100 bg-white p-3 shadow-lg transition-all duration-200 ${
+                right ? "right-[calc(22%_+_1rem)] origin-right" : "left-[calc(22%_+_1rem)] origin-left"
+              } ${
+                isHovered
+                  ? "translate-y-0 scale-100 opacity-100"
+                  : "translate-y-1 scale-95 opacity-0"
+              }`}
+            >
+              <div className="flex items-center gap-1.5 text-brand-accent">
+                <Icon size={13} />
+                <span className="text-[11px] font-semibold uppercase tracking-wide">Activity</span>
+              </div>
+              <div className="mt-1.5 text-xs leading-snug text-gray-700">{a.text}</div>
+              {actor && (
+                <div className="mt-2 text-[11px] text-gray-500">
+                  by <span className="font-medium text-gray-700">{actor}</span>
+                </div>
+              )}
+              <div className="mt-0.5 text-[11px] text-gray-400">{formatTaskDate(a.at)}</div>
             </div>
           </div>
         );
@@ -515,7 +576,7 @@ export function TaskDrawer({
                   )}
                 </div>
               ) : (
-                <CurvyActivityTimeline items={liveTask.activity} />
+                <CurvyActivityTimeline items={liveTask.activity} userName={userName} />
               )}
             </div>
 
