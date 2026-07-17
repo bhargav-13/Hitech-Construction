@@ -1,13 +1,17 @@
 @import "tailwindcss";
 
 :root {
-  --background: #f1f5f4;
-  --foreground: #171717;
-  --sidebar-bg: #ffffff;
-  --sidebar-border: #e7e8f0;
-  --sidebar-active: #3b6ef6;
-  --sidebar-text: #6b7080;
-  --brand-accent: #0d9488;
+  /* Deep Navy + Cyan — production ERP palette */
+  --background: #eef2f7;        /* cool slate content bg */
+  --foreground: #0f172a;        /* slate-900 text */
+  --sidebar-bg: #0e2a47;        /* deep navy chrome */
+  --sidebar-border: #1c3a5c;    /* navy border */
+  --sidebar-active: #22d3ee;    /* cyan-400 active accent on navy */
+  --sidebar-text: #93a7c4;      /* muted slate-blue */
+  --brand-accent: #0891b2;      /* cyan-600 primary for white surfaces */
+  --brand-accent-strong: #0e7490; /* cyan-700 hover */
+  --navy: #0e2a47;
+  --navy-soft: #13355a;
 }
 
 @theme inline {
@@ -18,19 +22,25 @@
   --color-sidebar-active: var(--sidebar-active);
   --color-sidebar-text: var(--sidebar-text);
   --color-brand-accent: var(--brand-accent);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-brand-accent-strong: var(--brand-accent-strong);
+  --color-navy: var(--navy);
+  --color-navy-soft: var(--navy-soft);
+  --font-sans: var(--font-sans);
+  --font-mono: var(--font-mono);
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans), system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  letter-spacing: -0.011em;
 }
 
 @layer components {
   .input {
-    @apply w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 outline-none focus:border-teal-400;
+    @apply w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 outline-none transition-colors duration-150 focus:border-cyan-500;
   }
 
   /* Every "card" surface in the app shares this exact class combination
@@ -38,6 +48,63 @@ body {
      shadow here means every card gets consistent depth without having
      to touch each page individually. */
   .rounded-xl.border.border-gray-200.bg-white {
-    @apply shadow-sm;
+    @apply shadow-sm transition-shadow duration-150;
+  }
+}
+
+/* Shared, lightweight motion primitives used across drawers, dropdowns and page content.
+   Kept deliberately simple (no animation library) — fade/slide on mount only, no exit tween. */
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fade-in-scale {
+  from {
+    opacity: 0;
+    transform: scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes slide-in-right {
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+@keyframes overlay-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@layer utilities {
+  .animate-fade-in {
+    animation: fade-in 0.18s ease-out;
+  }
+  .animate-fade-in-scale {
+    animation: fade-in-scale 0.15s ease-out;
+  }
+  .animate-slide-in-right {
+    animation: slide-in-right 0.22s cubic-bezier(0.32, 0.72, 0, 1);
+  }
+  .animate-overlay-in {
+    animation: overlay-in 0.18s ease-out;
   }
 }

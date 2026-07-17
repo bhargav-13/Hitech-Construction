@@ -62,7 +62,7 @@ const STATUS_CLS: Record<string, string> = {
   New: "bg-gray-100 text-gray-600",
   "Under Research": "bg-amber-100 text-amber-700",
   "Technical Evaluation": "bg-blue-100 text-blue-700",
-  "Quotation Sent": "bg-teal-100 text-teal-700",
+  "Quotation Sent": "bg-cyan-100 text-cyan-700",
   Negotiation: "bg-purple-100 text-purple-700",
   Won: "bg-green-100 text-green-700",
   Lost: "bg-rose-100 text-rose-700",
@@ -207,7 +207,7 @@ function LeadDrawer({ onClose, onSave }: { onClose: () => void; onSave: (l: Lead
     onSave({ ...f, id: `l${Date.now()}`, lastUpdated: "02 Jul 2026" });
   }
 
-  const selCls = "w-full rounded-lg border border-gray-200 bg-white px-3 py-2.5 text-sm text-gray-700 outline-none focus:border-teal-400";
+  const selCls = "w-full rounded-lg border border-gray-200 bg-white px-3 py-2.5 text-sm text-gray-700 outline-none focus:border-cyan-400";
 
   return (
     <Drawer title="New Lead" onClose={onClose} onSave={save} saveLabel="Save">

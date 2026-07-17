@@ -56,7 +56,7 @@ export function TransactionFormModal({
   const flowLabel =
     meta.flow === "in" ? "Money In" : meta.flow === "out" ? "Money Out" : "Transfer";
   const flowColor =
-    meta.flow === "in" ? "text-green-600" : meta.flow === "out" ? "text-rose-600" : "text-teal-600";
+    meta.flow === "in" ? "text-green-600" : meta.flow === "out" ? "text-rose-600" : "text-cyan-600";
 
   return (
     <Modal onClose={onClose}>
@@ -121,7 +121,7 @@ export function TransactionFormModal({
                 type="checkbox"
                 checked={markPaid}
                 onChange={(e) => setMarkPaid(e.target.checked)}
-                className="h-4 w-4 accent-teal-600"
+                className="h-4 w-4 accent-cyan-600"
               />
               Mark as settled now (records the money movement immediately)
             </label>

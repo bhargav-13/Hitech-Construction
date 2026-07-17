@@ -29,15 +29,18 @@ export function Drawer({
   }, [onClose]);
 
   return (
-    <div className="fixed inset-0 z-50 flex justify-end bg-black/40" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex justify-end bg-black/40 animate-overlay-in" onClick={onClose}>
       <div
-        className={`flex h-full w-full ${width} flex-col bg-white shadow-2xl`}
+        className={`flex h-full w-full ${width} flex-col bg-white shadow-2xl animate-slide-in-right`}
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="h-1 w-full bg-gradient-to-r from-brand-accent to-teal-400" />
+        <div className="h-1 w-full bg-gradient-to-r from-brand-accent to-cyan-400" />
         <div className="flex items-center justify-between border-b border-gray-100 px-6 py-4">
           <div className="flex items-center gap-3">
-            <button onClick={onClose} className="rounded-full p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600">
+            <button
+              onClick={onClose}
+              className="rounded-full p-1 text-gray-400 transition-all duration-150 hover:bg-gray-100 hover:text-gray-600 active:scale-90"
+            >
               <X size={18} />
             </button>
             <h2 className="text-sm font-bold tracking-wide text-gray-800 uppercase">{title}</h2>
@@ -45,7 +48,7 @@ export function Drawer({
           {onSave && (
             <button
               onClick={onSave}
-              className="rounded-lg bg-brand-accent px-5 py-2 text-sm font-medium text-white hover:opacity-90"
+              className="rounded-lg bg-brand-accent px-5 py-2 text-sm font-medium text-white transition-all duration-150 hover:opacity-90 active:scale-95"
             >
               {saveLabel}
             </button>

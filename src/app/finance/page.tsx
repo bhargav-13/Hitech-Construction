@@ -188,9 +188,9 @@ export default function FinancePage() {
                 <Calendar size={14} />
                 Date Filter
               </button>
-              <span className="flex items-center gap-1 rounded-lg bg-teal-50 px-3 py-2 text-xs font-medium text-teal-600">
+              <span className="flex items-center gap-1 rounded-lg bg-cyan-50 px-3 py-2 text-xs font-medium text-cyan-600">
                 Unbilled Materials
-                <span className="rounded-full bg-teal-600 px-1.5 text-white">71</span>
+                <span className="rounded-full bg-cyan-600 px-1.5 text-white">71</span>
               </span>
               <span className="flex items-center gap-1 rounded-lg bg-amber-50 px-3 py-2 text-xs font-medium text-amber-600">
                 Pending Entries
@@ -211,7 +211,7 @@ export default function FinancePage() {
               label="Total Invoice"
               value={formatRupee(txnTotals.totalInvoice)}
               sub={`Unpaid: ${formatRupee(txnTotals.unpaidInvoice)}`}
-              tint="text-teal-500"
+              tint="text-cyan-500"
             />
             <SummaryCard
               icon={<Landmark size={22} />}
@@ -345,7 +345,7 @@ export default function FinancePage() {
                 <div className="flex items-center gap-3">
                   <div
                     className={`flex h-10 w-10 items-center justify-center rounded-lg ${
-                      a.type === "Cash" ? "bg-green-50 text-green-600" : "bg-teal-50 text-teal-600"
+                      a.type === "Cash" ? "bg-green-50 text-green-600" : "bg-cyan-50 text-cyan-600"
                     }`}
                   >
                     {a.type === "Cash" ? <Wallet size={20} /> : <Landmark size={20} />}
@@ -354,7 +354,7 @@ export default function FinancePage() {
                     <div className="flex items-center gap-2">
                       <span className="text-sm font-semibold text-gray-800">{a.name}</span>
                       {a.isPrimary && (
-                        <span className="rounded bg-teal-50 px-1.5 py-0.5 text-[10px] font-medium text-teal-600">
+                        <span className="rounded bg-cyan-50 px-1.5 py-0.5 text-[10px] font-medium text-cyan-600">
                           PRIMARY
                         </span>
                       )}

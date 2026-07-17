@@ -20,6 +20,7 @@ import {
   Layers,
   FileSignature,
   CheckSquare,
+  ListChecks,
   MessageCircle,
   PanelLeftClose,
   PanelLeftOpen,
@@ -27,6 +28,7 @@ import {
 } from "lucide-react";
 import { NAV_ITEMS, NAV_BREAK_AFTER } from "@/lib/nav";
 import { useAppStore } from "@/lib/store";
+import { useAuthStore } from "@/lib/authStore";
 import { projectAvatarColor, projectInitials } from "@/lib/projectHelpers";
 import { canAccess } from "@/lib/permissions";
 
@@ -45,6 +47,7 @@ const ICONS: Record<string, React.ComponentType<{ size?: number; className?: str
   Library: BookOpen,
   Setting: Settings,
   Services: Layers,
+  Taskopad: ListChecks,
 };
 
 export function Sidebar() {
@@ -54,13 +57,21 @@ export function Sidebar() {
   const currentUserId = useAppStore((s) => s.currentUserId);
   const users = useAppStore((s) => s.users);
   const logout = useAppStore((s) => s.logout);
-  const currentUser = users.find((u) => u.id === currentUserId);
-  const navItems = currentUser
-    ? NAV_ITEMS.filter((item) => canAccess(currentUser.role, item.href))
+  const authUser = useAuthStore((s) => s.user);
+  const authLogout = useAuthStore((s) => s.logout);
+  const mockUser = users.find((u) => u.id === currentUserId);
+  // Prefer the real backend session for display/gating; fall back to the mock user for the
+  // not-yet-migrated feature screens if the real session hasn't loaded yet.
+  const currentUser = mockUser;
+  const displayName = authUser?.fullName ?? mockUser?.name ?? "";
+  const displayRole = authUser?.role.name ?? mockUser?.role ?? "";
+  const navItems = mockUser
+    ? NAV_ITEMS.filter((item) => canAccess(mockUser.role, item.href))
     : NAV_ITEMS;
-  const isAdmin = currentUser?.role === "Admin";
+  const isAdmin = mockUser?.role === "Admin" || authUser?.permissions.includes("USER_MANAGEMENT:VIEW");
 
-  function handleLogout() {
+  async function handleLogout() {
+    await authLogout();
     logout();
     router.replace("/login");
   }
@@ -74,15 +85,15 @@ export function Sidebar() {
       <div className={`flex items-center px-4 py-4 ${collapsed ? "justify-center" : "gap-3"}`}>
         {!collapsed && (
           <>
-            <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-sidebar-active text-sm font-bold text-white">
+            <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-brand-accent text-sm font-bold text-white">
               HT
             </div>
             <div className="min-w-0 flex-1">
-              <div className="truncate text-sm font-semibold text-gray-800">
+              <div className="truncate text-sm font-semibold text-white">
                 Hi-Tech Construction
               </div>
               <div className="truncate text-xs text-sidebar-text">
-                {currentUser?.role ?? "Admin"}
+                {displayRole || "Admin"}
               </div>
             </div>
           </>
@@ -90,7 +101,7 @@ export function Sidebar() {
         <button
           type="button"
           onClick={() => setCollapsed((c) => !c)}
-          className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md border border-sidebar-border text-sidebar-text transition-colors hover:bg-gray-50 hover:text-gray-700"
+          className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md border border-sidebar-border text-sidebar-text transition-all duration-150 hover:bg-white/10 hover:text-white active:scale-90"
           aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
         >
           {collapsed ? <PanelLeftOpen size={15} /> : <PanelLeftClose size={15} />}
@@ -108,10 +119,10 @@ export function Sidebar() {
                 <Link
                   href={item.href}
                   title={collapsed ? item.label : undefined}
-                  className={`flex items-center gap-3 rounded-r-lg border-l-[3px] py-2.5 pl-[9px] pr-3 text-sm transition-colors ${
+                  className={`flex items-center gap-3 rounded-r-lg border-l-[3px] py-2.5 pl-[9px] pr-3 text-sm transition-all duration-150 ease-out active:scale-[0.98] ${
                     active
-                      ? "border-sidebar-active bg-sidebar-active/5 font-medium text-sidebar-active"
-                      : "border-transparent text-sidebar-text hover:bg-gray-50 hover:text-gray-800"
+                      ? "border-sidebar-active bg-sidebar-active/10 font-medium text-sidebar-active"
+                      : "border-transparent text-sidebar-text hover:border-sidebar-active/30 hover:bg-white/5 hover:text-white"
                   }`}
                 >
                   <Icon size={18} className="flex-shrink-0" />
@@ -142,31 +153,31 @@ export function Sidebar() {
         </div>
       )}
 
-      {currentUser && (
+      {(authUser || currentUser) && (
         <div className={`border-t border-sidebar-border p-3 ${collapsed ? "flex justify-center" : ""}`}>
           {collapsed ? (
             <button
               onClick={handleLogout}
-              title={`Log out — ${currentUser.name}`}
-              className="flex h-9 w-9 items-center justify-center rounded-lg text-sidebar-text hover:bg-rose-50 hover:text-rose-600"
+              title={`Log out — ${displayName}`}
+              className="flex h-9 w-9 items-center justify-center rounded-lg text-sidebar-text transition-all duration-150 hover:bg-rose-500/15 hover:text-rose-300 active:scale-90"
             >
               <LogOut size={16} />
             </button>
           ) : (
             <div className="flex items-center gap-3">
               <div
-                className={`flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full text-xs font-semibold text-white ${projectAvatarColor(currentUser.id)}`}
+                className={`flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full text-xs font-semibold text-white ${projectAvatarColor(String(authUser?.id ?? currentUser?.id ?? ""))}`}
               >
-                {projectInitials(currentUser.name)}
+                {projectInitials(displayName)}
               </div>
               <div className="min-w-0 flex-1">
-                <div className="truncate text-sm font-medium text-gray-800">{currentUser.name}</div>
-                <div className="truncate text-[11px] text-sidebar-text">{currentUser.role}</div>
+                <div className="truncate text-sm font-medium text-white">{displayName}</div>
+                <div className="truncate text-[11px] text-sidebar-text">{displayRole}</div>
               </div>
               <button
                 onClick={handleLogout}
                 title="Log out"
-                className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg text-sidebar-text hover:bg-rose-50 hover:text-rose-600"
+                className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg text-sidebar-text transition-all duration-150 hover:bg-rose-500/15 hover:text-rose-300 active:scale-90"
               >
                 <LogOut size={16} />
               </button>
@@ -190,7 +201,7 @@ function QuickAction({
   collapsed: boolean;
 }) {
   const cls =
-    "flex flex-col items-center gap-1 rounded-lg border border-sidebar-border px-2 py-2 text-[11px] text-sidebar-text transition-colors hover:border-sidebar-active/40 hover:text-sidebar-active";
+    "flex flex-col items-center gap-1 rounded-lg border border-sidebar-border px-2 py-2 text-[11px] text-sidebar-text transition-all duration-150 hover:border-sidebar-active/40 hover:bg-sidebar-active/5 hover:text-sidebar-active active:scale-95";
   const content = (
     <>
       <Icon size={16} />

@@ -156,7 +156,7 @@ export default function NewSaleInvoicePage() {
             </div>
           </div>
 
-          <div className="mb-5 rounded-lg border border-dashed border-teal-200 bg-teal-50/40 p-4">
+          <div className="mb-5 rounded-lg border border-dashed border-cyan-200 bg-cyan-50/40 p-4">
             <LineItemsEditor items={items} lines={lines} onChange={setLines} />
           </div>
 
@@ -214,13 +214,13 @@ export default function NewSaleInvoicePage() {
               </div>
               <div className="text-right">
                 <div className="text-xs font-semibold text-gray-700">Invoice Details</div>
-                <div className="text-xs text-teal-500">Invoice No. #{invoiceNumber.slice(-4)}</div>
+                <div className="text-xs text-cyan-500">Invoice No. #{invoiceNumber.slice(-4)}</div>
                 <div className="text-xs text-gray-500">Date : {date}</div>
               </div>
             </div>
             <table className="mb-4 w-full border-collapse text-xs">
               <thead>
-                <tr className="bg-teal-400 text-left text-white">
+                <tr className="bg-cyan-400 text-left text-white">
                   <th className="px-2 py-1.5">#</th>
                   <th className="px-2 py-1.5">Item name</th>
                   <th className="px-2 py-1.5 text-right">Qty</th>
@@ -275,7 +275,7 @@ export default function NewSaleInvoicePage() {
                   <span>GST</span>
                   <span>₹ {totals.gst.toLocaleString("en-IN")}</span>
                 </div>
-                <div className="flex justify-between bg-teal-400 px-2 py-1 font-semibold text-white">
+                <div className="flex justify-between bg-cyan-400 px-2 py-1 font-semibold text-white">
                   <span>Total</span>
                   <span>₹ {totals.total.toLocaleString("en-IN")}</span>
                 </div>

@@ -37,7 +37,7 @@ export default function LibraryPage() {
                 <button
                   onClick={() => setLib(l)}
                   className={`w-full rounded-lg px-3 py-2 text-left text-sm ${
-                    lib === l ? "bg-teal-50 font-medium text-brand-accent" : "text-gray-600 hover:bg-gray-50"
+                    lib === l ? "bg-cyan-50 font-medium text-brand-accent" : "text-gray-600 hover:bg-gray-50"
                   }`}
                 >
                   {l}

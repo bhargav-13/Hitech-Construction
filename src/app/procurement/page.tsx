@@ -98,7 +98,7 @@ export default function ProcurementPage() {
                 {pos.map((po) => (
                   <tr key={po.id} className="border-b border-gray-50 last:border-b-0">
                     <td className="px-4 py-3">
-                      <div className="font-medium text-teal-600">{po.poNumber}</div>
+                      <div className="font-medium text-cyan-600">{po.poNumber}</div>
                       <div className="text-xs text-gray-400">{po.date}</div>
                     </td>
                     <td className="px-4 py-3 text-gray-700">{po.vendor}</td>
