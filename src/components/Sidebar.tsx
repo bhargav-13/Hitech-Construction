@@ -18,7 +18,6 @@ import {
   BookOpen,
   Settings,
   Layers,
-  FileSignature,
   CheckSquare,
   ListChecks,
   MessageCircle,
@@ -149,10 +148,9 @@ export function Sidebar() {
       {isAdmin && (
         <div
           className={`grid gap-2 border-t border-sidebar-border px-3 py-3 ${
-            collapsed ? "grid-cols-1" : "grid-cols-3"
+            collapsed ? "grid-cols-1" : "grid-cols-2"
           }`}
         >
-          <QuickAction icon={FileSignature} label="MOM" collapsed={collapsed} />
           <QuickAction icon={CheckSquare} label="To Do" href="/todo" collapsed={collapsed} />
           <QuickAction icon={MessageCircle} label="Chat" collapsed={collapsed} />
         </div>
