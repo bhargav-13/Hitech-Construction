@@ -148,15 +148,15 @@ export function GlobalSearch() {
 
   return (
     <>
-      {/* Trigger — sits beside the notification bell */}
+      {/* Trigger — a prominent, consistent search bar shown in the header of every page */}
       <button
         onClick={() => setOpen(true)}
-        className="flex items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-1.5 text-sm text-gray-400 transition-colors duration-150 hover:border-gray-300 hover:bg-gray-100"
+        className="flex w-44 items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-400 transition-colors duration-150 hover:border-gray-300 hover:bg-white sm:w-64 lg:w-80"
         title="Search everything (⌘K)"
       >
-        <Search size={15} />
-        <span className="hidden sm:inline">Search…</span>
-        <kbd className="ml-1 hidden rounded border border-gray-200 bg-white px-1.5 py-0.5 text-[10px] font-medium text-gray-400 sm:inline">
+        <Search size={15} className="shrink-0" />
+        <span className="flex-1 truncate text-left">Search everything…</span>
+        <kbd className="hidden shrink-0 rounded border border-gray-200 bg-white px-1.5 py-0.5 text-[10px] font-medium text-gray-400 sm:inline">
           ⌘K
         </kbd>
       </button>
