@@ -14,6 +14,7 @@ export interface Project {
   customerName: string;
   stage: string;
   address: string;
+  city: string;
   inAmount: number;
   outAmount: number;
   todoCount: number;

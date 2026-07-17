@@ -1,11 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { Sidebar } from "./Sidebar";
 import { Topbar } from "./Topbar";
+import { PageLoader } from "./Spinner";
 import { useAppStore } from "@/lib/store";
 import { AUTH_STORAGE_KEY } from "@/lib/auth";
+import { useAuthStore } from "@/lib/authStore";
 
 export function AppShell({
   title,
@@ -15,27 +17,25 @@ export function AppShell({
   children: React.ReactNode;
 }) {
   const router = useRouter();
-  const currentUserId = useAppStore((s) => s.currentUserId);
   const rehydrateAuth = useAppStore((s) => s.rehydrateAuth);
-  const [checked, setChecked] = useState(false);
+  const authUser = useAuthStore((s) => s.user);
+  const authHydrated = useAuthStore((s) => s.hydrated);
+  const hydrate = useAuthStore((s) => s.hydrate);
 
-  // Restore the session from localStorage before deciding to redirect.
+  // Restore the mock session (still backs the not-yet-migrated feature screens) and the
+  // real backend session (the actual source of truth for whether we're logged in).
   useEffect(() => {
     const stored = typeof window !== "undefined" ? localStorage.getItem(AUTH_STORAGE_KEY) : null;
     if (stored) rehydrateAuth(stored);
-    setChecked(true);
-  }, [rehydrateAuth]);
+    hydrate();
+  }, [rehydrateAuth, hydrate]);
 
   useEffect(() => {
-    if (checked && !currentUserId) router.replace("/login");
-  }, [checked, currentUserId, router]);
+    if (authHydrated && !authUser) router.replace("/login");
+  }, [authHydrated, authUser, router]);
 
-  if (!currentUserId) {
-    return (
-      <div className="flex h-screen w-full items-center justify-center bg-background text-sm text-gray-400">
-        Loading…
-      </div>
-    );
+  if (!authUser) {
+    return <PageLoader />;
   }
 
   return (
@@ -44,7 +44,7 @@ export function AppShell({
       <div className="flex min-w-0 flex-1 flex-col">
         <Topbar title={title} />
         <main className="min-w-0 flex-1 overflow-x-hidden overflow-y-auto bg-background p-6">
-          {children}
+          <div className="animate-fade-in">{children}</div>
         </main>
       </div>
     </div>
