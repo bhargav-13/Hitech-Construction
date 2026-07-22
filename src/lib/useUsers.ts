@@ -7,6 +7,9 @@ export interface TeamUser {
   id: string;
   name: string;
   role: string;
+  /** Org grouping the person belongs to — used to narrow assignee pickers by department. */
+  departmentId: string | null;
+  departmentName: string | null;
 }
 
 /**
@@ -25,7 +28,15 @@ export function useUsers(): { users: TeamUser[]; loading: boolean } {
       try {
         const res = await getTeam();
         if (!cancelled) {
-          setUsers(res.map((u) => ({ id: String(u.id), name: u.fullName, role: u.roleName })));
+          setUsers(
+            res.map((u) => ({
+              id: String(u.id),
+              name: u.fullName,
+              role: u.roleName,
+              departmentId: u.departmentId != null ? String(u.departmentId) : null,
+              departmentName: u.departmentName ?? null,
+            }))
+          );
         }
       } catch {
         if (!cancelled) setUsers([]);

@@ -4,17 +4,20 @@ import { useCallback, useEffect, useState } from "react";
 import { AppShell } from "@/components/AppShell";
 import { Spinner } from "@/components/Spinner";
 import { Select } from "@/components/Select";
+import { DatePicker } from "@/components/DatePicker";
 import { projectAvatarColor, projectInitials } from "@/lib/projectHelpers";
 import { useAuthStore } from "@/lib/authStore";
 import { useProjects } from "@/lib/useProjects";
 import { useProjectScope } from "@/lib/projectScope";
 import * as audit from "@/lib/auditApi";
 import type { AuditActionApi, AuditLog } from "@/lib/auditApi";
+import { downloadPdf } from "@/lib/vyaparExport";
 import {
   Activity,
   CheckCircle2,
   ChevronRight,
   Download,
+  FileText,
   LogIn,
   LogOut,
   Pencil,
@@ -151,26 +154,79 @@ export default function AuditPage() {
     setPage(0);
   }
 
-  function exportCsv() {
-    const head = ["Time", "Actor", "Role", "Action", "Entity", "Result", "IP"];
-    const lines = rows.map((r) => [
-      formatWhen(r.createdAt),
-      r.actorName ?? r.actorEmail ?? "System",
-      r.actorRole ?? "",
-      r.action,
-      entityLabel(r),
-      resultLabel(r.statusCode),
-      formatIp(r.ipAddress),
-    ]);
-    const csv = [head, ...lines]
-      .map((row) => row.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(","))
-      .join("\n");
-    const url = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `audit-log-page-${page + 1}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
+  const [exporting, setExporting] = useState(false);
+  const [exportingPdf, setExportingPdf] = useState(false);
+
+  // Fetches every page matching the current filters, not just what's on screen — the client
+  // flagged the old version for silently dropping every page past the first.
+  async function collectFiltered(): Promise<AuditLog[]> {
+    const EXPORT_PAGE_SIZE = 500;
+    const base = {
+      actorUserId: actorUserId ? Number(actorUserId) : undefined,
+      action: action || undefined,
+      entityType: entityType || undefined,
+      from: from || undefined,
+      to: to || undefined,
+      q: projectQ,
+    };
+    // Keep paging until we've collected every matching record — don't rely on totalPages alone,
+    // so the export always contains the full filtered set, never just the visible page.
+    const all: AuditLog[] = [];
+    let pageIndex = 0;
+    let total = Infinity;
+    // Hard stop guards against an unexpected server response causing an endless loop.
+    while (all.length < total && pageIndex < 1000) {
+      const res = await audit.getAuditLogs({ ...base, page: pageIndex, size: EXPORT_PAGE_SIZE });
+      total = res.totalElements;
+      if (res.content.length === 0) break;
+      all.push(...res.content);
+      pageIndex += 1;
+    }
+    return all;
+  }
+
+  const auditHead = ["Time", "Actor", "Role", "Action", "Entity", "Result", "IP"];
+  const auditRow = (r: AuditLog) => [
+    formatWhen(r.createdAt),
+    r.actorName ?? r.actorEmail ?? "System",
+    r.actorRole ?? "",
+    r.action,
+    entityLabel(r),
+    resultLabel(r.statusCode),
+    formatIp(r.ipAddress),
+  ];
+
+  async function exportCsv() {
+    setExporting(true);
+    try {
+      const all = await collectFiltered();
+      const lines = all.map(auditRow);
+      const csv = [auditHead, ...lines]
+        .map((row) => row.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(","))
+        .join("\n");
+      const url = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `audit-log-${new Date().toISOString().slice(0, 10)}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to export audit logs.");
+    } finally {
+      setExporting(false);
+    }
+  }
+
+  async function exportPdf() {
+    setExportingPdf(true);
+    try {
+      const all = await collectFiltered();
+      await downloadPdf("Audit Log", auditHead, all.map(auditRow), { landscape: true });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to export audit logs.");
+    } finally {
+      setExportingPdf(false);
+    }
   }
 
   if (!canView) {
@@ -265,10 +321,17 @@ export default function AuditPage() {
             </button>
             <button
               onClick={exportCsv}
-              disabled={rows.length === 0}
+              disabled={rows.length === 0 || exporting}
+              className="flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-600 transition-all duration-150 hover:bg-gray-50 active:scale-95 disabled:opacity-50"
+            >
+              <Download size={14} /> {exporting ? "Exporting…" : "Export"}
+            </button>
+            <button
+              onClick={exportPdf}
+              disabled={rows.length === 0 || exportingPdf}
               className="flex items-center gap-1.5 rounded-lg bg-brand-accent px-3 py-2 text-sm font-medium text-white transition-all duration-150 hover:opacity-90 active:scale-95 disabled:opacity-50"
             >
-              <Download size={14} /> Export
+              <FileText size={14} /> {exportingPdf ? "Generating…" : "PDF"}
             </button>
           </div>
         </div>
@@ -449,12 +512,7 @@ function DateField({ label, value, onChange }: { label: string; value: string; o
   return (
     <label className="block">
       <span className="mb-1 block text-[11px] font-medium tracking-wide text-gray-400 uppercase">{label}</span>
-      <input
-        type="date"
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="rounded-lg border border-gray-200 px-2 py-2 text-sm text-gray-600 outline-none transition-colors duration-150 focus:border-cyan-500"
-      />
+      <DatePicker value={value} onChange={onChange} placeholder={label} className="min-w-[150px]" />
     </label>
   );
 }

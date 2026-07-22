@@ -83,8 +83,8 @@ export function LocationStructure({ projectId }: { projectId: number }) {
   }
 
   return (
-    <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-      <div className="flex items-center justify-between border-b border-slate-100 bg-slate-50/70 px-5 py-3">
+    <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
+      <div className="flex items-center justify-between rounded-t-2xl border-b border-slate-100 bg-slate-50/70 px-5 py-3">
         <div className="flex items-center gap-2 text-sm font-semibold text-slate-700">
           <Layers3 size={16} className="text-brand-accent" />
           Location structure

@@ -1,5 +1,6 @@
 "use client";
 
+import { Suspense } from "react";
 import { TaskopadShell } from "@/components/task/TaskopadShell";
 import { TaskWorkspace } from "@/components/task/TaskWorkspace";
 
@@ -7,7 +8,10 @@ import { TaskWorkspace } from "@/components/task/TaskWorkspace";
 export default function TaskopadTasksPage() {
   return (
     <TaskopadShell>
-      <TaskWorkspace />
+      {/* TaskWorkspace reads query params, which needs a boundary for the production build. */}
+      <Suspense fallback={null}>
+        <TaskWorkspace />
+      </Suspense>
     </TaskopadShell>
   );
 }

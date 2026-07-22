@@ -6,7 +6,8 @@ import { AppShell } from "@/components/AppShell";
 import * as api from "@/lib/api";
 import type { ProjectResponse, ProjectStatus } from "@/lib/api";
 import { projectInitials } from "@/lib/projectHelpers";
-import { useAppStore } from "@/lib/store";
+import { inr } from "@/lib/format";
+import { useDrawerDismiss } from "@/lib/useDrawerDismiss";
 import {
   Building2,
   Wallet,
@@ -37,14 +38,6 @@ const HEALTH_META = {
 };
 const AVATAR_TINTS = ["from-cyan-500 to-sky-600", "from-indigo-500 to-blue-600", "from-teal-500 to-emerald-600", "from-violet-500 to-purple-600", "from-amber-500 to-orange-600", "from-rose-500 to-pink-600"];
 const avatarTint = (id: number) => AVATAR_TINTS[id % AVATAR_TINTS.length];
-
-function inr(value: number): string {
-  if (!value) return "₹0";
-  if (value >= 1e7) return `₹${(value / 1e7).toFixed(2)} Cr`;
-  if (value >= 1e5) return `₹${(value / 1e5).toFixed(2)} L`;
-  if (value >= 1e3) return `₹${(value / 1e3).toFixed(0)}K`;
-  return `₹${value}`;
-}
 
 const FILTERS: { key: "ALL" | ProjectStatus; label: string }[] = [
   { key: "ALL", label: "All" },
@@ -196,7 +189,7 @@ export default function ProjectsPage() {
 
 function NewProjectDialog({ onClose }: { onClose: () => void }) {
   const router = useRouter();
-  const addProject = useAppStore((s) => s.addProject);
+  const { closing, requestClose } = useDrawerDismiss(onClose);
   const [name, setName] = useState("");
   const [address, setAddress] = useState("");
   const [city, setCity] = useState("");
@@ -211,14 +204,16 @@ function NewProjectDialog({ onClose }: { onClose: () => void }) {
     setSaving(true);
     setError(null);
     try {
-      const localProject = addProject({ name: name.trim(), address: address.trim(), city: city.trim() });
-      try {
-        await api.createProject({ name: name.trim(), address: address.trim() || undefined, city: city.trim() || undefined });
-      } catch {
-        // Keep the UI flowing even if the backend is unavailable.
-      }
-      onClose();
-      router.push(`/project/${localProject.id}?setup=1`);
+      // The backend is the source of truth — navigate to the real project id it returns, so the
+      // detail page can load it. (Previously we navigated to a local mock id, which the detail page
+      // then failed to fetch, surfacing an error even though creation had succeeded.)
+      const created = await api.createProject({
+        name: name.trim(),
+        address: address.trim() || undefined,
+        city: city.trim() || undefined,
+      });
+      requestClose();
+      router.push(`/project/${created.id}?setup=1`);
     } catch (err) {
       setError(err instanceof api.ApiError ? err.message : "Couldn't create the project. Is the backend running?");
       setSaving(false);
@@ -227,8 +222,17 @@ function NewProjectDialog({ onClose }: { onClose: () => void }) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-[1px] animate-[fade-in_.15s_ease-out]" onClick={onClose} />
-      <div className="relative w-full max-w-md overflow-hidden rounded-2xl bg-white shadow-2xl animate-[fade-in-scale_.15s_ease-out]">
+      <div
+        className={`absolute inset-0 bg-slate-900/40 backdrop-blur-[1px] ${
+          closing ? "animate-overlay-out" : "animate-[fade-in_.15s_ease-out]"
+        }`}
+        onClick={requestClose}
+      />
+      <div
+        className={`relative w-full max-w-md overflow-hidden rounded-2xl bg-white shadow-2xl ${
+          closing ? "animate-fade-out-scale" : "animate-[fade-in-scale_.15s_ease-out]"
+        }`}
+      >
         <div className="flex items-center justify-between border-b border-slate-100 bg-navy px-5 py-4 text-white">
           <div className="flex items-center gap-2.5">
             <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-brand-accent">
@@ -239,7 +243,7 @@ function NewProjectDialog({ onClose }: { onClose: () => void }) {
               <p className="text-xs text-white/60">Start with the basics — refine details later.</p>
             </div>
           </div>
-          <button onClick={onClose} className="rounded-lg p-1.5 text-white/70 transition hover:bg-white/10 hover:text-white">
+          <button onClick={requestClose} className="rounded-lg p-1.5 text-white/70 transition hover:bg-white/10 hover:text-white">
             <X size={18} />
           </button>
         </div>
@@ -280,7 +284,7 @@ function NewProjectDialog({ onClose }: { onClose: () => void }) {
         </div>
 
         <div className="flex justify-end gap-2 border-t border-slate-100 px-5 py-4">
-          <button onClick={onClose} className="rounded-lg px-4 py-2 text-sm font-medium text-slate-600 transition hover:bg-slate-100">
+          <button onClick={requestClose} className="rounded-lg px-4 py-2 text-sm font-medium text-slate-600 transition hover:bg-slate-100">
             Cancel
           </button>
           <button
@@ -374,6 +378,7 @@ function ProjectCard({ project: p, onOpen }: { project: ProjectResponse; onOpen:
 
 function ProjectDrawer({ project, onClose }: { project: ProjectResponse; onClose: () => void }) {
   const router = useRouter();
+  const { closing, requestClose } = useDrawerDismiss(onClose);
   const [full, setFull] = useState<ProjectResponse>(project);
   const s = STATUS_META[full.status];
   const h = HEALTH_META[full.health];
@@ -389,8 +394,17 @@ function ProjectDrawer({ project, onClose }: { project: ProjectResponse; onClose
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end">
-      <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-[1px] animate-[fade-in_.15s_ease-out]" onClick={onClose} />
-      <aside className="relative flex h-full w-full max-w-md flex-col overflow-y-auto bg-white shadow-2xl animate-[slide-in-right_.2s_ease-out]">
+      <div
+        className={`absolute inset-0 bg-slate-900/40 backdrop-blur-[1px] ${
+          closing ? "animate-overlay-out" : "animate-[fade-in_.15s_ease-out]"
+        }`}
+        onClick={requestClose}
+      />
+      <aside
+        className={`relative flex h-full w-full max-w-md flex-col overflow-y-auto bg-white shadow-2xl ${
+          closing ? "animate-slide-out-right" : "animate-[slide-in-right_.2s_ease-out]"
+        }`}
+      >
         {/* header */}
         <div className="flex items-start justify-between gap-3 bg-navy p-6 text-white">
           <div className="flex items-center gap-3">
@@ -402,7 +416,7 @@ function ProjectDrawer({ project, onClose }: { project: ProjectResponse; onClose
               <h2 className="text-lg font-semibold leading-tight">{full.name}</h2>
             </div>
           </div>
-          <button onClick={onClose} className="rounded-lg p-1.5 text-white/70 transition hover:bg-white/10 hover:text-white">
+          <button onClick={requestClose} className="rounded-lg p-1.5 text-white/70 transition hover:bg-white/10 hover:text-white">
             <X size={18} />
           </button>
         </div>

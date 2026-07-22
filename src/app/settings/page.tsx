@@ -8,7 +8,18 @@ import { Select } from "@/components/Select";
 import { projectAvatarColor } from "@/lib/projectHelpers";
 import * as api from "@/lib/api";
 import type { ModuleResponse, RoleResponse, UserResponse } from "@/lib/api";
-import { ChevronRight, MoreVertical, Search, Settings as SettingsIcon, UserRound } from "lucide-react";
+import {
+  ChevronRight,
+  Pencil,
+  Search,
+  Settings as SettingsIcon,
+  Trash2,
+  UserCheck,
+  UserMinus,
+  UserRound,
+} from "lucide-react";
+import { RowMenu, RowMenuDivider, RowMenuItem } from "@/components/RowMenu";
+import { useDepartments } from "@/lib/useDepartments";
 
 // Roles & Access is the only built Settings section. Unimplemented sections used to be listed here
 // as "Coming soon" placeholders — that's been removed. The "coming soon" hint now lives in the
@@ -185,6 +196,17 @@ function RolesAndAccess() {
             setError(err instanceof api.ApiError ? err.message : "Unable to update the user.");
           }
         }}
+        onDeleteUser={async (user) => {
+          if (!confirm(`Permanently delete ${user.fullName}? This removes the account entirely and can't be undone.`)) {
+            return;
+          }
+          try {
+            await api.deleteUserPermanently(user.id);
+            refresh();
+          } catch (err) {
+            setError(err instanceof api.ApiError ? err.message : "Unable to delete the user.");
+          }
+        }}
       />
 
       {roleDrawer && (
@@ -295,6 +317,7 @@ function AccountsSection({
   onRoleFilterChange,
   onEditUser,
   onToggleActive,
+  onDeleteUser,
 }: {
   roles: RoleResponse[];
   users: UserResponse[];
@@ -302,16 +325,9 @@ function AccountsSection({
   onRoleFilterChange: (filter: number | "all") => void;
   onEditUser: (user: UserResponse) => void;
   onToggleActive: (user: UserResponse) => void;
+  onDeleteUser: (user: UserResponse) => void;
 }) {
   const [search, setSearch] = useState("");
-  const [openMenuId, setOpenMenuId] = useState<number | null>(null);
-
-  useEffect(() => {
-    if (openMenuId === null) return;
-    const close = () => setOpenMenuId(null);
-    document.addEventListener("click", close);
-    return () => document.removeEventListener("click", close);
-  }, [openMenuId]);
 
   const filtered = users.filter((user) => {
     if (roleFilter !== "all" && user.role.id !== roleFilter) return false;
@@ -391,35 +407,42 @@ function AccountsSection({
                 <td className="px-4 py-2">
                   <StatusPill active={user.isActive} />
                 </td>
-                <td className="relative px-4 py-2 text-right">
-                  <button
-                    onClick={() => setOpenMenuId(openMenuId === user.id ? null : user.id)}
-                    className="rounded-md p-1 text-gray-400 transition-all duration-150 hover:bg-gray-100 hover:text-gray-600 active:scale-90"
-                  >
-                    <MoreVertical size={16} />
-                  </button>
-                  {openMenuId === user.id && (
-                    <div className="animate-fade-in absolute right-4 top-9 z-10 w-36 rounded-lg border border-gray-200 bg-white py-1 text-left shadow-lg">
-                      <button
-                        onClick={() => {
-                          setOpenMenuId(null);
-                          onEditUser(user);
-                        }}
-                        className="block w-full px-3 py-1.5 text-left text-sm text-gray-700 transition-colors duration-150 hover:bg-gray-50"
-                      >
-                        Edit
-                      </button>
-                      <button
-                        onClick={() => {
-                          setOpenMenuId(null);
-                          onToggleActive(user);
-                        }}
-                        className="block w-full px-3 py-1.5 text-left text-sm text-gray-700 transition-colors duration-150 hover:bg-gray-50"
-                      >
-                        {user.isActive ? "Disable" : "Enable"}
-                      </button>
-                    </div>
-                  )}
+                <td className="px-4 py-2 text-right">
+                  <div className="inline-flex">
+                    <RowMenu align="right" buttonLabel={`Actions for ${user.fullName}`}>
+                      {(close) => (
+                        <>
+                          <RowMenuItem
+                            icon={Pencil}
+                            label="Edit"
+                            onClick={() => {
+                              close();
+                              onEditUser(user);
+                            }}
+                          />
+                          <RowMenuItem
+                            icon={user.isActive ? UserMinus : UserCheck}
+                            label={user.isActive ? "Remove Access" : "Restore Access"}
+                            tone={user.isActive ? "warning" : "default"}
+                            onClick={() => {
+                              close();
+                              onToggleActive(user);
+                            }}
+                          />
+                          <RowMenuDivider />
+                          <RowMenuItem
+                            icon={Trash2}
+                            label="Delete permanently"
+                            tone="danger"
+                            onClick={() => {
+                              close();
+                              onDeleteUser(user);
+                            }}
+                          />
+                        </>
+                      )}
+                    </RowMenu>
+                  </div>
                 </td>
               </tr>
             ))}
@@ -552,6 +575,7 @@ function RoleDrawer({
                     </span>
                     {implemented && (
                       <button
+                        type="button"
                         onClick={() => toggleModule(mod)}
                         className="text-xs font-medium text-brand-accent transition-opacity duration-150 hover:underline hover:opacity-80"
                       >
@@ -608,6 +632,8 @@ function UserDrawer({
   const [roleId, setRoleId] = useState<number | "">(
     existing?.role.id ?? defaultRoleId ?? roles[0]?.id ?? ""
   );
+  const { departments } = useDepartments();
+  const [departmentId, setDepartmentId] = useState<number | "">(existing?.departmentId ?? "");
   const [isActive, setIsActive] = useState(existing?.isActive ?? true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -625,6 +651,7 @@ function UserDrawer({
           fullName: fullName.trim(),
           phoneNumber: phoneNumber.trim() || undefined,
           roleId: roleId as number,
+          departmentId: departmentId === "" ? null : (departmentId as number),
           isActive,
         });
       } else {
@@ -634,6 +661,7 @@ function UserDrawer({
           fullName: fullName.trim(),
           phoneNumber: phoneNumber.trim() || undefined,
           roleId: roleId as number,
+          departmentId: departmentId === "" ? null : (departmentId as number),
         });
       }
       onSaved();
@@ -673,6 +701,19 @@ function UserDrawer({
 
         <DrawerField label="Phone (optional)">
           <input value={phoneNumber} onChange={(e) => setPhoneNumber(e.target.value)} className="input" />
+        </DrawerField>
+
+        {/* Department is the org team (Civil, Electrical…) — separate from Role, which is permissions. */}
+        <DrawerField label="Department">
+          <Select
+            value={departmentId === "" ? "" : String(departmentId)}
+            onChange={(v) => setDepartmentId(v === "" ? "" : Number(v))}
+            placeholder="No department"
+            options={[
+              { value: "", label: "No department" },
+              ...departments.map((d) => ({ value: String(d.id), label: d.name })),
+            ]}
+          />
         </DrawerField>
 
         <DrawerField label="Role" required>

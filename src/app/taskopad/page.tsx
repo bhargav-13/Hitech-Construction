@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   Area,
   AreaChart,
@@ -26,7 +27,7 @@ import { useUsers } from "@/lib/useUsers";
 import { useProjects } from "@/lib/useProjects";
 import { useProjectScope } from "@/lib/projectScope";
 import { useTaskStore } from "@/lib/taskStore";
-import { PRIORITY_STYLE, formatTaskDate, isDueToday, isOverdue, sameDay } from "@/lib/taskTypes";
+import { PRIORITY_STYLE, formatTaskDate, isDueToday, isOverdue, toIso } from "@/lib/taskTypes";
 import type { Task } from "@/lib/taskTypes";
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -47,6 +48,7 @@ export default function TaskopadDashboardPage() {
   const [range, setRange] = useState<"Monthly" | "Weekly">("Monthly");
 
   // "My Task" is the signed-in backend user.
+  const router = useRouter();
   const meId = authUser ? String(authUser.id) : "";
   const live = useMemo(
     () => allTasks.filter((t) => !t.isDraft && (projectScope === "all" || t.projectId === projectScope)),
@@ -61,6 +63,9 @@ export default function TaskopadDashboardPage() {
   const assignedToMe = live.filter((t) => t.assigneeId === meId).length;
   const dueToday = live.filter((t) => isDueToday(t)).length;
   const pastDue = live.filter((t) => isOverdue(t)).length;
+  // Drill-down targets for the score cards.
+  const todayIso = toIso(new Date());
+  const yesterdayIso = toIso(new Date(Date.now() - 86_400_000));
 
   const priorityData = (["Low", "Medium", "High"] as const).map((p) => ({
     name: p,
@@ -105,15 +110,34 @@ export default function TaskopadDashboardPage() {
       <div className="animate-fade-in space-y-5">
         {/* KPI strip */}
         <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-          <Kpi label="Total Task" value={totalTask} icon={ListChecks} tint="bg-cyan-50 text-brand-accent" />
-          <Kpi label="Assigned to me" value={assignedToMe} icon={UserRound} tint="bg-green-50 text-green-600" />
-          <Kpi label="Due today" value={dueToday} icon={AlarmClock} tint="bg-amber-50 text-amber-600" />
+          <Kpi
+            label="Total Task"
+            value={totalTask}
+            icon={ListChecks}
+            tint="bg-cyan-50 text-brand-accent"
+            drill={{}}
+          />
+          <Kpi
+            label="Assigned to me"
+            value={assignedToMe}
+            icon={UserRound}
+            tint="bg-green-50 text-green-600"
+            drill={meId ? { assignee: meId } : {}}
+          />
+          <Kpi
+            label="Due today"
+            value={dueToday}
+            icon={AlarmClock}
+            tint="bg-amber-50 text-amber-600"
+            drill={{ dueFrom: todayIso, dueTo: todayIso }}
+          />
           <Kpi
             label="Past due tasks"
             value={pastDue}
             icon={CalendarClock}
             tint="bg-rose-50 text-rose-600"
             valueClass={pastDue > 0 ? "text-rose-600" : undefined}
+            drill={{ dueTo: yesterdayIso }}
           />
         </div>
 
@@ -180,7 +204,12 @@ export default function TaskopadDashboardPage() {
                     strokeWidth={2}
                   >
                     {priorityData.map((p) => (
-                      <Cell key={p.name} fill={PRIORITY_STYLE[p.name].hex} />
+                      <Cell
+                        key={p.name}
+                        fill={PRIORITY_STYLE[p.name].hex}
+                        className="cursor-pointer outline-none"
+                        onClick={() => router.push(`/taskopad/tasks?priority=${encodeURIComponent(p.name)}`)}
+                      />
                     ))}
                   </Pie>
                   <Tooltip contentStyle={{ borderRadius: 8, border: "1px solid #eee", fontSize: 12 }} />
@@ -341,7 +370,7 @@ function buildStats(tasks: Task[], range: "Monthly" | "Weekly") {
   if (range === "Weekly") {
     return Array.from({ length: 7 }, (_, i) => {
       const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - (6 - i));
-      const due = tasks.filter((t) => sameDay(new Date(t.dueDate), d));
+      const due = tasks.filter((t) => t.dueDate === toIso(d));
       return {
         label: ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][d.getDay()],
         Completed: due.filter((t) => t.status === "Completed").length,
@@ -362,21 +391,27 @@ function buildStats(tasks: Task[], range: "Monthly" | "Weekly") {
   });
 }
 
+/**
+ * Score card. When `drill` is set the whole card becomes a link into the task list with those
+ * filters pre-applied, so the client can click a number and see exactly which tasks it counts.
+ */
 function Kpi({
   label,
   value,
   icon: Icon,
   tint,
   valueClass = "text-gray-800",
+  drill,
 }: {
   label: string;
   value: number;
   icon: React.ComponentType<{ size?: number }>;
   tint: string;
   valueClass?: string;
+  drill?: Record<string, string>;
 }) {
-  return (
-    <div className="flex items-center justify-between rounded-xl border border-gray-200 bg-white p-4 transition-shadow duration-150 hover:shadow-md">
+  const body = (
+    <>
       <div>
         <div className="text-xs text-gray-500">{label}</div>
         <div className={`mt-1 text-2xl font-semibold ${valueClass}`}>{value}</div>
@@ -384,6 +419,20 @@ function Kpi({
       <div className={`flex h-11 w-11 items-center justify-center rounded-full ${tint}`}>
         <Icon size={20} />
       </div>
-    </div>
+    </>
+  );
+  const base =
+    "flex items-center justify-between rounded-xl border border-gray-200 bg-white p-4 transition-all duration-150 hover:shadow-md";
+
+  if (!drill) return <div className={base}>{body}</div>;
+
+  return (
+    <Link
+      href={`/taskopad/tasks?${new URLSearchParams(drill).toString()}`}
+      title={`View ${label.toLowerCase()}`}
+      className={`${base} cursor-pointer hover:-translate-y-0.5 hover:border-brand-accent active:scale-[0.99]`}
+    >
+      {body}
+    </Link>
   );
 }

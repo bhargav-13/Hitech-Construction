@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { ChevronLeft, ChevronRight, MapPin } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
+import { inr } from "@/lib/format";
 import { SimpleTable } from "@/components/SimpleTable";
 
 const TABS = ["People", "Attendance", "Team Leaves", "My Leaves", "Holidays"] as const;
@@ -185,5 +186,5 @@ export default function PayrollPage() {
 }
 
 function formatWage(n: number) {
-  return `₹${n.toLocaleString("en-IN")}`;
+  return inr(n);
 }

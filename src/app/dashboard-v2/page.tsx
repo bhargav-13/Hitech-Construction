@@ -4,7 +4,7 @@ import { useMemo } from "react";
 import Link from "next/link";
 import { AppShell } from "@/components/AppShell";
 import { useAppStore } from "@/lib/store";
-import { formatLakh } from "@/lib/format";
+import { formatLakh, inrAxis } from "@/lib/format";
 import {
   Area,
   AreaChart,
@@ -202,7 +202,7 @@ export default function DashboardV2Page() {
                 </defs>
                 <CartesianGrid vertical={false} stroke="#eef2f1" />
                 <XAxis dataKey="month" tick={{ fontSize: 12, fill: "#64748b" }} axisLine={false} tickLine={false} />
-                <YAxis tick={{ fontSize: 11, fill: "#94a3b8" }} axisLine={false} tickLine={false} tickFormatter={(v) => (v === 0 ? "0" : formatLakh(v))} width={48} />
+                <YAxis tick={{ fontSize: 11, fill: "#94a3b8" }} axisLine={false} tickLine={false} tickFormatter={(v) => (v === 0 ? "0" : inrAxis(v))} width={48} />
                 <Tooltip
                   formatter={(v) => [`₹${formatLakh(Number(v))}`, "Expense"]}
                   contentStyle={{ borderRadius: 10, border: "1px solid #e2e8f0", fontSize: 12 }}

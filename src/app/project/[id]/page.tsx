@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
@@ -28,6 +28,7 @@ import * as api from "@/lib/api";
 import type { ProjectResponse } from "@/lib/api";
 import { useAppStore } from "@/lib/store";
 import { formatRupee, projectInitials } from "@/lib/projectHelpers";
+import { inr } from "@/lib/format";
 import { txnStyle } from "@/lib/txnDisplay";
 import type { TxnType } from "@/lib/types";
 import {
@@ -42,7 +43,6 @@ export const runtime = "edge";
 const TABS = [
   "Dashboard",
   "Design",
-  "BOQ",
   "Party",
   "Transaction",
   "To Do",
@@ -80,14 +80,6 @@ const HEALTH_CHIP: Record<ProjectResponse["health"], string> = {
   HEALTHY: "bg-emerald-50 text-emerald-700 ring-emerald-600/20",
   AT_RISK: "bg-rose-50 text-rose-700 ring-rose-600/20",
 };
-
-function inr(value: number): string {
-  if (!value) return "₹0";
-  if (value >= 1e7) return `₹${(value / 1e7).toFixed(2)} Cr`;
-  if (value >= 1e5) return `₹${(value / 1e5).toFixed(2)} L`;
-  if (value >= 1e3) return `₹${(value / 1e3).toFixed(0)}K`;
-  return `₹${value}`;
-}
 
 // Adapt the real backend project to the shape the workspace body displays.
 function adapt(p: ProjectResponse) {
@@ -272,8 +264,6 @@ export default function ProjectDetailPage() {
         </div>
       )}
 
-      {tab === "BOQ" && <BoqTab projectName={project.name} />}
-
       {tab === "Transaction" && (
         <div className="space-y-4">
           <div className="flex items-center justify-between">
@@ -328,7 +318,12 @@ export default function ProjectDetailPage() {
       )}
 
       {/* Project-scoped Taskopad workspace — same surface as the Taskopad module, filtered to this project. */}
-      {tab === "Task" && <TaskWorkspace projectId={params.id} />}
+      {tab === "Task" && (
+        // TaskWorkspace reads query params, which needs a boundary for the production build.
+        <Suspense fallback={null}>
+          <TaskWorkspace projectId={params.id} />
+        </Suspense>
+      )}
 
       {tab === "Members" && <ProjectMembers projectId={params.id} />}
 
@@ -361,30 +356,6 @@ export default function ProjectDetailPage() {
       {txnType && <TransactionFormModal type={txnType} fixedProjectId={project.id} onClose={() => setTxnType(null)} />}
     </AppShell>
   );
-
-  function BoqTab({ projectName }: { projectName: string }) {
-    return (
-      <div className="space-y-3">
-        <div className="flex items-center justify-between">
-          <h3 className="text-sm font-semibold text-gray-700">Bill of Quantities</h3>
-          <button className="rounded-lg bg-brand-accent px-4 py-2 text-sm font-medium text-white hover:opacity-90">+ BOQ</button>
-        </div>
-        <SimpleTable
-          columns={[
-            { key: "no", label: "S.No" },
-            { key: "client", label: "Client Name" },
-            { key: "title", label: "BOQ Title" },
-            { key: "milestone", label: "Milestone" },
-            { key: "progress", label: "Physical Progress" },
-            { key: "value", label: "BOQ Value" },
-          ]}
-          rows={[
-            { no: "#Sales-3", client: project?.category || "Client", title: `${projectName} - Works`, milestone: "2 / 8", progress: "18%", value: formatRupee(11048504) },
-          ]}
-        />
-      </div>
-    );
-  }
 }
 
 function ComingSoonPanel({ tab }: { tab: string }) {

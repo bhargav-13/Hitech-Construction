@@ -240,6 +240,7 @@ interface AppState {
   }) => SaleInvoice;
   addTodo: (input: Omit<TodoTask, "id">) => TodoTask;
   updateTodo: (id: string, updates: Partial<TodoTask>) => void;
+  deleteTodo: (id: string) => void;
   addPurchaseEntry: (input: {
     partyId: string;
     projectId: string;
@@ -692,6 +693,9 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({
       todos: get().todos.map((t) => (t.id === id ? { ...t, ...updates } : t)),
     });
+  },
+  deleteTodo: (id) => {
+    set({ todos: get().todos.filter((t) => t.id !== id) });
   },
   addTransaction: (input) => {
     const meta = TXN_TYPE_META[input.type];

@@ -56,7 +56,23 @@ body {
 
 @layer components {
   .input {
-    @apply w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 outline-none transition-colors duration-150 focus:border-cyan-500;
+    @apply w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 outline-none transition-all duration-150 focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/15;
+  }
+
+  /* Native date inputs: tint the calendar picker to the brand accent and give it a hover cue,
+     so the date fields feel like part of the design instead of raw browser chrome. */
+  input[type="date"].input::-webkit-calendar-picker-indicator {
+    cursor: pointer;
+    opacity: 0.55;
+    padding: 2px;
+    border-radius: 4px;
+    transition:
+      opacity 0.15s ease,
+      background-color 0.15s ease;
+  }
+  input[type="date"].input::-webkit-calendar-picker-indicator:hover {
+    opacity: 1;
+    background-color: rgb(8 145 178 / 0.1);
   }
 
   /* Every "card" surface in the app shares this exact class combination
@@ -110,6 +126,50 @@ body {
   }
 }
 
+/* Exit counterparts — drawers slide back out and the scrim fades, so closing feels as
+   deliberate as opening instead of the panel just vanishing. */
+@keyframes slide-out-right {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(100%);
+  }
+}
+
+@keyframes overlay-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+/* Centred dialogs settle back down instead of blinking out. */
+@keyframes fade-out-scale {
+  from {
+    opacity: 1;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: scale(0.97);
+  }
+}
+
+/* Dropdown / popover menus: a small spring-y pop from the anchor corner. */
+@keyframes menu-pop {
+  from {
+    opacity: 0;
+    transform: scale(0.94) translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
 @layer utilities {
   .animate-fade-in {
     animation: fade-in 0.18s ease-out;
@@ -122,5 +182,18 @@ body {
   }
   .animate-overlay-in {
     animation: overlay-in 0.18s ease-out;
+  }
+  .animate-menu-pop {
+    animation: menu-pop 0.16s cubic-bezier(0.32, 0.72, 0, 1);
+  }
+  /* `forwards` holds the final frame so the panel stays off-screen until it unmounts. */
+  .animate-slide-out-right {
+    animation: slide-out-right 0.22s cubic-bezier(0.4, 0, 1, 1) forwards;
+  }
+  .animate-overlay-out {
+    animation: overlay-out 0.22s ease-in forwards;
+  }
+  .animate-fade-out-scale {
+    animation: fade-out-scale 0.18s ease-in forwards;
   }
 }

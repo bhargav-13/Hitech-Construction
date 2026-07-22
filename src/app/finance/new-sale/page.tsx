@@ -8,6 +8,7 @@ import { AppShell } from "@/components/AppShell";
 import { LineItemsEditor, type LineDraft } from "@/components/LineItemsEditor";
 import { useAppStore } from "@/lib/store";
 import { formatRupee } from "@/lib/projectHelpers";
+import { inrNumber } from "@/lib/format";
 
 function amountInWords(value: number): string {
   if (value <= 0) return "Zero Rupees only";
@@ -169,7 +170,7 @@ export default function NewSaleInvoicePage() {
               <span className="mb-1 block text-xs text-gray-400">Invoice Amount*</span>
               <div className="flex items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-700">
                 <IndianRupee size={13} className="text-gray-400" />
-                {totals.total.toLocaleString("en-IN")}
+                {inrNumber(totals.total)}
               </div>
             </label>
             <label className="block">
@@ -237,9 +238,9 @@ export default function NewSaleInvoicePage() {
                       <td className="px-2 py-1.5 text-gray-500">{i + 1}</td>
                       <td className="px-2 py-1.5 text-gray-700">{item.name}</td>
                       <td className="px-2 py-1.5 text-right text-gray-700">{l.qty}</td>
-                      <td className="px-2 py-1.5 text-right text-gray-700">₹ {item.rate.toLocaleString("en-IN")}</td>
+                      <td className="px-2 py-1.5 text-right text-gray-700">₹ {inrNumber(item.rate)}</td>
                       <td className="px-2 py-1.5 text-right text-gray-700">
-                        ₹ {(item.rate * l.qty).toLocaleString("en-IN")}
+                        ₹ {inrNumber(item.rate * l.qty)}
                       </td>
                     </tr>
                   );
@@ -252,7 +253,7 @@ export default function NewSaleInvoicePage() {
                   </td>
                   <td className="px-2 py-1.5" />
                   <td className="px-2 py-1.5 text-right text-gray-700">
-                    ₹ {totals.subtotal.toLocaleString("en-IN")}
+                    ₹ {inrNumber(totals.subtotal)}
                   </td>
                 </tr>
               </tbody>
@@ -269,19 +270,19 @@ export default function NewSaleInvoicePage() {
               <div className="w-40 text-xs">
                 <div className="flex justify-between px-2 py-1 text-gray-600">
                   <span>Sub Total</span>
-                  <span>₹ {totals.subtotal.toLocaleString("en-IN")}</span>
+                  <span>₹ {inrNumber(totals.subtotal)}</span>
                 </div>
                 <div className="flex justify-between px-2 py-1 text-gray-600">
                   <span>GST</span>
-                  <span>₹ {totals.gst.toLocaleString("en-IN")}</span>
+                  <span>₹ {inrNumber(totals.gst)}</span>
                 </div>
                 <div className="flex justify-between bg-cyan-400 px-2 py-1 font-semibold text-white">
                   <span>Total</span>
-                  <span>₹ {totals.total.toLocaleString("en-IN")}</span>
+                  <span>₹ {inrNumber(totals.total)}</span>
                 </div>
                 <div className="flex justify-between px-2 py-1 font-medium text-gray-700">
                   <span>Balance Due</span>
-                  <span>₹ {totals.balance.toLocaleString("en-IN")}</span>
+                  <span>₹ {inrNumber(totals.balance)}</span>
                 </div>
               </div>
             </div>

@@ -41,6 +41,7 @@ export interface TaskAttachment {
   name: string;
   size: string;
   at: string;
+  url: string | null;
 }
 
 export interface TaskActivity {
@@ -65,6 +66,13 @@ export interface Task {
   dueDate: string; // ISO yyyy-mm-dd
   createdAt: string;
   isDraft: boolean;
+  pinned: boolean;
+  reminderAt: string | null;
+  recurrenceRule: string;
+  recurrenceInterval: number;
+  recurrenceUntil: string | null;
+  seriesId: string | null;
+  departmentId: string | null;
   subtasks: SubTask[];
   comments: TaskComment[];
   attachments: TaskAttachment[];
@@ -123,6 +131,13 @@ export function taskFromApi(t: ApiTask): Task {
     dueDate: toDateOnly(t.dueDate),
     createdAt: toDateOnly(t.createdAt),
     isDraft: t.draft,
+    pinned: t.pinned ?? false,
+    reminderAt: t.reminderAt ?? null,
+    recurrenceRule: t.recurrenceRule ?? "NONE",
+    recurrenceInterval: t.recurrenceInterval ?? 1,
+    recurrenceUntil: t.recurrenceUntil ?? null,
+    seriesId: t.seriesId != null ? String(t.seriesId) : null,
+    departmentId: t.departmentId != null ? String(t.departmentId) : null,
     subtasks: (t.subtasks ?? []).map((s) => ({
       id: String(s.id),
       title: s.title,
@@ -140,6 +155,7 @@ export function taskFromApi(t: ApiTask): Task {
       name: a.name,
       size: a.sizeLabel ?? "",
       at: a.at,
+      url: a.dataUrl ?? null,
     })),
     activity: (t.activity ?? []).map((a) => ({
       id: String(a.id),
@@ -150,13 +166,26 @@ export function taskFromApi(t: ApiTask): Task {
   };
 }
 
+// Compares plain "yyyy-MM-dd" strings directly instead of parsing into Date objects. Parsing a
+// date-only string with `new Date(...)` reads it as UTC midnight, which can silently shift the
+// calendar day (and therefore the overdue/due-today flags) depending on the browser's timezone —
+// this is why some tasks weren't showing as overdue for the client.
 export function isOverdue(task: Task, today = new Date()): boolean {
   if (task.status === "Completed") return false;
-  return new Date(task.dueDate) < startOfDay(today);
+  if (!task.dueDate) return false;
+  return task.dueDate < toDateKey(today);
 }
 
 export function isDueToday(task: Task, today = new Date()): boolean {
-  return sameDay(new Date(task.dueDate), today);
+  if (!task.dueDate) return false;
+  return task.dueDate === toDateKey(today);
+}
+
+function toDateKey(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
 }
 
 export function startOfDay(d: Date): Date {
@@ -176,6 +205,18 @@ export function formatTaskDate(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
   return `${String(d.getDate()).padStart(2, "0")} ${MONTHS[d.getMonth()]} ${d.getFullYear()}`;
+}
+
+// Date + time — used in the task activity log so the client can see exactly when each event happened.
+export function formatTaskDateTime(iso: string): string {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  let h = d.getHours();
+  const ampm = h >= 12 ? "PM" : "AM";
+  h = h % 12 || 12;
+  const mins = String(d.getMinutes()).padStart(2, "0");
+  return `${String(d.getDate()).padStart(2, "0")} ${MONTHS[d.getMonth()]} ${d.getFullYear()}, ${h}:${mins} ${ampm}`;
 }
 
 export function toIso(d: Date): string {

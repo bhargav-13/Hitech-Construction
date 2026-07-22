@@ -19,6 +19,12 @@ export interface TaskInput {
   dueDate: string;
   subtasks: SubTask[];
   isDraft?: boolean;
+  pinned?: boolean;
+  reminderAt?: string | null;
+  recurrenceRule?: string;
+  recurrenceInterval?: number;
+  recurrenceUntil?: string | null;
+  departmentId?: string | null;
 }
 
 function toUpsert(input: TaskInput): tasksApi.TaskUpsertRequest {
@@ -33,6 +39,12 @@ function toUpsert(input: TaskInput): tasksApi.TaskUpsertRequest {
     progress: input.progress,
     dueDate: input.dueDate || null,
     draft: input.isDraft ?? false,
+    pinned: input.pinned,
+    reminderAt: input.reminderAt ?? null,
+    recurrenceRule: input.recurrenceRule,
+    recurrenceInterval: input.recurrenceInterval,
+    recurrenceUntil: input.recurrenceUntil ?? null,
+    departmentId: input.departmentId ? Number(input.departmentId) : undefined,
     followerIds: input.followerIds.map(Number),
     subtasks: input.subtasks.map((s) => ({
       title: s.title,
@@ -53,8 +65,19 @@ interface TaskState {
   /** Inline update from the list/kanban main view — status / priority / progress only (PATCH). */
   patchTask: (
     id: string,
-    patch: { status?: TaskStatus; priority?: TaskPriority; progress?: number }
+    patch: {
+      status?: TaskStatus;
+      priority?: TaskPriority;
+      progress?: number;
+      pinned?: boolean;
+      reminderAt?: string | null;
+    }
   ) => Promise<void>;
+  bulkPatch: (
+    ids: string[],
+    patch: { status?: TaskStatus; priority?: TaskPriority; pinned?: boolean; assigneeId?: string }
+  ) => Promise<void>;
+  bulkRemove: (ids: string[]) => Promise<void>;
   removeTask: (id: string) => Promise<void>;
   toggleSubtask: (taskId: string, subtaskId: string) => Promise<void>;
   addComment: (taskId: string, text: string) => Promise<void>;
@@ -107,9 +130,28 @@ export const useTaskStore = create<TaskState>((set, get) => ({
         status: patch.status ? statusToApi(patch.status) : undefined,
         priority: patch.priority ? priorityToApi(patch.priority) : undefined,
         progress: patch.progress,
+        pinned: patch.pinned,
+        reminderAt: patch.reminderAt,
       })
     );
     set({ tasks: upsertLocal(get().tasks, updated) });
+  },
+
+  bulkPatch: async (ids, patch) => {
+    const updated = await tasksApi.bulkPatchTasks({
+      taskIds: ids.map(Number),
+      status: patch.status ? statusToApi(patch.status) : undefined,
+      priority: patch.priority ? priorityToApi(patch.priority) : undefined,
+      pinned: patch.pinned,
+      assigneeId: patch.assigneeId ? Number(patch.assigneeId) : undefined,
+    });
+    set({ tasks: updated.map(taskFromApi).reduce((acc, t) => upsertLocal(acc, t), get().tasks) });
+  },
+
+  bulkRemove: async (ids) => {
+    await tasksApi.bulkDeleteTasks(ids.map(Number));
+    const gone = new Set(ids);
+    set({ tasks: get().tasks.filter((t) => !gone.has(t.id)) });
   },
 
   removeTask: async (id) => {

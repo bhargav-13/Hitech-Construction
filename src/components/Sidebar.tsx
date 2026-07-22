@@ -1,6 +1,5 @@
 "use client";
 
-import { useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
@@ -21,6 +20,7 @@ import {
   CheckSquare,
   ListChecks,
   ScrollText,
+  Receipt,
   MessageCircle,
   PanelLeftClose,
   PanelLeftOpen,
@@ -29,6 +29,7 @@ import {
 import { NAV_ITEMS, NAV_BREAK_AFTER, NAV_MODULE } from "@/lib/nav";
 import { useAppStore } from "@/lib/store";
 import { useAuthStore } from "@/lib/authStore";
+import { useUiStore } from "@/lib/uiStore";
 import { projectAvatarColor, projectInitials } from "@/lib/projectHelpers";
 
 const ICONS: Record<string, React.ComponentType<{ size?: number; className?: string }>> = {
@@ -48,12 +49,15 @@ const ICONS: Record<string, React.ComponentType<{ size?: number; className?: str
   Services: Layers,
   Taskopad: ListChecks,
   Audit: ScrollText,
+  Vyapar: Receipt,
 };
 
 export function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
-  const [collapsed, setCollapsed] = useState(false);
+  // Persisted so collapsing survives navigation — AppShell (and this sidebar) remount per route.
+  const collapsed = useUiStore((s) => s.sidebarCollapsed);
+  const toggleSidebar = useUiStore((s) => s.toggleSidebar);
   const currentUserId = useAppStore((s) => s.currentUserId);
   const users = useAppStore((s) => s.users);
   const logout = useAppStore((s) => s.logout);
@@ -107,7 +111,7 @@ export function Sidebar() {
         )}
         <button
           type="button"
-          onClick={() => setCollapsed((c) => !c)}
+          onClick={toggleSidebar}
           className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md border border-sidebar-border text-sidebar-text transition-all duration-150 hover:bg-white/10 hover:text-white active:scale-90"
           aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
         >

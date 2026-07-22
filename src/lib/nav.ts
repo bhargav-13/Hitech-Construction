@@ -7,6 +7,7 @@ export const NAV_ITEMS: NavItem[] = [
   { label: "Dashboard", href: "/" },
   { label: "Project", href: "/project" },
   { label: "Taskopad", href: "/taskopad" },
+  { label: "Vyapar", href: "/vyapar" },
   { label: "Audit", href: "/audit" },
   { label: "Setting", href: "/settings" },
   // --- Not implemented yet ---
@@ -33,6 +34,7 @@ export const NAV_MODULE: Record<string, string> = {
   "/report": "REPORT",
   "/project": "PROJECT",
   "/taskopad": "TASKOPAD",
+  "/vyapar": "VYAPAR",
   "/audit": "AUDIT",
   "/team-schedule": "TEAM_SCHEDULE",
   "/finance": "FINANCE",

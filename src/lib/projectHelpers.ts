@@ -1,3 +1,5 @@
+import { inr } from "./format";
+
 const AVATAR_COLORS = [
   "bg-indigo-600",
   "bg-violet-600",
@@ -24,6 +26,7 @@ export function projectAvatarColor(id: string): string {
   return AVATAR_COLORS[hash % AVATAR_COLORS.length];
 }
 
+/** Kept as the familiar name used across the app; delegates to the canonical formatter. */
 export function formatRupee(value: number): string {
-  return `₹${value.toLocaleString("en-IN")}`;
+  return inr(value);
 }

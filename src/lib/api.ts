@@ -69,6 +69,8 @@ export interface UserResponse {
   phoneNumber: string | null;
   isActive: boolean;
   role: RoleSummary;
+  departmentId: number | null;
+  departmentName: string | null;
 }
 
 export interface UserPageResponse {
@@ -85,12 +87,14 @@ export interface UserCreateRequest {
   fullName: string;
   phoneNumber?: string;
   roleId: number;
+  departmentId?: number | null;
 }
 
 export interface UserUpdateRequest {
   fullName?: string;
   phoneNumber?: string;
   roleId?: number;
+  departmentId?: number | null;
   isActive?: boolean;
 }
 
@@ -250,6 +254,8 @@ export interface TeamMemberResponse {
   fullName: string;
   roleName: string;
   active: boolean;
+  departmentId: number | null;
+  departmentName: string | null;
 }
 
 export function getTeam() {
@@ -271,6 +277,11 @@ export function updateUser(id: number, body: UserUpdateRequest) {
 
 export function deactivateUser(id: number) {
   return request<void>(`/api/v1/users/${id}`, { method: "DELETE" });
+}
+
+// Hard delete — permanently removes the user account (backend guards against self/system accounts).
+export function deleteUserPermanently(id: number) {
+  return request<void>(`/api/v1/users/${id}/permanent`, { method: "DELETE" });
 }
 
 export function updateUserPassword(id: number, newPassword: string) {

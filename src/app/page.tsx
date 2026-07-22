@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { AppShell } from "@/components/AppShell";
 import { BubbleCluster } from "@/components/BubbleCluster";
 import { ProjectTable } from "@/components/ProjectTable";
@@ -9,23 +10,20 @@ import { Select } from "@/components/Select";
 import { useAppStore } from "@/lib/store";
 import { useProjectScope } from "@/lib/projectScope";
 import * as api from "@/lib/api";
-import { formatLakh } from "@/lib/format";
+import * as vyapar from "@/lib/vyaparApi";
+import type { Invoice as VyaparInvoice, Payment as VyaparPayment } from "@/lib/vyaparApi";
+import { formatLakh, inrAxis } from "@/lib/format";
 import type { Project, ProjectHealth, ProjectStatus } from "@/lib/types";
-import {
-  ArrowUpDown,
-  BarChart3,
-  Calendar,
-  FlaskConical,
-  Maximize2,
-  MoreVertical,
-  RefreshCw,
-  Upload,
-} from "lucide-react";
+
+/** Short month names for bucketing financials by month. */
+const MONTH_LABELS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+import { BarChart3, FlaskConical, RefreshCw, Upload } from "lucide-react";
 import {
   Bar,
   BarChart,
   CartesianGrid,
   Cell,
+  Legend,
   Pie,
   PieChart,
   ResponsiveContainer,
@@ -79,11 +77,38 @@ function toProject(p: api.ProjectResponse): Project {
 }
 
 export default function DashboardPage() {
-  // Sample/mock data — no backend yet for finance, attendance or materials.
+  // Sample/mock data — no backend yet for attendance or materials.
   const attendance = useAppStore((s) => s.attendance);
   const materials = useAppStore((s) => s.materials);
-  const financials = useAppStore((s) => s.financials);
   const [tab, setTab] = useState<"Operational" | "Financial">("Operational");
+
+  // Financials are real: they come from the Vyapar books (sales, expenses, payments).
+  const [finInvoices, setFinInvoices] = useState<VyaparInvoice[]>([]);
+  const [finPayments, setFinPayments] = useState<VyaparPayment[]>([]);
+  const [finLoading, setFinLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const [inv, pay] = await Promise.all([vyapar.getInvoices(), vyapar.getPayments()]);
+        if (!cancelled) {
+          setFinInvoices(inv);
+          setFinPayments(pay);
+        }
+      } catch {
+        if (!cancelled) {
+          setFinInvoices([]);
+          setFinPayments([]);
+        }
+      } finally {
+        if (!cancelled) setFinLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Projects ARE real (project-service) and honour the global project scope.
   const scopeId = useProjectScope((s) => s.projectId);
@@ -128,8 +153,74 @@ export default function DashboardPage() {
 
   const totalHealth = healthData.reduce((sum, d) => sum + d.value, 0);
 
-  const marginData = financials.map((f) => ({ month: f.month, margin: -f.expense }));
+  /**
+   * Sales, expense and margin bucketed by month, straight from the Vyapar books.
+   * Expense = purchase bills + recorded expenses; margin = sales - expense. All figures exclude
+   * GST, which is collected on the government's behalf rather than earned or spent.
+   */
+  const financials = useMemo(() => {
+    const byMonth = new Map<string, { sale: number; expense: number }>();
+    const bump = (date: string | null, key: "sale" | "expense", amount: number) => {
+      if (!date || date.length < 7) return;
+      const m = date.slice(0, 7);
+      const cur = byMonth.get(m) ?? { sale: 0, expense: 0 };
+      cur[key] += amount;
+      byMonth.set(m, cur);
+    };
+    for (const i of finInvoices) {
+      const net = i.total - i.taxAmount;
+      if (i.docType === "SALE") bump(i.invoiceDate, "sale", net);
+      else if (i.docType === "SALE_RETURN") bump(i.invoiceDate, "sale", -net);
+      else if (i.docType === "PURCHASE" || i.docType === "EXPENSE") bump(i.invoiceDate, "expense", net);
+      else if (i.docType === "PURCHASE_RETURN") bump(i.invoiceDate, "expense", -net);
+    }
+    return [...byMonth.entries()]
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([m, v]) => ({
+        month: `${MONTH_LABELS[Number(m.slice(5, 7)) - 1] ?? m.slice(5, 7)} ${m.slice(2, 4)}`,
+        sale: Math.round(v.sale),
+        expense: Math.round(v.expense),
+        margin: Math.round(v.sale - v.expense),
+      }));
+  }, [finInvoices]);
+
+  const totalSales = financials.reduce((sum, f) => sum + f.sale, 0);
   const totalExpense = financials.reduce((sum, f) => sum + f.expense, 0);
+  const totalMargin = totalSales - totalExpense;
+
+  /** Payment in/out by month, for the Payments card. */
+  const paymentSeries = useMemo(() => {
+    const byMonth = new Map<string, { in: number; out: number }>();
+    for (const p of finPayments) {
+      if (!p.paymentDate || p.paymentDate.length < 7) continue;
+      const m = p.paymentDate.slice(0, 7);
+      const cur = byMonth.get(m) ?? { in: 0, out: 0 };
+      cur[p.direction === "IN" ? "in" : "out"] += p.amount;
+      byMonth.set(m, cur);
+    }
+    return [...byMonth.entries()]
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([m, v]) => ({
+        month: `${MONTH_LABELS[Number(m.slice(5, 7)) - 1] ?? m.slice(5, 7)} ${m.slice(2, 4)}`,
+        In: Math.round(v.in),
+        Out: Math.round(v.out),
+      }));
+  }, [finPayments]);
+
+  /** Expense split by document type, for the Expense Type card. */
+  const expenseTypes = useMemo(() => {
+    let purchase = 0;
+    let expense = 0;
+    for (const i of finInvoices) {
+      const net = i.total - i.taxAmount;
+      if (i.docType === "PURCHASE") purchase += net;
+      else if (i.docType === "EXPENSE") expense += net;
+    }
+    return [
+      { name: "Purchases", value: Math.round(purchase) },
+      { name: "Expenses", value: Math.round(expense) },
+    ].filter((d) => d.value > 0);
+  }, [finInvoices]);
 
   return (
     <AppShell title="Dashboard">
@@ -156,9 +247,9 @@ export default function DashboardPage() {
       <div className="mb-4 flex items-start gap-2.5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm text-amber-800">
         <FlaskConical size={16} className="mt-0.5 shrink-0 text-amber-500" />
         <div>
-          <span className="font-medium">Project status, health and the summary table are live.</span>{" "}
-          Financials, attendance and materials below are <span className="font-medium">sample data</span> — those
-          modules aren&apos;t connected to the backend yet.
+          <span className="font-medium">Projects and financials are live</span> — financials come straight from the
+          Vyapar books. Attendance and materials below are still{" "}
+          <span className="font-medium">sample data</span>; those modules aren&apos;t connected yet.
         </div>
       </div>
 
@@ -181,125 +272,134 @@ export default function DashboardPage() {
 
         {tab === "Financial" ? (
           <div className="space-y-4 bg-gray-50 p-4">
-            <div className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50/60 px-3 py-2 text-xs text-amber-700">
-              <FlaskConical size={14} className="shrink-0 text-amber-500" />
-              This tab shows sample data — the Finance module isn&apos;t connected to the backend yet.
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <FilterSelect label="Project Name" />
-              <div>
-                <label className="mb-1 block text-xs text-gray-500">Txn Date:</label>
-                <div className="flex items-center gap-2 rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-700">
-                  <Calendar size={14} className="text-gray-400" />
-                  01 Jan 2026 to 31 Jul 2026
-                </div>
+            {finLoading ? (
+              <div className="flex h-48 items-center justify-center gap-2 rounded-xl border border-dashed border-gray-300 bg-white text-sm text-gray-400">
+                <Spinner size={16} className="text-brand-accent" /> Loading financials…
               </div>
-            </div>
+            ) : financials.length === 0 ? (
+              <div className="flex h-48 flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-gray-300 bg-white">
+                <BarChart3 size={28} className="text-gray-300" />
+                <span className="text-sm text-gray-500">No financial activity yet</span>
+                <Link href="/vyapar/sale?new=1" className="text-xs font-medium text-brand-accent hover:underline">
+                  Record your first sale in Vyapar
+                </Link>
+              </div>
+            ) : (
+              <>
+                <div className="grid grid-cols-3 gap-4">
+                  <div className="rounded-xl border border-gray-200 bg-white p-4">
+                    <h3 className="mb-2 text-sm font-semibold text-gray-700">Sales</h3>
+                    <div className="h-40">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart data={financials}>
+                          <XAxis dataKey="month" tick={{ fontSize: 10 }} angle={-25} textAnchor="end" height={40} />
+                          <YAxis tick={{ fontSize: 10 }} tickFormatter={(v) => (v === 0 ? "0" : inrAxis(v))} />
+                          <Tooltip formatter={(v) => formatLakh(Number(v))} />
+                          <Bar dataKey="sale" fill="#0ca30c" radius={[3, 3, 0, 0]} />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
 
-            <div className="grid grid-cols-3 gap-4">
-              <div className="rounded-xl border border-gray-200 bg-white p-4">
-                <div className="mb-2 flex items-center justify-between">
-                  <h3 className="text-sm font-semibold text-gray-700">Sales</h3>
-                  <div className="flex items-center gap-2 text-gray-400">
-                    <ArrowUpDown size={13} />
-                    <BarChart3 size={13} />
-                    <Maximize2 size={13} />
-                    <MoreVertical size={13} />
+                  <div className="rounded-xl border border-gray-200 bg-white p-4">
+                    <h3 className="mb-2 text-sm font-semibold text-gray-700">Expense</h3>
+                    <div className="h-40">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart data={financials}>
+                          <XAxis dataKey="month" tick={{ fontSize: 10 }} angle={-25} textAnchor="end" height={40} />
+                          <YAxis tick={{ fontSize: 10 }} tickFormatter={(v) => (v === 0 ? "0" : inrAxis(v))} />
+                          <Tooltip formatter={(v) => formatLakh(Number(v))} />
+                          <Bar dataKey="expense" fill="#d6478a" radius={[3, 3, 0, 0]} />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
+
+                  <div className="rounded-xl border border-gray-200 bg-white p-4">
+                    <h3 className="mb-2 text-sm font-semibold text-gray-700">Margin</h3>
+                    <div className="h-40">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart data={financials}>
+                          <XAxis dataKey="month" tick={{ fontSize: 10 }} angle={-25} textAnchor="end" height={40} />
+                          <YAxis tick={{ fontSize: 10 }} tickFormatter={(v) => (v === 0 ? "0" : inrAxis(v))} />
+                          <Tooltip formatter={(v) => formatLakh(Number(v))} />
+                          <Bar dataKey="margin" radius={[3, 3, 0, 0]}>
+                            {financials.map((f) => (
+                              <Cell key={f.month} fill={f.margin >= 0 ? "#0ca30c" : "#d6478a"} />
+                            ))}
+                          </Bar>
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
                   </div>
                 </div>
-                <div className="flex h-40 items-center justify-center">
-                  <span className="text-sm font-semibold text-red-500">No Data Available</span>
-                </div>
-              </div>
 
-              <div className="rounded-xl border border-gray-200 bg-white p-4">
-                <h3 className="mb-2 text-sm font-semibold text-gray-700">Expense</h3>
-                <div className="h-40">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={financials}>
-                      <XAxis dataKey="month" tick={{ fontSize: 10 }} angle={-25} textAnchor="end" height={40} />
-                      <YAxis
-                        tick={{ fontSize: 10 }}
-                        tickFormatter={(v) => (v === 0 ? "0" : formatLakh(v))}
-                      />
-                      <Tooltip formatter={(v) => formatLakh(Number(v))} />
-                      <Bar dataKey="expense" fill="#d6478a" radius={[3, 3, 0, 0]}>
-                        <Cell />
-                      </Bar>
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
-              </div>
-
-              <div className="rounded-xl border border-gray-200 bg-white p-4">
-                <h3 className="mb-2 text-sm font-semibold text-gray-700">Margin</h3>
-                <div className="h-40">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={marginData}>
-                      <XAxis dataKey="month" tick={{ fontSize: 10 }} angle={-25} textAnchor="end" height={40} />
-                      <YAxis
-                        tick={{ fontSize: 10 }}
-                        tickFormatter={(v) => (v === 0 ? "0" : formatLakh(v))}
-                      />
-                      <Tooltip formatter={(v) => formatLakh(Number(v))} />
-                      <Bar dataKey="margin" fill="#d6478a" radius={[3, 3, 0, 0]} />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-3 gap-4">
-              <div className="rounded-xl bg-green-50 p-4 text-center">
-                <div className="text-sm font-medium text-green-600">Total Sales</div>
-                <div className="mt-1 text-xl font-semibold text-gray-800">-</div>
-              </div>
-              <div className="rounded-xl bg-pink-50 p-4 text-center">
-                <div className="text-sm font-medium text-pink-600">Total Expense</div>
-                <div className="mt-1 text-xl font-semibold text-pink-600">
-                  {formatLakh(totalExpense)}
-                </div>
-              </div>
-              <div className="rounded-xl bg-gray-100 p-4 text-center">
-                <div className="text-sm font-medium text-gray-500">Total Margin</div>
-                <div className="mt-1 text-xl font-semibold text-gray-800">
-                  {formatLakh(-totalExpense)}
-                </div>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <div className="rounded-xl border border-gray-200 bg-white p-4">
-                <div className="mb-2 flex items-center justify-between">
-                  <h3 className="text-sm font-semibold text-gray-700">Payments</h3>
-                  <div className="flex items-center gap-3 text-xs text-gray-500">
-                    <label className="flex items-center gap-1">
-                      <input type="checkbox" className="accent-gray-400" />
-                      Payment Type
-                    </label>
-                    <label className="flex items-center gap-1 text-green-600">
-                      <input type="checkbox" defaultChecked className="accent-green-600" />
-                      Payment In
-                    </label>
-                    <label className="flex items-center gap-1 text-pink-600">
-                      <input type="checkbox" defaultChecked className="accent-pink-600" />
-                      Payment Out
-                    </label>
+                <div className="grid grid-cols-3 gap-4">
+                  <div className="rounded-xl bg-green-50 p-4 text-center">
+                    <div className="text-sm font-medium text-green-600">Total Sales</div>
+                    <div className="mt-1 text-xl font-semibold text-gray-800">{formatLakh(totalSales)}</div>
+                  </div>
+                  <div className="rounded-xl bg-pink-50 p-4 text-center">
+                    <div className="text-sm font-medium text-pink-600">Total Expense</div>
+                    <div className="mt-1 text-xl font-semibold text-pink-600">{formatLakh(totalExpense)}</div>
+                  </div>
+                  <div className="rounded-xl bg-gray-100 p-4 text-center">
+                    <div className="text-sm font-medium text-gray-500">Total Margin</div>
+                    <div className={`mt-1 text-xl font-semibold ${totalMargin < 0 ? "text-pink-600" : "text-green-600"}`}>
+                      {formatLakh(totalMargin)}
+                    </div>
                   </div>
                 </div>
-                <div className="flex h-32 items-center justify-center text-xs text-gray-400">
-                  No payment data for the selected period.
-                </div>
-              </div>
 
-              <div className="rounded-xl border border-gray-200 bg-white p-4">
-                <h3 className="mb-2 text-sm font-semibold text-gray-700">Expense Type</h3>
-                <div className="flex h-32 flex-col items-center justify-center gap-2 text-gray-300">
-                  <BarChart3 size={28} />
-                  <span className="text-xs text-gray-400">No data available</span>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="rounded-xl border border-gray-200 bg-white p-4">
+                    <h3 className="mb-2 text-sm font-semibold text-gray-700">Payments</h3>
+                    {paymentSeries.length === 0 ? (
+                      <div className="flex h-32 items-center justify-center text-xs text-gray-400">
+                        No payments recorded yet.
+                      </div>
+                    ) : (
+                      <div className="h-32">
+                        <ResponsiveContainer width="100%" height="100%">
+                          <BarChart data={paymentSeries}>
+                            <XAxis dataKey="month" tick={{ fontSize: 10 }} />
+                            <YAxis tick={{ fontSize: 10 }} tickFormatter={(v) => (v === 0 ? "0" : inrAxis(v))} />
+                            <Tooltip formatter={(v) => formatLakh(Number(v))} />
+                            <Legend iconType="circle" wrapperStyle={{ fontSize: 11 }} />
+                            <Bar dataKey="In" fill="#0ca30c" radius={[3, 3, 0, 0]} maxBarSize={24} />
+                            <Bar dataKey="Out" fill="#d6478a" radius={[3, 3, 0, 0]} maxBarSize={24} />
+                          </BarChart>
+                        </ResponsiveContainer>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="rounded-xl border border-gray-200 bg-white p-4">
+                    <h3 className="mb-2 text-sm font-semibold text-gray-700">Expense Type</h3>
+                    {expenseTypes.length === 0 ? (
+                      <div className="flex h-32 flex-col items-center justify-center gap-2 text-gray-300">
+                        <BarChart3 size={28} />
+                        <span className="text-xs text-gray-400">No expenses recorded yet</span>
+                      </div>
+                    ) : (
+                      <div className="h-32">
+                        <ResponsiveContainer width="100%" height="100%">
+                          <PieChart>
+                            <Pie data={expenseTypes} dataKey="value" nameKey="name" innerRadius={28} outerRadius={52} paddingAngle={2} stroke="#fff" strokeWidth={2}>
+                              {expenseTypes.map((d, i) => (
+                                <Cell key={d.name} fill={i === 0 ? "#6366f1" : "#d6478a"} />
+                              ))}
+                            </Pie>
+                            <Tooltip formatter={(v) => formatLakh(Number(v))} />
+                            <Legend iconType="circle" wrapperStyle={{ fontSize: 11 }} />
+                          </PieChart>
+                        </ResponsiveContainer>
+                      </div>
+                    )}
+                  </div>
                 </div>
-              </div>
-            </div>
+              </>
+            )}
           </div>
         ) : (
           <div className="space-y-4 bg-gray-50 p-4">

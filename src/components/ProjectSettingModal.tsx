@@ -1,10 +1,14 @@
 "use client";
 
-import { useState } from "react";
-import { X, Search, UserRound, Plus, Trash2 } from "lucide-react";
-import { useAppStore } from "@/lib/store";
+import { useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import { CalendarRange, X, Trash2 } from "lucide-react";
 import { projectAvatarColor, projectInitials } from "@/lib/projectHelpers";
+import { DatePicker } from "./DatePicker";
 import { LocationStructure } from "./LocationStructure";
+import { ProjectMembers } from "./ProjectMembers";
+import { useAuthStore } from "@/lib/authStore";
+import { useDrawerDismiss } from "@/lib/useDrawerDismiss";
 import * as api from "@/lib/api";
 import type { ProjectResponse } from "@/lib/api";
 
@@ -47,12 +51,16 @@ export function ProjectSettingModal({
   onClose: () => void;
   onSaved?: () => void;
 }) {
-  const users = useAppStore((s) => s.users);
+  const router = useRouter();
+  const canDelete = useAuthStore((s) => s.user?.permissions.includes("PROJECT:DELETE") ?? false);
+  const { closing, requestClose } = useDrawerDismiss(onClose);
 
   const [tab, setTab] = useState<Tab>("Project Details");
   const [saved, setSaved] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   const [form, setForm] = useState({
     projectCode: project.projectCode ?? "",
@@ -70,9 +78,11 @@ export function ProjectSettingModal({
     scopeOfWork: project.scopeOfWork ?? "",
   });
 
-  // Members are local-only for now (members API is the next backend piece).
-  const [memberIds, setMemberIds] = useState<string[]>([]);
-  const [memberSearch, setMemberSearch] = useState("");
+  // Live "how long is this project" hint under the end date — instant feedback while picking dates.
+  const durationLabel = useMemo(
+    () => describeSpan(toDateInput(form.startDate), toDateInput(form.endDate)),
+    [form.startDate, form.endDate]
+  );
 
   async function save() {
     setSaving(true);
@@ -103,19 +113,30 @@ export function ProjectSettingModal({
     }
   }
 
-  const members = users.filter((u) => memberIds.includes(u.id));
-  const candidates = users.filter(
-    (u) =>
-      !memberIds.includes(u.id) &&
-      (memberSearch.trim() === "" ||
-        u.name.toLowerCase().includes(memberSearch.toLowerCase()) ||
-        u.role.toLowerCase().includes(memberSearch.toLowerCase()))
-  );
+  async function deleteProject() {
+    setDeleting(true);
+    setError(null);
+    try {
+      await api.deleteProject(project.id);
+      router.push("/project");
+    } catch (err) {
+      setError(err instanceof api.ApiError ? err.message : "Couldn't delete this project.");
+      setDeleting(false);
+      setConfirmingDelete(false);
+    }
+  }
 
   return (
-    <div className="animate-overlay-in fixed inset-0 z-50 flex justify-end bg-black/40" onClick={onClose}>
+    <div
+      className={`fixed inset-0 z-50 flex justify-end bg-black/40 ${
+        closing ? "animate-overlay-out" : "animate-overlay-in"
+      }`}
+      onClick={requestClose}
+    >
       <div
-        className="animate-slide-in-right flex h-full w-full max-w-2xl flex-col overflow-hidden bg-white shadow-2xl"
+        className={`flex h-full w-full max-w-2xl flex-col overflow-hidden bg-white shadow-2xl ${
+          closing ? "animate-slide-out-right" : "animate-slide-in-right"
+        }`}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="h-1 w-full bg-gradient-to-r from-brand-accent to-cyan-400" />
@@ -133,7 +154,7 @@ export function ProjectSettingModal({
             </div>
           </div>
           <button
-            onClick={onClose}
+            onClick={requestClose}
             className="rounded-full p-1.5 text-gray-400 transition-all duration-150 hover:bg-gray-100 hover:text-gray-600 active:scale-90"
           >
             <X size={18} />
@@ -185,10 +206,24 @@ export function ProjectSettingModal({
                 </Field>
 
                 <Field label="Start Date">
-                  <input value={form.startDate} onChange={(e) => setForm({ ...form, startDate: e.target.value })} placeholder="Start Date" className="input" />
+                  <DatePicker
+                    value={toDateInput(form.startDate)}
+                    onChange={(v) => setForm({ ...form, startDate: v })}
+                    placeholder="Start date"
+                  />
                 </Field>
                 <Field label="End Date">
-                  <input value={form.endDate} onChange={(e) => setForm({ ...form, endDate: e.target.value })} placeholder="End Date" className="input" />
+                  <DatePicker
+                    value={toDateInput(form.endDate)}
+                    min={toDateInput(form.startDate) || undefined}
+                    onChange={(v) => setForm({ ...form, endDate: v })}
+                    placeholder="End date"
+                  />
+                  {durationLabel && (
+                    <span className="animate-fade-in mt-1.5 inline-flex items-center gap-1 rounded-md bg-cyan-50 px-2 py-0.5 text-[11px] font-medium text-brand-accent">
+                      <CalendarRange size={11} /> {durationLabel}
+                    </span>
+                  )}
                 </Field>
 
                 <div className="sm:col-span-2">
@@ -231,76 +266,7 @@ export function ProjectSettingModal({
             </div>
           )}
 
-          {tab === "Members" && (
-            <div className="animate-fade-in space-y-4">
-              <div className="flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 transition-colors duration-150 focus-within:border-cyan-400">
-                <Search size={15} className="text-gray-400" />
-                <input
-                  value={memberSearch}
-                  onChange={(e) => setMemberSearch(e.target.value)}
-                  placeholder="Search and add person"
-                  className="w-full bg-transparent text-sm outline-none"
-                />
-              </div>
-
-              {members.length > 0 && (
-                <div>
-                  <div className="mb-1.5 text-xs font-medium tracking-wide text-gray-400 uppercase">
-                    Added ({members.length})
-                  </div>
-                  <div className="space-y-2">
-                    {members.map((u) => (
-                      <div key={u.id} className="flex items-center gap-3 rounded-lg border border-gray-100 px-3 py-2">
-                        <div className={`flex h-8 w-8 items-center justify-center rounded-full text-white ${projectAvatarColor(u.id)}`}>
-                          <UserRound size={15} />
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <div className="truncate text-sm font-medium text-gray-800">{u.name}</div>
-                          <div className="truncate text-xs text-gray-400">{u.role}</div>
-                        </div>
-                        <button
-                          onClick={() => setMemberIds((ids) => ids.filter((id) => id !== u.id))}
-                          className="rounded-md p-1.5 text-gray-400 transition-all duration-150 hover:bg-rose-50 hover:text-rose-600 active:scale-90"
-                          title="Remove"
-                        >
-                          <Trash2 size={15} />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              <div>
-                <div className="mb-1.5 text-xs font-medium tracking-wide text-gray-400 uppercase">Suggestions</div>
-                {candidates.length === 0 ? (
-                  <div className="rounded-lg border border-dashed border-gray-200 py-6 text-center text-sm text-gray-400">
-                    No people to add.
-                  </div>
-                ) : (
-                  <div className="space-y-2">
-                    {candidates.map((u) => (
-                      <div key={u.id} className="flex items-center gap-3 rounded-lg border border-gray-100 px-3 py-2">
-                        <div className={`flex h-8 w-8 items-center justify-center rounded-full text-white ${projectAvatarColor(u.id)}`}>
-                          <UserRound size={15} />
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <div className="truncate text-sm font-medium text-gray-800">{u.name}</div>
-                          <div className="truncate text-xs text-gray-400">{u.role}</div>
-                        </div>
-                        <button
-                          onClick={() => setMemberIds((ids) => [...ids, u.id])}
-                          className="flex items-center gap-1 rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-600 transition-all duration-150 hover:border-brand-accent hover:text-brand-accent active:scale-95"
-                        >
-                          <Plus size={13} /> Add
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
+          {tab === "Members" && <ProjectMembers projectId={String(project.id)} />}
 
           {tab === "Location Structure" && (
             <div className="animate-fade-in">
@@ -311,20 +277,76 @@ export function ProjectSettingModal({
 
         {/* Footer */}
         {tab === "Project Details" && (
-          <div className="flex items-center justify-end gap-3 border-t border-gray-100 px-6 py-4">
-            {error && <span className="mr-auto text-xs font-medium text-rose-600">{error}</span>}
-            <button
-              onClick={save}
-              disabled={saving}
-              className="rounded-lg bg-brand-accent px-6 py-2 text-sm font-medium text-white transition-all duration-150 hover:opacity-90 active:scale-95 disabled:opacity-60"
-            >
-              {saving ? "Saving…" : saved ? "Saved ✓" : "Save"}
-            </button>
+          <div className="flex items-center justify-between gap-3 border-t border-gray-100 px-6 py-4">
+            {canDelete ? (
+              confirmingDelete ? (
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-medium text-rose-600">Delete this project? This can't be undone.</span>
+                  <button
+                    onClick={deleteProject}
+                    disabled={deleting}
+                    className="rounded-lg bg-rose-600 px-3 py-1.5 text-xs font-medium text-white transition-all duration-150 hover:bg-rose-700 active:scale-95 disabled:opacity-60"
+                  >
+                    {deleting ? "Deleting…" : "Yes, delete"}
+                  </button>
+                  <button
+                    onClick={() => setConfirmingDelete(false)}
+                    disabled={deleting}
+                    className="rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-600 transition-all duration-150 hover:bg-gray-50"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => setConfirmingDelete(true)}
+                  className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium text-rose-600 transition-all duration-150 hover:bg-rose-50 active:scale-95"
+                >
+                  <Trash2 size={15} /> Delete Project
+                </button>
+              )
+            ) : (
+              <span />
+            )}
+            <div className="flex items-center gap-3">
+              {error && <span className="text-xs font-medium text-rose-600">{error}</span>}
+              <button
+                onClick={save}
+                disabled={saving}
+                className="rounded-lg bg-brand-accent px-6 py-2 text-sm font-medium text-white transition-all duration-150 hover:opacity-90 active:scale-95 disabled:opacity-60"
+              >
+                {saving ? "Saving…" : saved ? "Saved ✓" : "Save"}
+              </button>
+            </div>
           </div>
         )}
       </div>
     </div>
   );
+}
+
+// Native <input type="date"> needs a bare yyyy-MM-dd; tolerate stored ISO datetimes.
+function toDateInput(value: string): string {
+  if (!value) return "";
+  return value.length > 10 ? value.slice(0, 10) : value;
+}
+
+/** Human duration between two yyyy-MM-dd dates, e.g. "1 yr 2 mo · 428 days". */
+function describeSpan(start: string, end: string): string | null {
+  if (!start || !end) return null;
+  const s = new Date(start);
+  const e = new Date(end);
+  if (Number.isNaN(s.getTime()) || Number.isNaN(e.getTime())) return null;
+  const days = Math.round((e.getTime() - s.getTime()) / 86_400_000);
+  if (days < 0) return "End date is before start date";
+  if (days === 0) return "Same day";
+  const years = Math.floor(days / 365);
+  const months = Math.floor((days % 365) / 30);
+  const parts: string[] = [];
+  if (years) parts.push(`${years} yr`);
+  if (months) parts.push(`${months} mo`);
+  const head = parts.length ? parts.join(" ") + " · " : "";
+  return `${head}${days} day${days === 1 ? "" : "s"}`;
 }
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {

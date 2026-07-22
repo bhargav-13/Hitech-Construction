@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect } from "react";
 import { X } from "lucide-react";
+import { useDrawerDismiss } from "@/lib/useDrawerDismiss";
 
 /**
  * Right-side slide-over drawer — Onsite's standard "add / edit record" form pattern.
@@ -22,23 +22,26 @@ export function Drawer({
   width?: string;
   children: React.ReactNode;
 }) {
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  const { closing, requestClose } = useDrawerDismiss(onClose);
 
   return (
-    <div className="fixed inset-0 z-50 flex justify-end bg-black/40 animate-overlay-in" onClick={onClose}>
+    <div
+      className={`fixed inset-0 z-50 flex justify-end bg-black/40 ${
+        closing ? "animate-overlay-out" : "animate-overlay-in"
+      }`}
+      onClick={requestClose}
+    >
       <div
-        className={`flex h-full w-full ${width} flex-col bg-white shadow-2xl animate-slide-in-right`}
+        className={`flex h-full w-full ${width} flex-col bg-white shadow-2xl ${
+          closing ? "animate-slide-out-right" : "animate-slide-in-right"
+        }`}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="h-1 w-full bg-gradient-to-r from-brand-accent to-cyan-400" />
         <div className="flex items-center justify-between border-b border-gray-100 px-6 py-4">
           <div className="flex items-center gap-3">
             <button
-              onClick={onClose}
+              onClick={requestClose}
               className="rounded-full p-1 text-gray-400 transition-all duration-150 hover:bg-gray-100 hover:text-gray-600 active:scale-90"
             >
               <X size={18} />

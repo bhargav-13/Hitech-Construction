@@ -4,6 +4,7 @@ import { useLayoutEffect, useRef, useState } from "react";
 import {
   X,
   Paperclip,
+  Download,
   Bell,
   Plus,
   Trash2,
@@ -19,14 +20,51 @@ import {
 import { useAppStore } from "@/lib/store";
 import { useAuthStore } from "@/lib/authStore";
 import { useUsers } from "@/lib/useUsers";
+import { useDepartments } from "@/lib/useDepartments";
 import { useProjects } from "@/lib/useProjects";
 import { useTaskStore } from "@/lib/taskStore";
-import { TASK_PRIORITIES, TASK_STATUSES, formatTaskDate, toIso } from "@/lib/taskTypes";
+import { TASK_PRIORITIES, TASK_STATUSES, formatTaskDate, formatTaskDateTime, toIso } from "@/lib/taskTypes";
 import type { SubTask, Task, TaskPriority, TaskStatus } from "@/lib/taskTypes";
 import { UserAvatar } from "./TaskBits";
 import { Select } from "@/components/Select";
+import { DatePicker } from "@/components/DatePicker";
+import type { RecurrenceRule } from "@/components/DatePicker";
+import { useDrawerDismiss } from "@/lib/useDrawerDismiss";
 
 type Panel = "Comment" | "Attachment" | "Log Activity";
+
+/** Reminder shortcuts, expressed relative to the task's due date. */
+const REMINDER_PRESETS: { label: string; from: (dueDate: string) => string }[] = [
+  { label: "On due", from: (d) => d || toIso(new Date()) },
+  { label: "1d before", from: (d) => shiftDays(d, -1) },
+  { label: "3d before", from: (d) => shiftDays(d, -3) },
+];
+
+function shiftDays(dateStr: string, days: number): string {
+  const base = dateStr ? new Date(dateStr) : new Date();
+  if (Number.isNaN(base.getTime())) return toIso(new Date());
+  base.setDate(base.getDate() + days);
+  return toIso(base);
+}
+
+/**
+ * `reminderAt` holds a time-of-day ("HH:mm") for repeating tasks — a fixed calendar date would be
+ * meaningless once the task rolls to its next occurrence — and a date ("YYYY-MM-DD"), optionally
+ * with a time ("YYYY-MM-DDTHH:mm"), for one-off tasks.
+ */
+function splitReminder(value: string | null | undefined): { date: string; time: string } {
+  if (!value) return { date: "", time: "" };
+  if (/^\d{1,2}:\d{2}$/.test(value)) return { date: "", time: value };
+  const [date, time] = value.split("T");
+  return { date: date ?? "", time: (time ?? "").slice(0, 5) };
+}
+
+/** Recombine the two inputs into the single stored value. */
+function joinReminder(date: string, time: string, repeating: boolean): string | null {
+  if (repeating) return time || null;
+  if (!date) return null;
+  return time ? `${date}T${time}` : date;
+}
 
 type ActivityItem = { id: number | string; text: string; at: string; userId?: string };
 
@@ -142,7 +180,7 @@ function CurvyActivityTimeline({
               } ${isHovered ? (right ? "-translate-x-1" : "translate-x-1") : ""}`}
             >
               <div className="text-sm leading-snug text-gray-700">{a.text}</div>
-              <div className="mt-0.5 text-[10px] text-gray-400">{formatTaskDate(a.at)}</div>
+              <div className="mt-0.5 text-[10px] text-gray-400">{formatTaskDateTime(a.at)}</div>
             </div>
 
             {/* Hover detail card */}
@@ -165,7 +203,7 @@ function CurvyActivityTimeline({
                   by <span className="font-medium text-gray-700">{actor}</span>
                 </div>
               )}
-              <div className="mt-0.5 text-[11px] text-gray-400">{formatTaskDate(a.at)}</div>
+              <div className="mt-0.5 text-[11px] text-gray-400">{formatTaskDateTime(a.at)}</div>
             </div>
           </div>
         );
@@ -190,8 +228,10 @@ export function TaskDrawer({
 }) {
   const { projects } = useProjects();
   const { users } = useUsers();
+  const { departments } = useDepartments();
   const authUser = useAuthStore((s) => s.user);
   const parties = useAppStore((s) => s.parties);
+  const { closing, requestClose } = useDrawerDismiss(onClose);
 
   const createTask = useTaskStore((s) => s.createTask);
   const saveTask = useTaskStore((s) => s.saveTask);
@@ -214,6 +254,13 @@ export function TaskDrawer({
   const [progress, setProgress] = useState(existing?.progress ?? 0);
   const [subtasks, setSubtasks] = useState<SubTask[]>(existing?.subtasks ?? []);
   const [subtaskInput, setSubtaskInput] = useState("");
+  const [reminderDate, setReminderDate] = useState(() => splitReminder(existing?.reminderAt).date);
+  const [reminderTime, setReminderTime] = useState(() => splitReminder(existing?.reminderAt).time);
+  const [recurrenceRule, setRecurrenceRule] = useState<RecurrenceRule>(
+    (existing?.recurrenceRule as RecurrenceRule) ?? "NONE"
+  );
+  const [recurrenceInterval, setRecurrenceInterval] = useState(existing?.recurrenceInterval ?? 1);
+  const [departmentId, setDepartmentId] = useState<string>(existing?.departmentId ?? "");
   const [panel, setPanel] = useState<Panel>("Comment");
   const [commentText, setCommentText] = useState("");
   const [error, setError] = useState("");
@@ -222,6 +269,8 @@ export function TaskDrawer({
   const fileRef = useRef<HTMLInputElement>(null);
 
   const clients = parties.filter((p) => p.type === "Client");
+  // A repeating task reminds at a time of day on each occurrence, so it carries no reminder date.
+  const isRepeating = recurrenceRule !== "NONE";
 
   async function save(asDraft: boolean) {
     if (!title.trim()) return setError("Task title is required.");
@@ -241,6 +290,11 @@ export function TaskDrawer({
       dueDate,
       subtasks,
       isDraft: asDraft,
+      pinned: existing?.pinned ?? false,
+      reminderAt: joinReminder(reminderDate, reminderTime, isRepeating),
+      recurrenceRule,
+      recurrenceInterval,
+      departmentId: departmentId || null,
     };
 
     setSaving(true);
@@ -248,7 +302,7 @@ export function TaskDrawer({
     try {
       if (existing) await saveTask(existing.id, payload);
       else await createTask(payload);
-      onClose();
+      requestClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not save the task.");
       setSaving(false);
@@ -278,11 +332,19 @@ export function TaskDrawer({
     const file = e.target.files?.[0];
     e.target.value = "";
     if (!file || !existing) return;
+    // Store the file contents as a data URL so it can actually be downloaded later.
+    const MAX_BYTES = 8 * 1024 * 1024; // 8 MB
+    if (file.size > MAX_BYTES) {
+      setError("File is too large to attach (max 8 MB).");
+      return;
+    }
     try {
+      const dataUrl = await readAsDataUrl(file);
       await addAttachment(existing.id, {
         name: file.name,
         sizeLabel: formatBytes(file.size),
         contentType: file.type || undefined,
+        dataUrl,
       });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not attach the file.");
@@ -292,9 +354,16 @@ export function TaskDrawer({
   const userName = (id: string) => users.find((u) => u.id === id)?.name ?? "Unknown";
 
   return (
-    <div className="animate-overlay-in fixed inset-0 z-50 flex justify-end bg-black/40" onClick={onClose}>
+    <div
+      className={`fixed inset-0 z-50 flex justify-end bg-black/40 ${
+        closing ? "animate-overlay-out" : "animate-overlay-in"
+      }`}
+      onClick={requestClose}
+    >
       <div
-        className="animate-slide-in-right flex h-full w-full max-w-5xl flex-col overflow-hidden bg-white shadow-2xl"
+        className={`flex h-full w-full max-w-5xl flex-col overflow-hidden bg-white shadow-2xl ${
+          closing ? "animate-slide-out-right" : "animate-slide-in-right"
+        }`}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="h-1 w-full bg-gradient-to-r from-brand-accent to-cyan-400" />
@@ -324,7 +393,7 @@ export function TaskDrawer({
               <Bell size={16} />
             </button>
             <button
-              onClick={onClose}
+              onClick={requestClose}
               className="rounded-full p-1.5 transition-all duration-150 hover:bg-gray-100 hover:text-gray-600 active:scale-90"
             >
               <X size={18} />
@@ -350,12 +419,77 @@ export function TaskDrawer({
               <div className="flex flex-wrap items-center gap-3">
                 <label className="flex items-center gap-2">
                   <span className="text-xs font-medium text-gray-400">Due Date *</span>
-                  <input
-                    type="date"
+                  <DatePicker
                     value={dueDate}
-                    onChange={(e) => setDueDate(e.target.value)}
-                    className="rounded-lg border border-gray-200 px-2 py-1.5 text-sm outline-none transition-colors duration-150 focus:border-cyan-500"
+                    onChange={setDueDate}
+                    placeholder="Due date"
+                    className="py-1.5"
+                    recurrence={recurrenceRule}
+                    onRecurrenceChange={setRecurrenceRule}
+                    recurrenceInterval={recurrenceInterval}
+                    onRecurrenceIntervalChange={setRecurrenceInterval}
                   />
+                </label>
+
+                {/*
+                  Per-task reminder. A repeating task gets a time of day only — it fires on each
+                  occurrence's own due date, so pinning it to one calendar date would be wrong.
+                  A one-off task gets a date (with quick presets) plus an optional time.
+                */}
+                <label className="flex items-center gap-2">
+                  <span className="flex items-center gap-1 text-xs font-medium text-gray-400">
+                    <Bell size={12} /> Reminder
+                  </span>
+
+                  {!isRepeating && (
+                    <DatePicker
+                      value={reminderDate}
+                      onChange={setReminderDate}
+                      placeholder="Remind me on"
+                      className="py-1.5"
+                    />
+                  )}
+
+                  <input
+                    type="time"
+                    value={reminderTime}
+                    onChange={(e) => setReminderTime(e.target.value)}
+                    aria-label={isRepeating ? "Reminder time for each occurrence" : "Reminder time"}
+                    className="rounded-lg border border-gray-200 px-2 py-1.5 text-sm text-gray-700 outline-none transition-colors duration-150 focus:border-cyan-500"
+                  />
+
+                  {isRepeating && (
+                    <span className="text-[10px] text-gray-400">on each occurrence</span>
+                  )}
+
+                  {(isRepeating ? reminderTime : reminderDate || reminderTime) ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setReminderDate("");
+                        setReminderTime("");
+                      }}
+                      title="Clear reminder"
+                      className="rounded-md p-1 text-gray-400 transition-colors duration-150 hover:bg-rose-50 hover:text-rose-600"
+                    >
+                      <X size={13} />
+                    </button>
+                  ) : (
+                    !isRepeating && (
+                      <div className="flex gap-1">
+                        {REMINDER_PRESETS.map((p) => (
+                          <button
+                            key={p.label}
+                            type="button"
+                            onClick={() => setReminderDate(p.from(dueDate))}
+                            className="rounded-md border border-gray-200 px-1.5 py-1 text-[10px] font-medium text-gray-500 transition-all duration-150 hover:border-brand-accent hover:text-brand-accent active:scale-95"
+                          >
+                            {p.label}
+                          </button>
+                        ))}
+                      </div>
+                    )
+                  )}
                 </label>
 
                 <Select
@@ -393,12 +527,40 @@ export function TaskDrawer({
                 />
               </Field>
 
+              <Field label="Department">
+                <Select
+                  value={departmentId}
+                  onChange={(v) => {
+                    setDepartmentId(v);
+                    // If the current assignee isn't in the newly picked department, clear them so
+                    // the list below only offers people who actually belong to that team.
+                    if (v) {
+                      const stillValid = users.some(
+                        (u) => u.id === assigneeId && String(u.departmentId ?? "") === v
+                      );
+                      if (!stillValid) setAssigneeId("");
+                    }
+                  }}
+                  placeholder="Any department"
+                  options={[
+                    { value: "", label: "Any department" },
+                    ...departments.map((d) => ({
+                      value: String(d.id),
+                      label: `${d.name}${d.memberCount ? ` · ${d.memberCount}` : ""}`,
+                    })),
+                  ]}
+                />
+              </Field>
+
               <Field label="Assignee *">
                 <Select
                   value={assigneeId}
                   onChange={setAssigneeId}
-                  placeholder="Select assignee"
-                  options={users.map((u) => ({ value: u.id, label: `${u.name} · ${u.role}` }))}
+                  placeholder={departmentId ? "Select from this department" : "Select assignee"}
+                  // Narrow the people list to the chosen department, so a long directory stays usable.
+                  options={users
+                    .filter((u) => !departmentId || String(u.departmentId ?? "") === departmentId)
+                    .map((u) => ({ value: u.id, label: `${u.name} · ${u.role}` }))}
                 />
               </Field>
 
@@ -488,7 +650,7 @@ export function TaskDrawer({
             {/* Footer */}
             <div className="flex justify-end gap-2 border-t border-gray-100 px-6 py-3">
               <button
-                onClick={onClose}
+                onClick={requestClose}
                 disabled={saving}
                 className="rounded-lg border border-gray-200 px-4 py-2 text-sm font-medium text-gray-600 transition-all duration-150 hover:bg-gray-50 active:scale-95 disabled:opacity-50"
               >
@@ -563,14 +725,36 @@ export function TaskDrawer({
                     <p className="py-6 text-center text-xs text-gray-400">No attachments yet.</p>
                   ) : (
                     liveTask.attachments.map((a) => (
-                      <div key={a.id} className="flex items-center gap-2 rounded-lg border border-gray-100 px-3 py-2">
-                        <FileText size={16} className="shrink-0 text-brand-accent" />
+                      <div
+                        key={a.id}
+                        className="group flex items-center gap-2.5 rounded-lg border border-gray-100 px-3 py-2 transition-colors duration-150 hover:border-cyan-200 hover:bg-cyan-50/30"
+                      >
+                        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-cyan-50 text-brand-accent">
+                          <FileText size={16} />
+                        </div>
                         <div className="min-w-0 flex-1">
-                          <div className="truncate text-sm text-gray-700">{a.name}</div>
+                          <div className="truncate text-sm font-medium text-gray-700">{a.name}</div>
                           <div className="text-[10px] text-gray-400">
                             {a.size} · {formatTaskDate(a.at)}
                           </div>
                         </div>
+                        {a.url ? (
+                          <a
+                            href={a.url}
+                            download={a.name}
+                            title={`Download ${a.name}`}
+                            className="flex shrink-0 items-center gap-1 rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 text-xs font-medium text-gray-600 transition-all duration-150 hover:border-brand-accent hover:bg-cyan-50 hover:text-brand-accent active:scale-95"
+                          >
+                            <Download size={13} /> Download
+                          </a>
+                        ) : (
+                          <span
+                            title="This file was attached before download support was added, so its contents weren't stored. Re-upload it to enable download."
+                            className="shrink-0 cursor-help rounded-md bg-gray-50 px-2 py-1 text-[10px] font-medium text-gray-400"
+                          >
+                            No file data
+                          </span>
+                        )}
                       </div>
                     ))
                   )}
@@ -609,6 +793,15 @@ function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function readAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = () => reject(new Error("Could not read the file."));
+    reader.readAsDataURL(file);
+  });
 }
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {

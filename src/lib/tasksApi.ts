@@ -51,6 +51,13 @@ export interface TaskResponse {
   progress: number;
   dueDate: string | null;
   draft: boolean;
+  pinned: boolean;
+  reminderAt: string | null;
+  recurrenceRule: string;
+  recurrenceInterval: number;
+  recurrenceUntil: string | null;
+  seriesId: number | null;
+  departmentId: number | null;
   followerIds: number[];
   subtasks: SubtaskDto[];
   comments: CommentDto[];
@@ -78,6 +85,12 @@ export interface TaskUpsertRequest {
   progress?: number;
   dueDate?: string | null;
   draft?: boolean;
+  pinned?: boolean;
+  reminderAt?: string | null;
+  recurrenceRule?: string;
+  recurrenceInterval?: number;
+  recurrenceUntil?: string | null;
+  departmentId?: number | null;
   followerIds?: number[];
   subtasks?: SubtaskInput[];
 }
@@ -86,6 +99,8 @@ export interface TaskPatchRequest {
   status?: TaskStatusApi;
   priority?: TaskPriorityApi;
   progress?: number;
+  pinned?: boolean;
+  reminderAt?: string | null;
 }
 
 export function listTasks(projectId?: number) {
@@ -111,6 +126,23 @@ export function patchTask(id: number, body: TaskPatchRequest) {
 
 export function deleteTask(id: number) {
   return apiRequest<void>(`/api/v1/tasks/${id}`, { method: "DELETE" });
+}
+
+// ---- Bulk actions on the task list ----
+export interface BulkPatchRequest {
+  taskIds: number[];
+  status?: TaskStatusApi;
+  priority?: TaskPriorityApi;
+  pinned?: boolean;
+  assigneeId?: number;
+}
+
+export function bulkPatchTasks(body: BulkPatchRequest) {
+  return apiRequest<TaskResponse[]>("/api/v1/tasks/bulk", { method: "PATCH", body });
+}
+
+export function bulkDeleteTasks(taskIds: number[]) {
+  return apiRequest<void>("/api/v1/tasks/bulk-delete", { method: "POST", body: { taskIds } });
 }
 
 export function addComment(id: number, text: string) {

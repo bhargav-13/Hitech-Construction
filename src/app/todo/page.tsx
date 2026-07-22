@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { CalendarDays, ChevronLeft, ChevronRight, Plus, UserRound } from "lucide-react";
+import { CalendarDays, ChevronLeft, ChevronRight, Pencil, Plus, Trash2, UserRound } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { Modal } from "@/components/Modal";
 import { useAppStore, CREW } from "@/lib/store";
@@ -25,10 +25,16 @@ const COLUMN_ACCENT: Record<TodoStatus, string> = {
 export default function TodoPage() {
   const todos = useAppStore((s) => s.todos);
   const updateTodo = useAppStore((s) => s.updateTodo);
+  const deleteTodo = useAppStore((s) => s.deleteTodo);
   const projects = useAppStore((s) => s.projects);
   const [showNew, setShowNew] = useState(false);
+  const [editing, setEditing] = useState<TodoTask | null>(null);
 
   const projectName = (id: string) => projects.find((p) => p.id === id)?.name ?? "—";
+
+  function remove(task: TodoTask) {
+    if (confirm(`Delete "${task.title}"? This can't be undone.`)) deleteTodo(task.id);
+  }
 
   function move(task: TodoTask, dir: 1 | -1) {
     const idx = STATUSES.indexOf(task.status);
@@ -75,11 +81,27 @@ export default function TodoPage() {
                   <div key={task.id} className="rounded-lg border border-gray-100 bg-gray-50/60 p-3">
                     <div className="mb-2 flex items-start justify-between gap-2">
                       <div className="text-sm font-medium text-gray-800">{task.title}</div>
-                      <span
-                        className={`shrink-0 rounded-md px-1.5 py-0.5 text-[10px] font-medium ${PRIORITY_CLS[task.priority]}`}
-                      >
-                        {task.priority}
-                      </span>
+                      <div className="flex shrink-0 items-center gap-1">
+                        <span
+                          className={`rounded-md px-1.5 py-0.5 text-[10px] font-medium ${PRIORITY_CLS[task.priority]}`}
+                        >
+                          {task.priority}
+                        </span>
+                        <button
+                          onClick={() => setEditing(task)}
+                          title="Edit task"
+                          className="rounded p-1 text-gray-400 transition-colors duration-150 hover:bg-gray-100 hover:text-gray-600"
+                        >
+                          <Pencil size={12} />
+                        </button>
+                        <button
+                          onClick={() => remove(task)}
+                          title="Delete task"
+                          className="rounded p-1 text-gray-400 transition-colors duration-150 hover:bg-rose-50 hover:text-rose-600"
+                        >
+                          <Trash2 size={12} />
+                        </button>
+                      </div>
                     </div>
                     <div className="mb-2 truncate text-xs text-gray-400">
                       {projectName(task.projectId)}
@@ -130,6 +152,7 @@ export default function TodoPage() {
       </div>
 
       {showNew && <NewTaskModal onClose={() => setShowNew(false)} />}
+      {editing && <EditTaskModal task={editing} onClose={() => setEditing(null)} />}
     </AppShell>
   );
 }
@@ -212,6 +235,74 @@ function NewTaskModal({ onClose }: { onClose: () => void }) {
             className="w-full rounded-lg bg-brand-accent py-2.5 text-sm font-medium text-white hover:opacity-90"
           >
             Save Task
+          </button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+function EditTaskModal({ task, onClose }: { task: TodoTask; onClose: () => void }) {
+  const updateTodo = useAppStore((s) => s.updateTodo);
+  const projects = useAppStore((s) => s.projects);
+  const [title, setTitle] = useState(task.title);
+  const [projectId, setProjectId] = useState(task.projectId);
+  const [assignee, setAssignee] = useState(task.assignee);
+  const [priority, setPriority] = useState<TodoPriority>(task.priority);
+  const [dueDate, setDueDate] = useState(task.dueDate);
+
+  function save() {
+    if (!title.trim()) return;
+    updateTodo(task.id, { title: title.trim(), projectId, assignee, priority, dueDate });
+    onClose();
+  }
+
+  return (
+    <Modal onClose={onClose}>
+      <div className="p-8">
+        <h2 className="mb-6 text-lg font-semibold text-gray-800">Edit Task</h2>
+        <div className="space-y-4">
+          <label className="block">
+            <span className="mb-1 block text-xs font-medium text-gray-500">Task Title</span>
+            <input value={title} onChange={(e) => setTitle(e.target.value)} className="input" />
+          </label>
+          <label className="block">
+            <span className="mb-1 block text-xs font-medium text-gray-500">Project</span>
+            <select value={projectId} onChange={(e) => setProjectId(e.target.value)} className="input">
+              {projects.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <div className="grid grid-cols-2 gap-4">
+            <label className="block">
+              <span className="mb-1 block text-xs font-medium text-gray-500">Assignee</span>
+              <select value={assignee} onChange={(e) => setAssignee(e.target.value)} className="input">
+                {CREW.map((c) => (
+                  <option key={c}>{c}</option>
+                ))}
+              </select>
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-xs font-medium text-gray-500">Priority</span>
+              <select value={priority} onChange={(e) => setPriority(e.target.value as TodoPriority)} className="input">
+                {PRIORITIES.map((p) => (
+                  <option key={p}>{p}</option>
+                ))}
+              </select>
+            </label>
+          </div>
+          <label className="block">
+            <span className="mb-1 block text-xs font-medium text-gray-500">Due Date</span>
+            <input value={dueDate} onChange={(e) => setDueDate(e.target.value)} placeholder="e.g. 10-Jul-2026" className="input" />
+          </label>
+          <button
+            onClick={save}
+            className="w-full rounded-lg bg-brand-accent py-2.5 text-sm font-medium text-white hover:opacity-90"
+          >
+            Update Task
           </button>
         </div>
       </div>
