@@ -1,26 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Bell, AlarmClock, CalendarClock, UserPlus, Activity, CheckCheck } from "lucide-react";
-import { useTaskStore } from "@/lib/taskStore";
-import { useAuthStore } from "@/lib/authStore";
-import { isOverdue, isDueToday } from "@/lib/taskTypes";
-import type { Task } from "@/lib/taskTypes";
-
-const SEEN_KEY = "taskopad:notifSeen";
-const RECENT_DAYS = 7;
-
-type NotifKind = "overdue" | "due" | "assigned" | "activity";
-
-interface Notif {
-  id: string;
-  kind: NotifKind;
-  title: string;
-  detail: string;
-  at: string; // ISO timestamp used for sorting + unread
-  taskId: string;
-}
+import { useTaskNotifications, relativeTime, ms, type NotifKind } from "@/lib/taskNotifications";
 
 const KIND_META: Record<NotifKind, { icon: React.ComponentType<{ size?: number }>; tone: string }> = {
   overdue: { icon: AlarmClock, tone: "bg-rose-50 text-rose-600" },
@@ -29,109 +12,17 @@ const KIND_META: Record<NotifKind, { icon: React.ComponentType<{ size?: number }
   activity: { icon: Activity, tone: "bg-violet-50 text-violet-600" },
 };
 
-/** Days-ago cutoff as an ISO date-time string. */
-function recentCutoff(): number {
-  return Date.now() - RECENT_DAYS * 24 * 60 * 60 * 1000;
-}
-
-function ms(iso: string): number {
-  const t = new Date(iso).getTime();
-  return Number.isNaN(t) ? 0 : t;
-}
-
-function relative(iso: string): string {
-  const diff = Date.now() - ms(iso);
-  if (diff < 0) return "just now";
-  const mins = Math.floor(diff / 60000);
-  if (mins < 1) return "just now";
-  if (mins < 60) return `${mins}m ago`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  const days = Math.floor(hrs / 24);
-  if (days < 30) return `${days}d ago`;
-  return new Date(iso).toLocaleDateString();
-}
-
-/** Build the notification feed for the signed-in user out of their tasks. */
-function buildNotifs(tasks: Task[], myId: string): Notif[] {
-  if (!myId) return [];
-  const out: Notif[] = [];
-  const cutoff = recentCutoff();
-
-  for (const t of tasks) {
-    if (t.isDraft) continue;
-    const mine = t.assigneeId === myId;
-    const following = t.followerIds.includes(myId);
-    if (!mine && !following) continue;
-
-    if (isOverdue(t)) {
-      out.push({
-        id: `overdue-${t.id}`,
-        kind: "overdue",
-        title: t.title,
-        detail: `Overdue — was due ${t.dueDate}`,
-        at: t.dueDate,
-        taskId: t.id,
-      });
-    } else if (isDueToday(t)) {
-      out.push({
-        id: `due-${t.id}`,
-        kind: "due",
-        title: t.title,
-        detail: "Due today",
-        at: t.dueDate,
-        taskId: t.id,
-      });
-    }
-
-    if (mine && ms(t.createdAt) >= cutoff) {
-      out.push({
-        id: `assigned-${t.id}`,
-        kind: "assigned",
-        title: t.title,
-        detail: "Assigned to you",
-        at: t.createdAt,
-        taskId: t.id,
-      });
-    }
-
-    // Recent activity from someone else on a task I own or follow.
-    for (const a of t.activity) {
-      if (a.userId === myId) continue;
-      if (ms(a.at) < cutoff) continue;
-      out.push({
-        id: `activity-${t.id}-${a.id}`,
-        kind: "activity",
-        title: t.title,
-        detail: a.text,
-        at: a.at,
-        taskId: t.id,
-      });
-    }
-  }
-
-  return out.sort((x, y) => ms(y.at) - ms(x.at)).slice(0, 25);
-}
-
-/** A lightweight in-app notification bell for Taskopad, derived from the current user's tasks. */
-export function NotificationBell() {
+/**
+ * In-app notification bell derived from the signed-in user's tasks. Used both in the global header
+ * (`variant="header"`) and inside the Taskopad module (`variant="module"`). All instances share the
+ * same feed + unread marker via `useTaskNotifications`, so reading in one place clears the rest.
+ */
+export function NotificationBell({ variant = "module" }: { variant?: "module" | "header" }) {
   const router = useRouter();
-  const tasks = useTaskStore((s) => s.tasks);
-  const load = useTaskStore((s) => s.load);
-  const myId = useAuthStore((s) => (s.user ? String(s.user.id) : ""));
+  const { notifs, unread, lastSeen, markAllRead } = useTaskNotifications();
 
   const [open, setOpen] = useState(false);
-  const [lastSeen, setLastSeen] = useState(0);
   const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    load();
-  }, [load]);
-
-  useEffect(() => {
-    const raw = typeof window !== "undefined" ? window.localStorage.getItem(SEEN_KEY) : null;
-    setLastSeen(raw ? Number(raw) || 0 : 0);
-  }, []);
 
   // Close on outside click / Escape.
   useEffect(() => {
@@ -150,15 +41,6 @@ export function NotificationBell() {
     };
   }, [open]);
 
-  const notifs = useMemo(() => buildNotifs(tasks, myId), [tasks, myId]);
-  const unread = useMemo(() => notifs.filter((n) => ms(n.at) > lastSeen).length, [notifs, lastSeen]);
-
-  function markAllRead() {
-    const now = Date.now();
-    setLastSeen(now);
-    if (typeof window !== "undefined") window.localStorage.setItem(SEEN_KEY, String(now));
-  }
-
   function toggle() {
     const next = !open;
     setOpen(next);
@@ -170,15 +52,15 @@ export function NotificationBell() {
     router.push(`/taskopad/tasks?task=${taskId}`);
   }
 
+  const triggerCls =
+    variant === "header"
+      ? "relative flex h-9 w-9 items-center justify-center rounded-lg text-gray-500 transition-colors duration-150 hover:bg-gray-100 hover:text-gray-700"
+      : "relative flex h-9 w-9 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-500 transition-colors duration-150 hover:bg-gray-50 hover:text-brand-accent";
+
   return (
     <div ref={ref} className="relative">
-      <button
-        type="button"
-        onClick={toggle}
-        aria-label="Notifications"
-        className="relative flex h-9 w-9 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-500 transition-colors duration-150 hover:bg-gray-50 hover:text-brand-accent"
-      >
-        <Bell size={17} />
+      <button type="button" onClick={toggle} aria-label="Notifications" className={triggerCls}>
+        <Bell size={variant === "header" ? 20 : 17} />
         {unread > 0 && (
           <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-rose-500 px-1 text-[10px] font-semibold text-white">
             {unread > 9 ? "9+" : unread}
@@ -187,7 +69,7 @@ export function NotificationBell() {
       </button>
 
       {open && (
-        <div className="absolute right-0 z-30 mt-2 w-80 origin-top-right overflow-hidden rounded-xl border border-gray-200 bg-white shadow-lg animate-fade-in">
+        <div className="absolute right-0 z-40 mt-2 w-80 origin-top-right overflow-hidden rounded-xl border border-gray-200 bg-white shadow-lg animate-fade-in">
           <div className="flex items-center justify-between border-b border-gray-100 px-4 py-2.5">
             <span className="text-sm font-semibold text-gray-800">Notifications</span>
             {notifs.length > 0 && (
@@ -206,7 +88,7 @@ export function NotificationBell() {
                 <div className="mb-2 flex h-11 w-11 items-center justify-center rounded-full bg-gray-50 text-gray-300">
                   <Bell size={20} />
                 </div>
-                <p className="text-sm font-medium text-gray-500">You're all caught up</p>
+                <p className="text-sm font-medium text-gray-500">You&apos;re all caught up</p>
                 <p className="mt-0.5 text-xs text-gray-400">Task updates and reminders show up here.</p>
               </div>
             ) : (
@@ -228,7 +110,7 @@ export function NotificationBell() {
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-[13px] font-medium text-gray-800">{n.title}</span>
                       <span className="block truncate text-xs text-gray-500">{n.detail}</span>
-                      <span className="mt-0.5 block text-[11px] text-gray-400">{relative(n.at)}</span>
+                      <span className="mt-0.5 block text-[11px] text-gray-400">{relativeTime(n.at)}</span>
                     </span>
                     {isUnread && <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-brand-accent" />}
                   </button>

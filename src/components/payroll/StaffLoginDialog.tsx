@@ -30,8 +30,13 @@ export function StaffLoginDialog({ employee, onClose }: { employee: Employee; on
   // Default the role once roles arrive.
   const roleValue = roleId || String(defaultStaffRoleId(roles) ?? "");
 
-  // Users not already linked to another staff member.
-  const linkedIds = usePayrollStore((s) => s.employees.map((e) => e.userId).filter((x): x is number => x != null));
+  // Users not already linked to another staff member. Select the stable array, derive in a memo —
+  // deriving inside the selector returns a fresh array each render and trips the getSnapshot guard.
+  const employees = usePayrollStore((s) => s.employees);
+  const linkedIds = useMemo(
+    () => employees.map((e) => e.userId).filter((x): x is number => x != null),
+    [employees]
+  );
   const availableUsers = useMemo(
     () => users.filter((u) => u.id === employee.userId || !linkedIds.includes(u.id)),
     [users, linkedIds, employee.userId]

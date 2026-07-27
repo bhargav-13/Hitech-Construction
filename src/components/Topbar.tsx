@@ -1,11 +1,12 @@
 "use client";
 
 import { usePathname } from "next/navigation";
-import { Bell, FolderKanban, Landmark, UserCircle } from "lucide-react";
+import { FolderKanban, Landmark, UserCircle } from "lucide-react";
 import { useProjects } from "@/lib/useProjects";
 import { useProjectScope } from "@/lib/projectScope";
 import { useBankAccounts, useBankScope } from "@/lib/bankScope";
 import { GlobalSearch } from "./GlobalSearch";
+import { NotificationBell } from "./task/NotificationBell";
 import { Select } from "./Select";
 
 /** Vyapar routes where the bank-account filter has nothing to filter. */
@@ -42,9 +43,7 @@ export function Topbar({ title }: { title: string }) {
       </div>
       <div className="flex items-center gap-4 text-sm text-brand-accent">
         <GlobalSearch />
-        <button className="text-gray-500 hover:text-gray-700">
-          <Bell size={20} />
-        </button>
+        <NotificationBell variant="header" />
         <button className="text-orange-500 hover:text-orange-600">
           <UserCircle size={26} />
         </button>

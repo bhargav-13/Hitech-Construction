@@ -30,6 +30,7 @@ import { NAV_ITEMS, NAV_BREAK_AFTER, NAV_MODULE } from "@/lib/nav";
 import { useAppStore } from "@/lib/store";
 import { useAuthStore } from "@/lib/authStore";
 import { useUiStore } from "@/lib/uiStore";
+import { useTaskNotifications } from "@/lib/taskNotifications";
 import { projectAvatarColor, projectInitials } from "@/lib/projectHelpers";
 
 const ICONS: Record<string, React.ComponentType<{ size?: number; className?: string }>> = {
@@ -79,6 +80,8 @@ export function Sidebar() {
       })
     : NAV_ITEMS;
   const isAdmin = authUser?.permissions.includes("USER_MANAGEMENT:VIEW") ?? false;
+  // Unread task-notification count, surfaced as a live badge on the Taskopad nav item.
+  const { unread: taskUnread } = useTaskNotifications();
 
   async function handleLogout() {
     await authLogout();
@@ -125,20 +128,33 @@ export function Sidebar() {
             const Icon = ICONS[item.label] ?? LayoutGrid;
             const active =
               item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);
+            // Live unread count on Taskopad (task reminders / assignments / activity).
+            const count = item.href === "/taskopad" ? taskUnread : 0;
             const link = (
               <li key={item.href}>
                 <Link
                   href={item.href}
                   title={collapsed ? item.label : undefined}
-                  className={`flex items-center gap-3 rounded-r-lg border-l-[3px] py-2.5 pl-[9px] pr-3 text-sm transition-all duration-150 ease-out active:scale-[0.98] ${
+                  className={`relative flex items-center gap-3 rounded-r-lg border-l-[3px] py-2.5 pl-[9px] pr-3 text-sm transition-all duration-150 ease-out active:scale-[0.98] ${
                     active
                       ? "border-sidebar-active bg-sidebar-active/10 font-medium text-sidebar-active"
                       : "border-transparent text-sidebar-text hover:border-sidebar-active/30 hover:bg-white/5 hover:text-white"
                   }`}
                 >
                   <Icon size={18} className="flex-shrink-0" />
+                  {/* Collapsed rail: show a small count bubble on the icon corner. */}
+                  {collapsed && count > 0 && (
+                    <span className="absolute left-6 top-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-rose-500 px-1 text-[9px] font-semibold text-white">
+                      {count > 9 ? "9+" : count}
+                    </span>
+                  )}
                   {!collapsed && <span className="truncate">{item.label}</span>}
-                  {!collapsed && item.badge && (
+                  {!collapsed && count > 0 && (
+                    <span className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-rose-500 px-1.5 text-[10px] font-semibold text-white">
+                      {count > 99 ? "99+" : count}
+                    </span>
+                  )}
+                  {!collapsed && !count && item.badge && (
                     <span className="ml-auto rounded-full bg-amber-400/20 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-amber-300">
                       {item.badge}
                     </span>
