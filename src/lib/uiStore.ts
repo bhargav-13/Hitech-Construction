@@ -18,6 +18,9 @@ interface UiState {
   /** Vyapar's own inner rail. */
   vyaparRailCollapsed: boolean;
   toggleVyaparRail: () => void;
+  /** Payroll's own inner rail. */
+  payrollRailCollapsed: boolean;
+  togglePayrollRail: () => void;
 }
 
 export const useUiStore = create<UiState>()(
@@ -27,6 +30,8 @@ export const useUiStore = create<UiState>()(
       toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
       vyaparRailCollapsed: false,
       toggleVyaparRail: () => set((s) => ({ vyaparRailCollapsed: !s.vyaparRailCollapsed })),
+      payrollRailCollapsed: false,
+      togglePayrollRail: () => set((s) => ({ payrollRailCollapsed: !s.payrollRailCollapsed })),
     }),
     {
       name: "hitech.ui.v1",

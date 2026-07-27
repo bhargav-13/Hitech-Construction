@@ -155,6 +155,14 @@ export function TaskWorkspace({ projectId }: { projectId?: string }) {
     if (status || priority || assignee || from || to) setShowFilters(true);
   }, [searchParams]);
 
+  // Deep-link: open a specific task's drawer when arriving via ?task=<id> (e.g. from a notification).
+  useEffect(() => {
+    const taskId = searchParams?.get("task");
+    if (!taskId) return;
+    const match = allTasks.find((t) => t.id === taskId);
+    if (match) setEditing(match);
+  }, [searchParams, allTasks]);
+
   useEffect(() => {
     try {
       const saved = localStorage.getItem(COLUMNS_KEY);

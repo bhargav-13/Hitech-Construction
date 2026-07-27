@@ -45,6 +45,8 @@ export interface FinancialMonth {
 export interface NavItem {
   label: string;
   href: string;
+  /** Optional small pill shown next to the label, e.g. "Soon" for work-in-progress modules. */
+  badge?: string;
 }
 
 export interface ScheduleTask {

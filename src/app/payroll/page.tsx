@@ -1,190 +1,224 @@
 "use client";
 
-import { useState } from "react";
-import { ChevronLeft, ChevronRight, MapPin } from "lucide-react";
-import { AppShell } from "@/components/AppShell";
-import { inr } from "@/lib/format";
-import { SimpleTable } from "@/components/SimpleTable";
+import { useMemo, useState } from "react";
+import Link from "next/link";
+import { PayrollShell, StatCard } from "@/components/payroll/PayrollShell";
+import { MyPayrollHome } from "@/components/payroll/self/MyPayrollHome";
+import { DatePicker } from "@/components/DatePicker";
+import { usePayrollStore, getAttendance, usePayrollAccess } from "@/lib/payrollApi";
+import { ATTENDANCE_META, DEPARTMENTS } from "@/lib/payrollConfig";
+import type { AttendanceCode } from "@/lib/payrollConfig";
+import {
+  CalendarDays,
+  CircleCheck,
+  CircleX,
+  Clock,
+  LogIn,
+  LogOut,
+  Plane,
+  TimerReset,
+  TriangleAlert,
+  UserMinus,
+} from "lucide-react";
 
-const TABS = ["People", "Attendance", "Team Leaves", "My Leaves", "Holidays"] as const;
-type Tab = (typeof TABS)[number];
-
-interface Person {
-  name: string;
-  role: string;
-  staff: "Office Staff" | "Site Staff";
-  selfPunch: boolean;
-  wage: number;
+const iso = (d: Date) => d.toISOString().slice(0, 10);
+/** Most recent working day (skip Sundays) so the dashboard lands on a populated day, not a week-off. */
+function latestWorkingDay(): string {
+  const d = new Date();
+  while (d.getDay() === 0) d.setDate(d.getDate() - 1);
+  return iso(d);
 }
 
-const PEOPLE: Person[] = [
-  { name: "Anil Singh", role: "Store Guard", staff: "Site Staff", selfPunch: true, wage: 387 },
-  { name: "Anil Sisodiya", role: "Supervisor", staff: "Site Staff", selfPunch: true, wage: 484 },
-  { name: "Ankit Chauhan", role: "Site Engineer", staff: "Site Staff", selfPunch: true, wage: 710 },
-  { name: "Dilip Sirondiya", role: "Supervisor", staff: "Site Staff", selfPunch: true, wage: 484 },
-  { name: "Juber Supervisor", role: "Supervisor", staff: "Site Staff", selfPunch: true, wage: 645 },
-  { name: "Kishor Kumar", role: "Supervisor", staff: "Site Staff", selfPunch: false, wage: 484 },
-  { name: "Priya Mehta", role: "Accountant", staff: "Office Staff", selfPunch: false, wage: 1200 },
-  { name: "Rakesh Shah", role: "Project Manager", staff: "Office Staff", selfPunch: false, wage: 1600 },
-];
+/** The Payroll landing routes by access: HR admins get the full attendance dashboard, everyone
+ * else (project managers, team members, workers) gets their own self-service payroll home. */
+export default function PayrollLanding() {
+  const { isAdmin } = usePayrollAccess();
+  return isAdmin ? <AdminAttendanceDashboard /> : <MyPayrollHome />;
+}
 
-const HOLIDAYS = [
-  { date: "15-Aug-2026", name: "Independence Day", type: "National Holiday" },
-  { date: "02-Oct-2026", name: "Gandhi Jayanti", type: "National Holiday" },
-  { date: "20-Oct-2026", name: "Diwali", type: "Festival" },
-  { date: "26-Jan-2027", name: "Republic Day", type: "National Holiday" },
-];
+/** Attendance Dashboard — the day's staff attendance at a glance, by department and per employee. */
+function AdminAttendanceDashboard() {
+  const employees = usePayrollStore((s) => s.employees);
+  const overrides = usePayrollStore((s) => s.attendanceOverrides);
+  const [date, setDate] = useState(latestWorkingDay);
 
-const LEAVES = [
-  { name: "Ankit Chauhan", type: "Casual Leave", from: "10-Jul-2026", to: "11-Jul-2026", status: "Pending" },
-  { name: "Dilip Sirondiya", type: "Sick Leave", from: "05-Jul-2026", to: "05-Jul-2026", status: "Approved" },
-  { name: "Kishor Kumar", type: "Casual Leave", from: "15-Jul-2026", to: "16-Jul-2026", status: "Pending" },
-];
+  const active = useMemo(() => employees.filter((e) => e.active), [employees]);
 
-export default function PayrollPage() {
-  const [tab, setTab] = useState<Tab>("People");
-  const [staff, setStaff] = useState<"Office Staff" | "Site Staff">("Site Staff");
-  const [people, setPeople] = useState(PEOPLE);
-  const filtered = people.filter((p) => p.staff === staff);
+  const rows = useMemo(
+    () => active.map((e) => ({ emp: e, att: getAttendance(overrides, e, date) })),
+    [active, overrides, date]
+  );
+
+  const totals = useMemo(() => {
+    const t = { present: 0, absent: 0, halfDay: 0, paidLeave: 0, notMarked: 0, weekOff: 0, punchedIn: 0, punchedOut: 0, overtime: 0, fine: 0 };
+    for (const { att } of rows) {
+      if (att.code === "P") t.present++;
+      else if (att.code === "A") t.absent++;
+      else if (att.code === "HD") t.halfDay++;
+      else if (att.code === "PL") t.paidLeave++;
+      else if (att.code === "NM") t.notMarked++;
+      else if (att.code === "WO") t.weekOff++;
+      if (att.inTime) t.punchedIn++;
+      if (att.outTime) t.punchedOut++;
+      t.overtime += att.overtimeHours;
+      t.fine += att.fineHours;
+    }
+    return t;
+  }, [rows]);
+
+  const deactivated = employees.length - active.length;
+
+  const byDept = useMemo(() => {
+    return DEPARTMENTS.map((dept) => {
+      const deptRows = rows.filter((r) => r.emp.department === dept);
+      const c = { dept, count: deptRows.length, P: 0, A: 0, NM: 0, HD: 0, OT: 0, F: 0, L: 0 };
+      for (const { att } of deptRows) {
+        if (att.code === "P") c.P++;
+        else if (att.code === "A") c.A++;
+        else if (att.code === "NM") c.NM++;
+        else if (att.code === "HD") c.HD++;
+        else if (att.code === "PL") c.L++;
+        c.OT += att.overtimeHours;
+        c.F += att.fineHours;
+      }
+      return c;
+    }).filter((c) => c.count > 0);
+  }, [rows]);
+
+  const [deptFilter, setDeptFilter] = useState<string | null>(null);
+  const detailRows = deptFilter ? rows.filter((r) => r.emp.department === deptFilter) : rows;
 
   return (
-    <AppShell title="Payroll">
-      <div className="mb-4 flex gap-6 border-b border-gray-200">
-        {TABS.map((t) => (
-          <button
-            key={t}
-            onClick={() => setTab(t)}
-            className={`border-b-2 px-1 py-2 text-sm font-medium whitespace-nowrap ${
-              tab === t ? "border-brand-accent text-brand-accent" : "border-transparent text-gray-500 hover:text-gray-700"
-            }`}
-          >
-            {t}
-          </button>
-        ))}
-      </div>
-
-      {(tab === "People" || tab === "Attendance") && (
-        <div className="mb-4 flex items-center justify-between">
-          <div className="inline-flex rounded-lg border border-gray-200 bg-white p-1">
-            {(["Office Staff", "Site Staff"] as const).map((s) => (
-              <button
-                key={s}
-                onClick={() => setStaff(s)}
-                className={`rounded-md px-4 py-1.5 text-sm font-medium ${
-                  staff === s ? "bg-brand-accent text-white" : "text-gray-500"
-                }`}
-              >
-                {s}
-              </button>
-            ))}
+    <PayrollShell>
+      <div className="space-y-5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="text-lg font-semibold text-gray-800">Attendance Dashboard</h2>
+            <p className="mt-0.5 text-sm text-gray-500">Daily attendance overview for the selected date.</p>
           </div>
-          {tab === "People" && (
-            <button className="rounded-lg bg-brand-accent px-4 py-2 text-sm font-medium text-white hover:opacity-90">+ New Payroll</button>
-          )}
+          <div className="flex items-center gap-2">
+            <div className="w-44">
+              <DatePicker value={date} onChange={setDate} placeholder="Select date" />
+            </div>
+            <Link
+              href="/payroll/attendance"
+              className="flex items-center gap-1.5 rounded-lg bg-brand-accent px-3.5 py-2 text-sm font-semibold text-white transition-all duration-150 hover:opacity-90 active:scale-95"
+            >
+              <CalendarDays size={15} /> Mark Attendance
+            </Link>
+          </div>
         </div>
-      )}
 
-      {tab === "People" && (
+        {/* Overview cards */}
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+          <StatCard label="Present" value={totals.present} accent="green" icon={CircleCheck} />
+          <StatCard label="Absent" value={totals.absent} accent="rose" icon={CircleX} />
+          <StatCard label="Half Day" value={totals.halfDay} accent="amber" icon={Clock} />
+          <StatCard label="On Leave" value={totals.paidLeave} accent="blue" icon={Plane} />
+          <StatCard label="Not Marked" value={totals.notMarked} accent="gray" icon={TimerReset} />
+          <StatCard label="Punched In" value={totals.punchedIn} accent="cyan" icon={LogIn} />
+          <StatCard label="Punched Out" value={totals.punchedOut} accent="cyan" icon={LogOut} />
+          <StatCard label="Overtime Hrs" value={totals.overtime} accent="green" icon={TimerReset} />
+          <StatCard label="Fine Hrs" value={totals.fine} accent="rose" icon={TriangleAlert} />
+          <StatCard label="Deactivated" value={deactivated} accent="gray" icon={UserMinus} />
+        </div>
+
+        {/* Department-wise attendance */}
         <div className="overflow-hidden rounded-xl border border-gray-200 bg-white">
-          <div className="grid grid-cols-[2fr_1.4fr_auto_auto] gap-4 border-b border-gray-100 bg-gray-50 px-4 py-3 text-xs font-medium text-gray-500">
-            <div>Party</div>
-            <div>Associated Projects</div>
-            <div className="text-center">Self Punch</div>
-            <div className="text-right">Payroll Type</div>
+          <div className="flex items-center justify-between border-b border-gray-100 px-4 py-3">
+            <h3 className="text-sm font-semibold text-gray-800">Department-wise Attendance</h3>
+            {deptFilter && (
+              <button onClick={() => setDeptFilter(null)} className="text-xs font-medium text-brand-accent hover:underline">
+                Clear filter · {deptFilter}
+              </button>
+            )}
           </div>
-          {filtered.map((p, i) => (
-            <div key={p.name} className="grid grid-cols-[2fr_1.4fr_auto_auto] items-center gap-4 border-b border-gray-50 px-4 py-3 last:border-b-0">
-              <div>
-                <div className="text-sm font-medium text-gray-800">{p.name}</div>
-                <div className="text-xs text-gray-400">{p.role}</div>
-              </div>
-              <button className="text-left text-xs font-medium text-brand-accent">+ Add (1)</button>
-              <div className="flex justify-center">
-                <button
-                  onClick={() => setPeople(people.map((x) => (x.name === p.name ? { ...x, selfPunch: !x.selfPunch } : x)))}
-                  className={`relative h-5 w-9 rounded-full transition-colors ${p.selfPunch ? "bg-brand-accent" : "bg-gray-300"}`}
-                >
-                  <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition-all ${p.selfPunch ? "left-4" : "left-0.5"}`} />
-                </button>
-              </div>
-              <div className="text-right">
-                <span className="rounded bg-green-50 px-2 py-1 text-xs font-medium text-green-700">{p.staff}</span>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {tab === "Attendance" && (
-        <div className="space-y-3">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <button className="rounded-lg border border-gray-200 bg-white p-2 text-gray-500"><ChevronLeft size={15} /></button>
-              <div className="rounded-lg bg-green-500 px-4 py-2 text-center text-sm font-semibold text-white">2 Thu</div>
-              <button className="rounded-lg border border-gray-200 bg-white p-2 text-gray-500"><ChevronRight size={15} /></button>
-              <span className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-600">Jul 2026</span>
-            </div>
-            <div className="text-sm text-gray-600">
-              <span className="font-semibold text-gray-800">{filtered.length} Present</span> · 1 Absent · 0 Paid Leave · 0 Week Off
-            </div>
-          </div>
-          <div className="overflow-hidden rounded-xl border border-gray-200 bg-white">
-            <div className="grid grid-cols-[2fr_auto_1.4fr_auto_auto] gap-4 border-b border-gray-100 bg-gray-50 px-4 py-3 text-xs font-medium text-gray-500">
-              <div>Name</div>
-              <div>Wage</div>
-              <div>Punch</div>
-              <div>Shift</div>
-              <div className="text-right">Status</div>
-            </div>
-            {filtered.map((p, i) => (
-              <div key={p.name} className="grid grid-cols-[2fr_auto_1.4fr_auto_auto] items-center gap-4 border-b border-gray-50 px-4 py-3 last:border-b-0">
-                <div>
-                  <div className="text-sm font-medium text-gray-800">{p.name}</div>
-                  <div className="text-xs text-gray-400">{p.role}</div>
-                </div>
-                <div className="text-sm text-gray-700">{formatWage(p.wage)}</div>
-                <div className="flex items-center gap-1 text-sm text-gray-600">
-                  <MapPin size={12} className="text-gray-400" />
-                  {8 + (i % 2)}:{(10 + i * 4) % 60 < 10 ? "0" : ""}{(10 + i * 4) % 60} AM
-                  {i % 3 === 0 && <span className="ml-1 rounded bg-rose-50 px-1.5 py-0.5 text-[10px] text-rose-600">LATE</span>}
-                </div>
-                <div className="text-sm text-gray-500">1 Shift</div>
-                <div className="text-right">
-                  <span className="rounded-md bg-green-50 px-2 py-1 text-xs font-medium text-green-700">Present</span>
-                </div>
-              </div>
-            ))}
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[720px] border-collapse text-sm">
+              <thead>
+                <tr className="border-b border-gray-100 bg-gray-50 text-left text-gray-500">
+                  <th className="px-4 py-2 font-medium">Department</th>
+                  <Th>P</Th>
+                  <Th>A</Th>
+                  <Th>NM</Th>
+                  <Th>HD</Th>
+                  <Th>OT</Th>
+                  <Th>F</Th>
+                  <Th>L</Th>
+                </tr>
+              </thead>
+              <tbody>
+                {byDept.map((c) => (
+                  <tr
+                    key={c.dept}
+                    onClick={() => setDeptFilter(c.dept === deptFilter ? null : c.dept)}
+                    className={`cursor-pointer border-b border-gray-50 transition-colors duration-150 last:border-b-0 hover:bg-cyan-50/40 ${
+                      deptFilter === c.dept ? "bg-cyan-50/60" : ""
+                    }`}
+                  >
+                    <td className="px-4 py-2.5 font-medium text-gray-700">{c.dept}</td>
+                    <Td className="text-emerald-600">{c.P}</Td>
+                    <Td className="text-rose-600">{c.A}</Td>
+                    <Td className="text-gray-400">{c.NM}</Td>
+                    <Td className="text-amber-600">{c.HD}</Td>
+                    <Td>{c.OT}</Td>
+                    <Td className="text-rose-500">{c.F}</Td>
+                    <Td className="text-blue-600">{c.L}</Td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         </div>
-      )}
 
-      {(tab === "Team Leaves" || tab === "My Leaves") && (
-        <SimpleTable
-          columns={[
-            { key: "name", label: "Name" },
-            { key: "type", label: "Leave Type" },
-            { key: "from", label: "From" },
-            { key: "to", label: "To" },
-            { key: "status", label: "Status" },
-          ]}
-          rows={tab === "My Leaves" ? LEAVES.slice(0, 1) : LEAVES}
-        />
-      )}
-
-      {tab === "Holidays" && (
-        <SimpleTable
-          columns={[
-            { key: "date", label: "Date" },
-            { key: "name", label: "Holiday" },
-            { key: "type", label: "Type" },
-          ]}
-          rows={HOLIDAYS}
-        />
-      )}
-    </AppShell>
+        {/* Daily attendance view */}
+        <div className="overflow-hidden rounded-xl border border-gray-200 bg-white">
+          <div className="border-b border-gray-100 px-4 py-3">
+            <h3 className="text-sm font-semibold text-gray-800">
+              Daily Attendance {deptFilter && <span className="text-gray-400">· {deptFilter}</span>}
+            </h3>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[640px] border-collapse text-sm">
+              <thead>
+                <tr className="border-b border-gray-100 bg-gray-50 text-left text-gray-500">
+                  <th className="px-4 py-2 font-medium">Name</th>
+                  <th className="px-4 py-2 font-medium">Department</th>
+                  <th className="px-4 py-2 font-medium">Attendance</th>
+                  <th className="px-4 py-2 font-medium">In Time</th>
+                  <th className="px-4 py-2 font-medium">Out Time</th>
+                </tr>
+              </thead>
+              <tbody>
+                {detailRows.map(({ emp, att }) => (
+                  <tr key={emp.id} className="border-b border-gray-50 transition-colors duration-150 last:border-b-0 even:bg-gray-50/40 hover:bg-cyan-50/40">
+                    <td className="px-4 py-2.5">
+                      <div className="font-medium text-gray-800">{emp.name}</div>
+                      <div className="text-xs text-gray-400">{emp.staffId} · {emp.designation}</div>
+                    </td>
+                    <td className="px-4 py-2.5 text-gray-600">{emp.department}</td>
+                    <td className="px-4 py-2.5"><AttBadge code={att.code} /></td>
+                    <td className="px-4 py-2.5 text-gray-600">{att.inTime ?? "—"}</td>
+                    <td className="px-4 py-2.5 text-gray-600">{att.outTime ?? "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </PayrollShell>
   );
 }
 
-function formatWage(n: number) {
-  return inr(n);
+function Th({ children }: { children: React.ReactNode }) {
+  return <th className="px-4 py-2 text-center font-medium">{children}</th>;
+}
+function Td({ children, className = "" }: { children: React.ReactNode; className?: string }) {
+  return <td className={`px-4 py-2.5 text-center font-medium ${className}`}>{children}</td>;
+}
+
+export function AttBadge({ code }: { code: AttendanceCode }) {
+  const m = ATTENDANCE_META[code];
+  return <span className={`rounded-md px-2 py-0.5 text-xs font-medium ${m.className}`}>{m.label}</span>;
 }

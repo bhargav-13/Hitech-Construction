@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ChevronRight } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
+import { NotificationBell } from "@/components/task/NotificationBell";
 
 const TABS = [
   { label: "Dashboard", href: "/taskopad" },
@@ -19,12 +20,15 @@ export function TaskopadShell({ children }: { children: React.ReactNode }) {
   return (
     <AppShell title="Taskopad">
       <div className="space-y-5">
-        <div className="flex items-center gap-1.5 text-xs text-gray-400">
-          <Link href="/taskopad" className="transition-colors duration-150 hover:text-gray-600 hover:underline">
-            Taskopad
-          </Link>
-          <ChevronRight size={12} className="shrink-0" />
-          <span className="font-medium text-gray-600">{active?.label ?? "Dashboard"}</span>
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-1.5 text-xs text-gray-400">
+            <Link href="/taskopad" className="transition-colors duration-150 hover:text-gray-600 hover:underline">
+              Taskopad
+            </Link>
+            <ChevronRight size={12} className="shrink-0" />
+            <span className="font-medium text-gray-600">{active?.label ?? "Dashboard"}</span>
+          </div>
+          <NotificationBell />
         </div>
 
         <div className="flex gap-5 border-b border-gray-200">

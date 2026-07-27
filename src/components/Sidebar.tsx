@@ -138,6 +138,11 @@ export function Sidebar() {
                 >
                   <Icon size={18} className="flex-shrink-0" />
                   {!collapsed && <span className="truncate">{item.label}</span>}
+                  {!collapsed && item.badge && (
+                    <span className="ml-auto rounded-full bg-amber-400/20 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-amber-300">
+                      {item.badge}
+                    </span>
+                  )}
                 </Link>
               </li>
             );
