@@ -42,6 +42,8 @@ export interface TaskAttachment {
   size: string;
   at: string;
   url: string | null;
+  /** Uploader user id — needed to align attachment bubbles in the chat view. */
+  userId: string;
 }
 
 export interface TaskActivity {
@@ -158,6 +160,7 @@ export function taskFromApi(t: ApiTask): Task {
       size: a.sizeLabel ?? "",
       at: a.at,
       url: a.dataUrl ?? null,
+      userId: String(a.uploadedBy),
     })),
     activity: (t.activity ?? []).map((a) => ({
       id: String(a.id),

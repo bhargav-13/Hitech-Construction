@@ -1,6 +1,6 @@
 "use client";
 
-import { useLayoutEffect, useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import {
   X,
   Paperclip,
@@ -24,7 +24,7 @@ import { useDepartments } from "@/lib/useDepartments";
 import { useProjects } from "@/lib/useProjects";
 import { useTaskStore } from "@/lib/taskStore";
 import { TASK_PRIORITIES, TASK_STATUSES, formatTaskDate, formatTaskDateTime, toIso } from "@/lib/taskTypes";
-import type { SubTask, Task, TaskPriority, TaskStatus } from "@/lib/taskTypes";
+import type { SubTask, Task, TaskAttachment, TaskComment, TaskPriority, TaskStatus } from "@/lib/taskTypes";
 import { UserAvatar } from "./TaskBits";
 import { Select } from "@/components/Select";
 import { DatePicker } from "@/components/DatePicker";
@@ -77,138 +77,136 @@ function activityIcon(text: string) {
 }
 
 /**
- * Builds a mostly-straight snake through the node centres: a vertical drop, a short
- * horizontal hop to the next side, joined only by small rounded corners at the turns.
+ * WhatsApp-style discussion thread for a task. Merges comments and attachments into one timeline
+ * sorted by time; the current user's messages bubble right in accent colour, everyone else's
+ * bubble left on a light background. Attachments render as a compact file card inside a bubble
+ * so uploads show up in the conversation instead of being hidden away in the Attachment tab.
  */
-function snakePath(pts: { x: number; y: number }[]) {
-  if (pts.length < 2) return "";
-  let d = `M ${pts[0].x} ${pts[0].y}`;
-  for (let i = 1; i < pts.length; i++) {
-    const p0 = pts[i - 1];
-    const p1 = pts[i];
-    const my = (p0.y + p1.y) / 2;
-    const dir = Math.sign(p1.x - p0.x) || 1;
-    const r = Math.min(14, Math.abs(p1.x - p0.x) / 2, (p1.y - p0.y) / 2);
-    // straight down, round into the horizontal, straight across, round back into the vertical
-    d += ` L ${p0.x} ${my - r}`;
-    d += ` Q ${p0.x} ${my} ${p0.x + dir * r} ${my}`;
-    d += ` L ${p1.x - dir * r} ${my}`;
-    d += ` Q ${p1.x} ${my} ${p1.x} ${my + r}`;
-    d += ` L ${p1.x} ${p1.y}`;
+type ChatEntry =
+  | { kind: "comment"; id: string; userId: string; at: string; text: string }
+  | { kind: "attachment"; id: string; userId: string; at: string; att: TaskAttachment };
+
+function ChatThread({
+  comments,
+  attachments,
+  userName,
+  meId,
+}: {
+  comments: TaskComment[];
+  attachments: TaskAttachment[];
+  userName: (id: string) => string;
+  meId: string;
+}) {
+  const entries = useMemo<ChatEntry[]>(() => {
+    const merged: ChatEntry[] = [
+      ...comments.map((c) => ({ kind: "comment" as const, id: `c-${c.id}`, userId: c.userId, at: c.at, text: c.text })),
+      ...attachments.map((a) => ({ kind: "attachment" as const, id: `a-${a.id}`, userId: a.userId, at: a.at, att: a })),
+    ];
+    // Oldest first — matches WhatsApp reading order; the composer sits below.
+    merged.sort((x, y) => x.at.localeCompare(y.at));
+    return merged;
+  }, [comments, attachments]);
+
+  if (entries.length === 0) {
+    return <p className="py-10 text-center text-xs text-gray-400">No messages yet. Say hi 👋</p>;
   }
-  return d;
+
+  return (
+    <div className="flex flex-col gap-2">
+      {entries.map((e) => {
+        const mine = e.userId === meId;
+        return (
+          <div key={e.id} className={`flex items-end gap-1.5 ${mine ? "justify-end" : "justify-start"}`}>
+            {!mine && <UserAvatar id={e.userId} name={userName(e.userId)} size={22} />}
+            <div className={`flex max-w-[78%] flex-col ${mine ? "items-end" : "items-start"}`}>
+              {!mine && (
+                <span className="mb-0.5 px-1 text-[10px] font-medium text-gray-500">
+                  {userName(e.userId)}
+                </span>
+              )}
+              {e.kind === "comment" ? (
+                <div
+                  className={`whitespace-pre-wrap break-words rounded-2xl px-3 py-1.5 text-sm shadow-sm ${
+                    mine
+                      ? "rounded-br-sm bg-brand-accent text-white"
+                      : "rounded-bl-sm bg-gray-100 text-gray-800"
+                  }`}
+                >
+                  {e.text}
+                </div>
+              ) : (
+                <a
+                  href={e.att.url ?? undefined}
+                  download={e.att.url ? e.att.name : undefined}
+                  className={`flex max-w-[240px] items-center gap-2 rounded-2xl px-2.5 py-1.5 text-sm shadow-sm transition-opacity hover:opacity-90 ${
+                    mine
+                      ? "rounded-br-sm bg-brand-accent text-white"
+                      : "rounded-bl-sm bg-gray-100 text-gray-800"
+                  } ${e.att.url ? "cursor-pointer" : "cursor-default"}`}
+                  title={e.att.url ? `Download ${e.att.name}` : e.att.name}
+                >
+                  <span
+                    className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${
+                      mine ? "bg-white/20" : "bg-white"
+                    }`}
+                  >
+                    <FileText size={14} />
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-xs font-medium">{e.att.name}</span>
+                    <span className={`block truncate text-[10px] ${mine ? "text-white/80" : "text-gray-500"}`}>
+                      {e.att.size || "File"}
+                      {e.att.url ? " · Tap to download" : " · No file data"}
+                    </span>
+                  </span>
+                </a>
+              )}
+              <span className="mt-0.5 px-1 text-[10px] text-gray-400">{formatTaskDate(e.at)}</span>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
 }
 
 /**
- * Log-activity timeline where entries alternate sides and are joined by a flowing curve.
- * Node positions are measured after layout so the curve tracks real (variable-height) rows.
+ * Single-column vertical activity timeline. Each entry is one row: icon + text + actor + time,
+ * connected by a subtle dotted line down the left. No side-alternation, no measured curve.
  */
-function CurvyActivityTimeline({
+function ActivityTimeline({
   items,
   userName,
 }: {
   items: ActivityItem[];
   userName?: (id: string) => string;
 }) {
-  const wrapRef = useRef<HTMLDivElement>(null);
-  const nodeRefs = useRef<(HTMLDivElement | null)[]>([]);
-  const [pts, setPts] = useState<{ x: number; y: number }[]>([]);
-  const [hovered, setHovered] = useState<number | null>(null);
-
-  useLayoutEffect(() => {
-    function measure() {
-      const wrap = wrapRef.current;
-      if (!wrap) return;
-      const wb = wrap.getBoundingClientRect();
-      setPts(
-        nodeRefs.current.slice(0, items.length).map((n) => {
-          if (!n) return { x: 0, y: 0 };
-          const b = n.getBoundingClientRect();
-          return { x: b.left - wb.left + b.width / 2, y: b.top - wb.top + b.height / 2 };
-        })
-      );
-    }
-    measure();
-    const ro = new ResizeObserver(measure);
-    if (wrapRef.current) ro.observe(wrapRef.current);
-    return () => ro.disconnect();
-  }, [items]);
-
   if (items.length === 0) {
     return <p className="py-10 text-center text-xs text-gray-400">No activity yet.</p>;
   }
-
   return (
-    <div ref={wrapRef} className="relative py-1">
-      <svg className="pointer-events-none absolute inset-0 h-full w-full" fill="none" aria-hidden>
-        <path
-          d={snakePath(pts)}
-          className="stroke-cyan-300"
-          strokeWidth={2}
-          strokeLinecap="round"
-          strokeDasharray="1 6"
-        />
-      </svg>
-      {items.map((a, i) => {
-        const right = i % 2 === 0;
+    <ol className="relative pl-6">
+      <span
+        aria-hidden
+        className="absolute left-[11px] top-3 bottom-3 w-px border-l border-dashed border-cyan-200"
+      />
+      {items.map((a) => {
         const Icon = activityIcon(a.text);
-        const isHovered = hovered === i;
         const actor = a.userId && userName ? userName(a.userId) : null;
         return (
-          <div
-            key={a.id}
-            className="group relative min-h-[62px]"
-            onMouseEnter={() => setHovered(i)}
-            onMouseLeave={() => setHovered((h) => (h === i ? null : h))}
-          >
-            <div
-              ref={(el) => {
-                nodeRefs.current[i] = el;
-              }}
-              className={`absolute top-3 z-10 flex h-7 w-7 -translate-x-1/2 items-center justify-center rounded-full border bg-white text-brand-accent shadow-sm transition-all duration-300 ${
-                isHovered
-                  ? "scale-125 border-cyan-400 shadow-md ring-4 ring-cyan-100"
-                  : "border-cyan-200"
-              }`}
-              style={{ left: right ? "78%" : "22%" }}
-            >
-              <Icon size={14} />
+          <li key={a.id} className="relative py-2.5">
+            <span className="absolute -left-6 top-2.5 flex h-6 w-6 items-center justify-center rounded-full border border-cyan-200 bg-white text-brand-accent shadow-sm">
+              <Icon size={12} />
+            </span>
+            <div className="text-sm leading-snug text-gray-700">{a.text}</div>
+            <div className="mt-0.5 text-[10px] text-gray-400">
+              {actor && <span className="mr-1 font-medium text-gray-500">{actor}</span>}
+              {formatTaskDateTime(a.at)}
             </div>
-            <div
-              className={`transition-transform duration-300 ${
-                right ? "pr-[27%] text-right" : "pl-[27%] text-left"
-              } ${isHovered ? (right ? "-translate-x-1" : "translate-x-1") : ""}`}
-            >
-              <div className="text-sm leading-snug text-gray-700">{a.text}</div>
-              <div className="mt-0.5 text-[10px] text-gray-400">{formatTaskDateTime(a.at)}</div>
-            </div>
-
-            {/* Hover detail card */}
-            <div
-              className={`pointer-events-none absolute top-1 z-20 w-52 rounded-lg border border-cyan-100 bg-white p-3 shadow-lg transition-all duration-200 ${
-                right ? "right-[calc(22%_+_1rem)] origin-right" : "left-[calc(22%_+_1rem)] origin-left"
-              } ${
-                isHovered
-                  ? "translate-y-0 scale-100 opacity-100"
-                  : "translate-y-1 scale-95 opacity-0"
-              }`}
-            >
-              <div className="flex items-center gap-1.5 text-brand-accent">
-                <Icon size={13} />
-                <span className="text-[11px] font-semibold uppercase tracking-wide">Activity</span>
-              </div>
-              <div className="mt-1.5 text-xs leading-snug text-gray-700">{a.text}</div>
-              {actor && (
-                <div className="mt-2 text-[11px] text-gray-500">
-                  by <span className="font-medium text-gray-700">{actor}</span>
-                </div>
-              )}
-              <div className="mt-0.5 text-[11px] text-gray-400">{formatTaskDateTime(a.at)}</div>
-            </div>
-          </div>
+          </li>
         );
       })}
-    </div>
+    </ol>
   );
 }
 
@@ -352,6 +350,7 @@ export function TaskDrawer({
   }
 
   const userName = (id: string) => users.find((u) => u.id === id)?.name ?? "Unknown";
+  const meId = authUser ? String(authUser.id) : "";
 
   return (
     <div
@@ -676,6 +675,10 @@ export function TaskDrawer({
 
           {/* Side panel */}
           <div className="hidden w-[340px] shrink-0 flex-col lg:flex">
+            {/* Hidden file input, shared by the Attachment tab's "Upload a file" button and the
+                Comment tab's paper-clip in the composer. Kept at the top so it stays mounted
+                whichever tab is active. */}
+            <input ref={fileRef} type="file" hidden onChange={onUploadFile} />
             <div className="flex border-b border-gray-100">
               {(["Comment", "Attachment", "Log Activity"] as Panel[]).map((p) => (
                 <button
@@ -696,22 +699,12 @@ export function TaskDrawer({
                   Save the task to start a discussion, attach files and see its activity log.
                 </p>
               ) : panel === "Comment" ? (
-                liveTask.comments.length === 0 ? (
-                  <p className="py-10 text-center text-xs text-gray-400">No comments yet.</p>
-                ) : (
-                  <div className="space-y-3">
-                    {liveTask.comments.map((c) => (
-                      <div key={c.id} className="flex gap-2">
-                        <UserAvatar id={c.userId} name={userName(c.userId)} size={26} />
-                        <div className="min-w-0 flex-1">
-                          <div className="text-xs font-medium text-gray-700">{userName(c.userId)}</div>
-                          <div className="text-sm text-gray-600">{c.text}</div>
-                          <div className="text-[10px] text-gray-400">{formatTaskDate(c.at)}</div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )
+                <ChatThread
+                  comments={liveTask.comments}
+                  attachments={liveTask.attachments}
+                  userName={userName}
+                  meId={meId}
+                />
               ) : panel === "Attachment" ? (
                 <div className="space-y-3">
                   <button
@@ -720,7 +713,6 @@ export function TaskDrawer({
                   >
                     <Paperclip size={14} /> Upload a file
                   </button>
-                  <input ref={fileRef} type="file" hidden onChange={onUploadFile} />
                   {liveTask.attachments.length === 0 ? (
                     <p className="py-6 text-center text-xs text-gray-400">No attachments yet.</p>
                   ) : (
@@ -760,7 +752,7 @@ export function TaskDrawer({
                   )}
                 </div>
               ) : (
-                <CurvyActivityTimeline items={liveTask.activity} userName={userName} />
+                <ActivityTimeline items={liveTask.activity} userName={userName} />
               )}
             </div>
 
@@ -774,8 +766,16 @@ export function TaskDrawer({
                   className="flex-1 rounded-full border border-gray-200 px-3 py-1.5 text-sm outline-none transition-colors duration-150 focus:border-cyan-500"
                 />
                 <button
+                  onClick={() => fileRef.current?.click()}
+                  title="Attach a file"
+                  className="rounded-full border border-gray-200 p-2 text-gray-500 transition-all duration-150 hover:border-brand-accent hover:text-brand-accent active:scale-90"
+                >
+                  <Paperclip size={14} />
+                </button>
+                <button
                   onClick={sendComment}
                   disabled={sendingComment}
+                  title="Send message"
                   className="rounded-full bg-brand-accent p-2 text-white transition-all duration-150 hover:opacity-90 active:scale-90 disabled:opacity-60"
                 >
                   {sendingComment ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
