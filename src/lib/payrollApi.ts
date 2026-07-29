@@ -13,6 +13,7 @@ import { persist, createJSONStorage } from "zustand/middleware";
 import { useAuthStore } from "./authStore";
 import type { StaffCategory, AttendanceCode } from "./payrollConfig";
 import { DEPARTMENTS } from "./payrollConfig";
+import type { PayrollProfileResponse } from "./api";
 
 // ---------------- Types ----------------
 
@@ -33,6 +34,12 @@ export interface SalaryStructure {
   pt: boolean;
 }
 
+// NOTE: Shifts, Holiday Policy, Leave Policy and the per-member Payroll Profile are now REAL,
+// backed by payroll-service (see @/lib/api.ts — ShiftResponse/HolidayPolicyResponse/
+// LeavePolicyResponse/PayrollProfileResponse — and @/lib/usePayrollSetup.ts for the fetch hooks).
+// They used to live here as localStorage-only types; this file still owns everything else in
+// Payroll that hasn't been migrated yet (Employee roster, attendance, loans, payments...).
+
 export interface Employee {
   id: string;
   name: string;
@@ -51,6 +58,31 @@ export interface Employee {
   pan: string | null;
   /** Linked ERP user account (real user-management id), so this employee can log in. null = no login yet. */
   userId: number | null;
+  /** Projects this employee is posted to — mirrors Onsite's "Associated Projects". */
+  associatedProjects: string[];
+  /** Payroll work locations (geofences) this employee may punch from. A person can work several
+   *  sites, so this is a list; it is independent of projects. */
+  assignedLocations: string[];
+  /** Enrolled reference faceprint (128 floats) captured once; every punch is matched against it.
+   *  null = not enrolled yet. */
+  faceDescriptor: number[] | null;
+  /** Small JPEG data URL of the enrolled reference selfie (shown to admins). */
+  facePhoto: string | null;
+}
+
+/** A single geographic point (a polygon vertex). */
+export interface GeoPoint {
+  lat: number;
+  lng: number;
+}
+
+/** A geofenced work location, defined as a free-form polygon drawn on a map. Set in Payroll, not per
+ *  project. Any number of points (min 3) so irregular sites — L-shapes, long strips — fit exactly. */
+export interface WorkLocation {
+  id: string;
+  name: string;
+  /** Polygon vertices in order. The shape is closed automatically (last point joins the first). */
+  points: GeoPoint[];
 }
 
 export interface AttendanceEntry {
@@ -59,6 +91,15 @@ export interface AttendanceEntry {
   outTime: string | null;
   overtimeHours: number;
   fineHours: number;
+  /** Which project site this punch was recorded at. Ties attendance to a project so the same
+   *  record shows in both the Payroll muster roll and the Project's Attendance tab. */
+  projectId: string | null;
+  punchLocation?: string | null;
+  /** Face-verified punch selfies (JPEG data URLs) captured at punch-in / punch-out. */
+  punchInPhoto?: string | null;
+  punchOutPhoto?: string | null;
+  /** Face-match distance recorded at the last punch (lower = closer match). */
+  faceScore?: number | null;
 }
 
 export type LoanInterestType = "FLAT" | "SIMPLE" | "COMPOUND";
@@ -184,6 +225,10 @@ function seedEmployees(): Employee[] {
       bankName: category !== "WORK_BASIS" ? "HDFC Bank" : null,
       pan: category === "REGULAR" ? `ABCDE${1000 + i}F` : null,
       userId: null,
+      associatedProjects: [],
+      assignedLocations: [],
+      faceDescriptor: null,
+      facePhoto: null,
     };
   });
 }
@@ -272,11 +317,24 @@ interface PayrollState {
   taxProfiles: TaxProfile[];
   /** Employees whose payroll is locked / held / stopped for the current cycle. */
   payrollFlags: Record<string, "LOCKED" | "HOLD" | "STOP" | "PROCESSED">;
+  /** Geofenced work locations, drawn on a map in Payroll. Key = locationId. */
+  locations: Record<string, WorkLocation>;
 
   addEmployee: (e: Omit<Employee, "id" | "staffId">) => Employee;
   updateEmployee: (id: string, patch: Partial<Employee>) => void;
   /** Attach (or detach with null) a real ERP user account to an employee so they can log in. */
   linkUser: (employeeId: string, userId: number | null) => void;
+  /** Add/remove projects an employee is posted to — the Onsite "Associated Projects" link. */
+  setAssociatedProjects: (employeeId: string, projectIds: string[]) => void;
+  addAssociatedProject: (employeeId: string, projectId: string) => void;
+  removeAssociatedProject: (employeeId: string, projectId: string) => void;
+  /** Which geofenced work locations an employee may punch from (independent of projects). */
+  setAssignedLocations: (employeeId: string, locationIds: string[]) => void;
+  /** Enrol (or re-enrol) an employee's reference faceprint + selfie for punch verification. */
+  setFaceEnrollment: (employeeId: string, descriptor: number[], photo: string) => void;
+  /** Create / update a geofenced work location. */
+  saveLocation: (loc: WorkLocation) => void;
+  removeLocation: (id: string) => void;
   setAttendance: (employeeId: string, date: string, entry: AttendanceEntry) => void;
   addLoan: (l: Omit<Loan, "id">) => void;
   addReimbursement: (r: Omit<Reimbursement, "id">) => void;
@@ -298,6 +356,7 @@ export const usePayrollStore = create<PayrollState>()(
       payments: seedPayments(),
       taxProfiles: seedTaxProfiles(),
       payrollFlags: { "emp-1": "PROCESSED", "emp-2": "PROCESSED", "emp-7": "HOLD" },
+      locations: {},
 
       addEmployee: (e) => {
         const created: Employee = { ...e, id: rid("emp"), staffId: `HC${String(Math.floor(Math.random() * 9000) + 1000)}` };
@@ -308,6 +367,25 @@ export const usePayrollStore = create<PayrollState>()(
         set((s) => ({ employees: s.employees.map((e) => (e.id === id ? { ...e, ...patch } : e)) })),
       linkUser: (employeeId, userId) =>
         set((s) => ({ employees: s.employees.map((e) => (e.id === employeeId ? { ...e, userId } : e)) })),
+      setAssociatedProjects: (employeeId, projectIds) =>
+        set((s) => ({ employees: s.employees.map((e) => (e.id === employeeId ? { ...e, associatedProjects: projectIds } : e)) })),
+      addAssociatedProject: (employeeId, projectId) =>
+        set((s) => ({
+          employees: s.employees.map((e) => {
+            const ap = e.associatedProjects ?? [];
+            return e.id === employeeId && !ap.includes(projectId)
+              ? { ...e, associatedProjects: [...ap, projectId] }
+              : e;
+          }),
+        })),
+      removeAssociatedProject: (employeeId, projectId) =>
+        set((s) => ({
+          employees: s.employees.map((e) =>
+            e.id === employeeId
+              ? { ...e, associatedProjects: (e.associatedProjects ?? []).filter((p) => p !== projectId) }
+              : e
+          ),
+        })),
       setAttendance: (employeeId, date, entry) =>
         set((s) => ({ attendanceOverrides: { ...s.attendanceOverrides, [`${employeeId}|${date}`]: entry } })),
       addLoan: (l) => set((s) => ({ loans: [{ ...l, id: rid("loan") }, ...s.loans] })),
@@ -336,8 +414,24 @@ export const usePayrollStore = create<PayrollState>()(
           else next[employeeId] = flag;
           return { payrollFlags: next };
         }),
+      setAssignedLocations: (employeeId, locationIds) =>
+        set((s) => ({ employees: s.employees.map((e) => (e.id === employeeId ? { ...e, assignedLocations: locationIds } : e)) })),
+      setFaceEnrollment: (employeeId, descriptor, photo) =>
+        set((s) => ({ employees: s.employees.map((e) => (e.id === employeeId ? { ...e, faceDescriptor: descriptor, facePhoto: photo } : e)) })),
+      saveLocation: (loc) =>
+        set((s) => ({ locations: { ...s.locations, [loc.id]: loc } })),
+      removeLocation: (id) =>
+        set((s) => {
+          const nextLocs = { ...s.locations };
+          delete nextLocs[id];
+          // Also unassign it from any staff.
+          const employees = s.employees.map((e) =>
+            (e.assignedLocations ?? []).includes(id) ? { ...e, assignedLocations: e.assignedLocations.filter((l) => l !== id) } : e
+          );
+          return { locations: nextLocs, employees };
+        }),
     }),
-    { name: "hitech.payroll.v2", storage: createJSONStorage(() => localStorage) }
+    { name: "hitech.payroll.v3", storage: createJSONStorage(() => localStorage) }
   )
 );
 
@@ -351,8 +445,8 @@ export const usePayrollStore = create<PayrollState>()(
 export function genAttendance(staffId: string, date: string): AttendanceEntry {
   const d = new Date(date + "T00:00:00");
   const isFuture = d.getTime() > Date.now();
-  if (d.getDay() === 0) return { code: "WO", inTime: null, outTime: null, overtimeHours: 0, fineHours: 0 };
-  if (isFuture) return { code: "NM", inTime: null, outTime: null, overtimeHours: 0, fineHours: 0 };
+  if (d.getDay() === 0) return { code: "WO", inTime: null, outTime: null, overtimeHours: 0, fineHours: 0, projectId: null };
+  if (isFuture) return { code: "NM", inTime: null, outTime: null, overtimeHours: 0, fineHours: 0, projectId: null };
   // Cheap deterministic hash from staffId + date.
   let h = 0;
   const key = staffId + date;
@@ -361,16 +455,108 @@ export function genAttendance(staffId: string, date: string): AttendanceEntry {
   if (r < 78) {
     const late = r % 7 === 0;
     const ot = r % 11 === 0 ? 2 : 0;
-    return { code: "P", inTime: late ? "09:35" : "09:00", outTime: ot ? "20:00" : "18:00", overtimeHours: ot, fineHours: late ? 0.5 : 0 };
+    return { code: "P", inTime: late ? "09:35" : "09:00", outTime: ot ? "20:00" : "18:00", overtimeHours: ot, fineHours: late ? 0.5 : 0, projectId: null };
   }
-  if (r < 86) return { code: "HD", inTime: "09:00", outTime: "13:30", overtimeHours: 0, fineHours: 0 };
-  if (r < 92) return { code: "PL", inTime: null, outTime: null, overtimeHours: 0, fineHours: 0 };
-  return { code: "A", inTime: null, outTime: null, overtimeHours: 0, fineHours: 0 };
+  if (r < 86) return { code: "HD", inTime: "09:00", outTime: "13:30", overtimeHours: 0, fineHours: 0, projectId: null };
+  if (r < 92) return { code: "PL", inTime: null, outTime: null, overtimeHours: 0, fineHours: 0, projectId: null };
+  return { code: "A", inTime: null, outTime: null, overtimeHours: 0, fineHours: 0, projectId: null };
 }
 
 /** Attendance for an employee/date — user override if present, else the deterministic default. */
 export function getAttendance(overrides: Record<string, AttendanceEntry>, emp: Employee, date: string): AttendanceEntry {
   return overrides[`${emp.id}|${date}`] ?? genAttendance(emp.staffId, date);
+}
+
+/**
+ * How complete a member's payroll profile is, as 4 equal steps → a 0–100% score. Drives the People
+ * list progress bar and the setup wizard's stepper. A member with no profile scores 0%.
+ */
+export interface ProfileStep {
+  key: "employment" | "policies" | "salary" | "bank";
+  label: string;
+  done: boolean;
+}
+export interface ProfileProgress {
+  percent: number;
+  done: number;
+  total: number;
+  steps: ProfileStep[];
+}
+export function profileProgress(p: PayrollProfileResponse | undefined): ProfileProgress {
+  const steps: ProfileStep[] = [
+    { key: "employment", label: "Employment", done: !!p && !!p.designation && !!p.joiningDate },
+    { key: "policies", label: "Shift & Policies", done: !!p && !!p.shiftId && !!p.holidayPolicyId && !!p.leavePolicyId },
+    { key: "salary", label: "Salary", done: !!p && (p.salary.monthlyCtc > 0 || p.salary.workRate > 0) },
+    { key: "bank", label: "Bank & Identity", done: !!p && (!!p.bankAccount || !!p.pan) },
+  ];
+  const done = steps.filter((s) => s.done).length;
+  return { percent: Math.round((done / steps.length) * 100), done, total: steps.length, steps };
+}
+
+/** Daily rate for display — monthly CTC / 30 for salaried, workRate for work-basis. */
+export function dailyRate(emp: Employee): number {
+  if (emp.salary.workType) return emp.salary.workRate;
+  return emp.salary.monthlyCtc ? Math.round((emp.salary.monthlyCtc / 30) * 100) / 100 : 0;
+}
+
+/** Staff posted to a project — read from the stable `employees` array, derive in a memo. */
+export function staffForProject(employees: Employee[], projectId: string): Employee[] {
+  return employees.filter((e) => e.active && (e.associatedProjects ?? []).includes(projectId));
+}
+
+/** Haversine distance in metres between two GPS coordinates. */
+export function gpsDistance(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const R = 6371000;
+  const toRad = (x: number) => (x * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+/** The geographic centre (average of vertices) of a work location's polygon — used to recentre the
+ *  map and to report "you're ~Nm away" when a punch falls outside. */
+export function locationCenter(loc: WorkLocation): { lat: number; lng: number } {
+  const pts = loc.points ?? [];
+  if (pts.length === 0) return { lat: 0, lng: 0 };
+  const sum = pts.reduce((a, p) => ({ lat: a.lat + p.lat, lng: a.lng + p.lng }), { lat: 0, lng: 0 });
+  return { lat: sum.lat / pts.length, lng: sum.lng / pts.length };
+}
+
+/** Is a GPS point inside a work location's polygon? Ray-casting point-in-polygon over the vertices
+ *  (the shape is treated as closed). Needs at least 3 points to enclose any area. */
+export function isInsideLocation(lat: number, lng: number, loc: WorkLocation): boolean {
+  const pts = loc.points ?? [];
+  if (pts.length < 3) return false;
+  let inside = false;
+  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+    const yi = pts[i].lat, xi = pts[i].lng;
+    const yj = pts[j].lat, xj = pts[j].lng;
+    const intersects = yi > lat !== yj > lat && lng < ((xj - xi) * (lat - yi)) / (yj - yi) + xi;
+    if (intersects) inside = !inside;
+  }
+  return inside;
+}
+
+/**
+ * Which of the staff's assigned work locations they are currently inside. Locations are Payroll-
+ * level geofences (rectangles), independent of projects; a staff may be assigned several.
+ */
+export function detectLocation(
+  lat: number,
+  lng: number,
+  assignedLocationIds: string[],
+  locations: Record<string, WorkLocation>,
+): { location: WorkLocation; distance: number } | null {
+  let best: { location: WorkLocation; distance: number } | null = null;
+  for (const id of assignedLocationIds) {
+    const loc = locations[id];
+    if (!loc || !isInsideLocation(lat, lng, loc)) continue;
+    const c = locationCenter(loc);
+    const d = gpsDistance(lat, lng, c.lat, c.lng);
+    if (!best || d < best.distance) best = { location: loc, distance: d };
+  }
+  return best;
 }
 
 export function daysInMonth(year: number, month0: number): string[] {

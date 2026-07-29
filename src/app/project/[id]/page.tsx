@@ -22,6 +22,7 @@ import { SimpleTable } from "@/components/SimpleTable";
 import { ProjectSettingModal } from "@/components/ProjectSettingModal";
 import { TaskWorkspace } from "@/components/task/TaskWorkspace";
 import { ProjectMembers } from "@/components/ProjectMembers";
+import { ProjectAttendance } from "@/components/project/ProjectAttendance";
 import { CreateTransactionMenu } from "@/components/CreateTransactionMenu";
 import { TransactionFormModal } from "@/components/TransactionFormModal";
 import * as api from "@/lib/api";
@@ -327,9 +328,7 @@ export default function ProjectDetailPage() {
 
       {tab === "Members" && <ProjectMembers projectId={params.id} />}
 
-      {tab === "Attendance" && (
-        <SimpleTable columns={[{ key: "date", label: "Date" }, { key: "workers", label: "Workers Present" }]} rows={attendance} />
-      )}
+      {tab === "Attendance" && <ProjectAttendance projectId={params.id} />}
 
       {tab === "Material" && (
         <SimpleTable

@@ -1,16 +1,18 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { PayrollShell, PayrollEmpty, StatCard } from "@/components/payroll/PayrollShell";
+import { Spinner } from "@/components/Spinner";
 import { Drawer } from "@/components/Drawer";
 import { Select } from "@/components/Select";
 import { DatePicker } from "@/components/DatePicker";
-import { usePayrollStore, useMyEmployee } from "@/lib/payrollApi";
-import type { ReimbursementStatus } from "@/lib/payrollApi";
+import { useMyReimbursements } from "@/lib/usePayrollLive";
+import { ApiError } from "@/lib/api";
+import type { ReimbStatus } from "@/lib/api";
 import { inr } from "@/lib/format";
-import { CircleCheck, Clock, Plus, Receipt, UserRound, Wallet } from "lucide-react";
+import { CircleCheck, Clock, Plus, Receipt, Wallet } from "lucide-react";
 
-const STATUS_STYLE: Record<ReimbursementStatus, string> = {
+const STATUS_STYLE: Record<ReimbStatus, string> = {
   PENDING: "bg-amber-50 text-amber-700",
   APPROVED: "bg-blue-50 text-blue-700",
   REJECTED: "bg-rose-50 text-rose-700",
@@ -18,22 +20,16 @@ const STATUS_STYLE: Record<ReimbursementStatus, string> = {
 };
 const EXPENSE_TYPES = ["Travel", "Fuel", "Site Supplies", "Food & Lodging", "Tools", "Medical", "Other"];
 
-/** My Reimbursements — the signed-in employee's own claims, and a form to raise a new one. */
+/** My Reimbursements — self-service, backed by the real reimbursements API. */
 export default function MyReimbursementsPage() {
-  const me = useMyEmployee();
-  const reimbursements = usePayrollStore((s) => s.reimbursements);
+  const { rows, loading, error, create } = useMyReimbursements();
   const [applying, setApplying] = useState(false);
-
-  const mine = useMemo(() => (me ? reimbursements.filter((r) => r.employeeId === me.id) : []), [me, reimbursements]);
-
-  if (!me) {
-    return <PayrollShell><PayrollEmpty icon={UserRound} title="Your staff profile isn't linked yet" hint="Ask HR to add you as a staff member so you can raise claims." /></PayrollShell>;
-  }
+  const [actionError, setActionError] = useState("");
 
   const totals = {
-    paid: mine.filter((r) => r.status === "PAID").reduce((a, r) => a + (r.approvedAmount ?? 0), 0),
-    approved: mine.filter((r) => r.status === "APPROVED").reduce((a, r) => a + (r.approvedAmount ?? 0), 0),
-    pending: mine.filter((r) => r.status === "PENDING").length,
+    paid: rows.filter((r) => r.status === "PAID").reduce((a, r) => a + Number(r.approvedAmount ?? 0), 0),
+    approved: rows.filter((r) => r.status === "APPROVED").reduce((a, r) => a + Number(r.approvedAmount ?? 0), 0),
+    pending: rows.filter((r) => r.status === "PENDING").length,
   };
 
   return (
@@ -49,13 +45,20 @@ export default function MyReimbursementsPage() {
           </button>
         </div>
 
+        {actionError && <div className="rounded-lg bg-rose-50 px-4 py-2 text-sm text-rose-600">{actionError}</div>}
+        {error && <div className="rounded-lg bg-rose-50 px-4 py-2 text-sm text-rose-600">{error}</div>}
+
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
           <StatCard label="Paid to me" value={inr(totals.paid)} accent="green" icon={CircleCheck} />
           <StatCard label="Approved (awaiting)" value={inr(totals.approved)} accent="blue" icon={Wallet} />
           <StatCard label="Pending review" value={totals.pending} accent="amber" icon={Clock} />
         </div>
 
-        {mine.length === 0 ? (
+        {loading ? (
+          <div className="flex items-center justify-center gap-2 rounded-xl border border-dashed border-gray-300 bg-white py-16 text-sm text-gray-400">
+            <Spinner size={16} className="text-brand-accent" /> Loading…
+          </div>
+        ) : rows.length === 0 ? (
           <PayrollEmpty icon={Receipt} title="No claims yet" hint="Raise your first reimbursement claim — travel, fuel, tools and more." action={<button onClick={() => setApplying(true)} className="rounded-lg bg-brand-accent px-4 py-2 text-sm font-medium text-white hover:opacity-90">+ New Claim</button>} />
         ) : (
           <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white">
@@ -70,7 +73,7 @@ export default function MyReimbursementsPage() {
                 </tr>
               </thead>
               <tbody>
-                {mine.map((r) => (
+                {rows.map((r) => (
                   <tr key={r.id} className="border-b border-gray-50 last:border-b-0 even:bg-gray-50/40">
                     <td className="px-4 py-2.5">
                       <div className="font-medium text-gray-800">{r.expenseType}</div>
@@ -88,26 +91,49 @@ export default function MyReimbursementsPage() {
         )}
       </div>
 
-      {applying && <ClaimDialog employeeId={me.id} onClose={() => setApplying(false)} />}
+      {applying && (
+        <ClaimDialog
+          onClose={() => setApplying(false)}
+          onCreate={async (body) => {
+            try {
+              await create(body);
+              setApplying(false);
+            } catch (err) {
+              setActionError(err instanceof ApiError ? err.message : "Unable to submit this claim.");
+            }
+          }}
+        />
+      )}
     </PayrollShell>
   );
 }
 
-function ClaimDialog({ employeeId, onClose }: { employeeId: string; onClose: () => void }) {
-  const add = usePayrollStore((s) => s.addReimbursement);
+function ClaimDialog({
+  onClose,
+  onCreate,
+}: {
+  onClose: () => void;
+  onCreate: (body: { expenseType: string; expenseDate: string; requestedAmount: number }) => Promise<void>;
+}) {
   const [expenseType, setExpenseType] = useState(EXPENSE_TYPES[0]);
   const [expenseDate, setExpenseDate] = useState(new Date().toISOString().slice(0, 10));
   const [amount, setAmount] = useState(0);
   const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
 
-  function save() {
-    if (!amount) return setError("Enter the claim amount.");
-    add({ employeeId, expenseType, claimId: `CLM-${Math.floor(1000 + Math.random() * 9000)}`, expenseDate, appliedAt: new Date().toISOString().slice(0, 10), approvedAt: null, settlementDate: null, requestedAmount: amount, approvedAmount: null, approvedBy: null, status: "PENDING" });
-    onClose();
+  async function save() {
+    if (!amount) { setError("Enter the claim amount."); return; }
+    setSaving(true);
+    setError("");
+    try {
+      await onCreate({ expenseType, expenseDate, requestedAmount: amount });
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
-    <Drawer title="New Reimbursement Claim" onClose={onClose} onSave={save} saveLabel="Submit Claim" width="max-w-md">
+    <Drawer title="New Reimbursement Claim" onClose={onClose} onSave={save} saveLabel={saving ? "Submitting…" : "Submit Claim"} width="max-w-md">
       <div className="space-y-4">
         {error && <div className="rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-600">{error}</div>}
         <label className="block">

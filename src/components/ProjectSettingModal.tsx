@@ -2,7 +2,8 @@
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { CalendarRange, X, Trash2 } from "lucide-react";
+import { CalendarRange, Loader2, MapPin, X, Trash2 } from "lucide-react";
+import { usePayrollStore } from "@/lib/payrollApi";
 import { projectAvatarColor, projectInitials } from "@/lib/projectHelpers";
 import { DatePicker } from "./DatePicker";
 import { LocationStructure } from "./LocationStructure";
@@ -243,12 +244,20 @@ export function ProjectSettingModal({
                   </Field>
                 </div>
 
-                <Field label="Attendance Radius">
-                  <input type="number" value={form.attendanceRadius} onChange={(e) => setForm({ ...form, attendanceRadius: Number(e.target.value) })} className="input" />
-                </Field>
                 <Field label="Project Value">
                   <input type="number" value={form.projectValue} onChange={(e) => setForm({ ...form, projectValue: Number(e.target.value) })} className="input" />
                 </Field>
+                <Field label="Attendance Radius (backend)">
+                  <input type="number" value={form.attendanceRadius} onChange={(e) => setForm({ ...form, attendanceRadius: Number(e.target.value) })} className="input" />
+                </Field>
+
+                {/* Punch-in geofences now live in Payroll → Locations, assigned to staff (not per project). */}
+                <div className="sm:col-span-2">
+                  <div className="mt-2 flex items-start gap-2 rounded-xl border border-gray-200 bg-gray-50/60 p-3 text-xs text-gray-500">
+                    <MapPin size={14} className="mt-0.5 shrink-0 text-brand-accent" />
+                    <span>Punch-in geofences are managed in <span className="font-medium text-gray-700">Payroll → Locations</span> and assigned to staff, so a person can work across several sites. Add staff to this project from its <span className="font-medium text-gray-700">Attendance</span> tab.</span>
+                  </div>
+                </div>
 
                 <Field label="Project Orientation">
                   <input value={form.orientation} onChange={(e) => setForm({ ...form, orientation: e.target.value })} placeholder="Project Orientation" className="input" />

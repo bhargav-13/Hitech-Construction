@@ -21,6 +21,7 @@ import {
   ListChecks,
   ScrollText,
   Receipt,
+  MapPin,
   MessageCircle,
   PanelLeftClose,
   PanelLeftOpen,
@@ -79,7 +80,6 @@ export function Sidebar() {
         return !module || perms.includes(`${module}:VIEW`);
       })
     : NAV_ITEMS;
-  const isAdmin = authUser?.permissions.includes("USER_MANAGEMENT:VIEW") ?? false;
   // Unread task-notification count, surfaced as a live badge on the Taskopad nav item.
   const { unread: taskUnread } = useTaskNotifications();
 
@@ -173,13 +173,16 @@ export function Sidebar() {
         </ul>
       </nav>
 
-      {isAdmin && (
+      {/* Self-service quick actions — Punch especially must reach every signed-in staff member,
+          not just admins, since staff are the ones who punch in/out. */}
+      {(authUser || currentUser) && (
         <div
           className={`grid gap-2 border-t border-sidebar-border px-3 py-3 ${
             collapsed ? "grid-cols-1" : "grid-cols-2"
           }`}
         >
           <QuickAction icon={CheckSquare} label="To Do" href="/todo" collapsed={collapsed} />
+          <QuickAction icon={MapPin} label="Punch" href="/punch" collapsed={collapsed} />
           <QuickAction icon={MessageCircle} label="Chat" collapsed={collapsed} />
         </div>
       )}

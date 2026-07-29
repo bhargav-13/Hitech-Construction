@@ -11,6 +11,7 @@ import { useAppStore } from "@/lib/store";
 import { useProjectScope } from "@/lib/projectScope";
 import * as api from "@/lib/api";
 import * as vyapar from "@/lib/vyaparApi";
+import { usePayrollStore, getAttendance } from "@/lib/payrollApi";
 import type { Invoice as VyaparInvoice, Payment as VyaparPayment } from "@/lib/vyaparApi";
 import { formatLakh, inrAxis } from "@/lib/format";
 import type { Project, ProjectHealth, ProjectStatus } from "@/lib/types";
@@ -77,10 +78,31 @@ function toProject(p: api.ProjectResponse): Project {
 }
 
 export default function DashboardPage() {
-  // Sample/mock data — no backend yet for attendance or materials.
-  const attendance = useAppStore((s) => s.attendance);
+  // Sample/mock data — no backend yet for materials.
   const materials = useAppStore((s) => s.materials);
   const [tab, setTab] = useState<"Operational" | "Financial">("Operational");
+
+  // Real workforce attendance from the Payroll module: how many staff were present each of the
+  // last 7 days (present + half-day), plus how many are present today.
+  const payrollEmployees = usePayrollStore((s) => s.employees);
+  const attendanceOverrides = usePayrollStore((s) => s.attendanceOverrides);
+  const workforce = useMemo(() => {
+    const active = payrollEmployees.filter((e) => e.active);
+    const days: { date: string; workers: number }[] = [];
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      // Local calendar date (not UTC) so the key matches daysInMonth / muster / punch.
+      const iso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+      let workers = 0;
+      for (const e of active) {
+        const a = getAttendance(attendanceOverrides, e, iso);
+        if (a.code === "P" || a.code === "HD") workers++;
+      }
+      days.push({ date: `${d.getDate()}/${d.getMonth() + 1}`, workers });
+    }
+    return { series: days, total: active.length, presentToday: days[days.length - 1]?.workers ?? 0 };
+  }, [payrollEmployees, attendanceOverrides]);
 
   // Financials are real: they come from the Vyapar books (sales, expenses, payments).
   const [finInvoices, setFinInvoices] = useState<VyaparInvoice[]>([]);
@@ -247,9 +269,9 @@ export default function DashboardPage() {
       <div className="mb-4 flex items-start gap-2.5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm text-amber-800">
         <FlaskConical size={16} className="mt-0.5 shrink-0 text-amber-500" />
         <div>
-          <span className="font-medium">Projects and financials are live</span> — financials come straight from the
-          Vyapar books. Attendance and materials below are still{" "}
-          <span className="font-medium">sample data</span>; those modules aren&apos;t connected yet.
+          <span className="font-medium">Projects, financials and attendance are live</span> — financials come from the
+          Vyapar books and attendance from the Payroll workforce. Materials below are still{" "}
+          <span className="font-medium">sample data</span>.
         </div>
       </div>
 
@@ -462,15 +484,13 @@ export default function DashboardPage() {
               <div className="rounded-xl border border-gray-200 bg-white p-4">
                 <div className="mb-2 flex items-center justify-between">
                   <h3 className="text-sm font-semibold text-gray-700">Last 7 Days Attendance</h3>
-                  <SampleBadge />
-                </div>
-                <div className="mb-3 grid grid-cols-2 gap-3">
-                  <FilterSelect label="Payroll Type" compact />
-                  <FilterSelect label="Workforce Name" compact />
+                  <span className="text-xs text-gray-500">
+                    <span className="font-semibold text-emerald-600">{workforce.presentToday}</span> present today · {workforce.total} staff
+                  </span>
                 </div>
                 <div className="h-64">
                   <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={attendance} margin={{ bottom: 24 }}>
+                    <BarChart data={workforce.series} margin={{ bottom: 24 }}>
                       <CartesianGrid vertical={false} stroke="#eee" />
                       <XAxis
                         dataKey="date"

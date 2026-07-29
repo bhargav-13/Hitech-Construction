@@ -55,7 +55,7 @@ export default function TaskopadDashboardPage() {
     [allTasks, projectScope]
   );
   const scoped = useMemo(
-    () => (scope === "My Task" ? live.filter((t) => t.assigneeId === meId) : live),
+    () => (scope === "My Task" ? live.filter((t) => t.assigneeId === meId || t.followerIds.includes(meId)) : live),
     [live, scope]
   );
 

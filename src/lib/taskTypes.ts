@@ -59,6 +59,7 @@ export interface Task {
   projectId: string | null;
   assigneeId: string;
   followerIds: string[];
+  createdBy: string | null;
   clientName: string | null;
   status: TaskStatus;
   priority: TaskPriority;
@@ -124,6 +125,7 @@ export function taskFromApi(t: ApiTask): Task {
     projectId: t.projectId != null ? String(t.projectId) : null,
     assigneeId: String(t.assigneeId),
     followerIds: (t.followerIds ?? []).map(String),
+    createdBy: t.createdBy != null ? String(t.createdBy) : null,
     clientName: t.clientName ?? null,
     status: statusFromApi(t.status),
     priority: priorityFromApi(t.priority),

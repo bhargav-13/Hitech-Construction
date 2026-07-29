@@ -1,119 +1,144 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { PayrollShell, PayrollEmpty } from "@/components/payroll/PayrollShell";
 import { Select } from "@/components/Select";
-import { RowMenu, RowMenuDivider, RowMenuItem } from "@/components/RowMenu";
-import { StaffLoginDialog } from "@/components/payroll/StaffLoginDialog";
-import { UserPickerDialog } from "@/components/payroll/UserPickerDialog";
-import { usePayrollStore } from "@/lib/payrollApi";
-import type { Employee } from "@/lib/payrollApi";
-import { STAFF_CATEGORIES, DEPARTMENTS, categoryConfig } from "@/lib/payrollConfig";
-import type { StaffCategory } from "@/lib/payrollConfig";
+import { Spinner } from "@/components/Spinner";
+import { profileProgress } from "@/lib/payrollApi";
+import { usePayrollProfiles } from "@/lib/usePayrollSetup";
+import { getUsers, ApiError } from "@/lib/api";
+import type { UserResponse } from "@/lib/api";
+import { DEPARTMENTS, categoryConfig } from "@/lib/payrollConfig";
 import { inr } from "@/lib/format";
-import { exportRowsToCsv, downloadPdf } from "@/lib/vyaparExport";
-import { FileSpreadsheet, FileText, KeyRound, Link2, Power, Search, ShieldCheck, Unlink, UserPlus, Users } from "lucide-react";
+import { exportRowsToCsv } from "@/lib/vyaparExport";
+import { FileSpreadsheet, Search, Settings2, UserRoundPlus, Users } from "lucide-react";
 
-const CATEGORY_BADGE: Record<StaffCategory, string> = {
-  REGULAR: "bg-cyan-50 text-brand-accent",
-  CONTRACTOR: "bg-amber-50 text-amber-700",
-  WORK_BASIS: "bg-violet-50 text-violet-700",
-};
+type PostingFilter = "all" | "OFFICE" | "SITE";
 
-/** Staff List — search, filter, bulk select, and per-employee actions. */
-export default function StaffListPage() {
-  const employees = usePayrollStore((s) => s.employees);
-  const updateEmployee = usePayrollStore((s) => s.updateEmployee);
-  const linkUser = usePayrollStore((s) => s.linkUser);
+/**
+ * People — the payroll roster, sourced from real Members (Settings) where "On payroll" is ticked.
+ * People aren't created here anymore; they're enrolled in Settings. This screen fills in each
+ * person's payroll profile (salary, statutory, bank) via a drawer.
+ */
+export default function PayrollPeoplePage() {
+  const router = useRouter();
+  const [members, setMembers] = useState<UserResponse[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
   const [search, setSearch] = useState("");
+  const [posting, setPosting] = useState<PostingFilter>("all");
   const [dept, setDept] = useState("all");
-  const [cat, setCat] = useState<"all" | StaffCategory>("all");
-  const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [loginFor, setLoginFor] = useState<Employee | null>(null);
-  const [pickUser, setPickUser] = useState(false);
+
+  const memberIds = useMemo(() => members.map((m) => m.id), [members]);
+  const { profiles, error: profilesError } = usePayrollProfiles(memberIds.length ? memberIds : undefined);
+
+  const openProfile = (id: number) => router.push(`/payroll/staff/${id}`);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await getUsers(0, 200);
+        if (!cancelled) setMembers(res.content.filter((u) => u.onPayroll));
+      } catch (err) {
+        if (!cancelled) setError(err instanceof ApiError ? err.message : "Unable to load members.");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const rows = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return employees.filter((e) => {
-      if (dept !== "all" && e.department !== dept) return false;
-      if (cat !== "all" && e.category !== cat) return false;
+    return members.filter((m) => {
+      if (posting !== "all" && m.staffType !== posting) return false;
+      if (dept !== "all" && (m.departmentName ?? "") !== dept) return false;
       if (!q) return true;
-      return [e.name, e.staffId, e.designation, e.phone].some((f) => f?.toLowerCase().includes(q));
+      return [m.fullName, m.email, m.phoneNumber ?? ""].some((f) => f.toLowerCase().includes(q));
     });
-  }, [employees, search, dept, cat]);
+  }, [members, search, posting, dept]);
 
-  const allSelected = rows.length > 0 && rows.every((r) => selected.has(r.id));
-  const toggleAll = () => {
-    setSelected((prev) => {
-      if (allSelected) return new Set();
-      return new Set(rows.map((r) => r.id));
-    });
+  const enrolledCount = members.length;
+  const completeCount = members.filter((m) => profileProgress(profiles[m.id]).percent === 100).length;
+
+  const payLabel = (m: UserResponse): string => {
+    const p = profiles[m.id];
+    if (!p) return "—";
+    if (p.salary.workType) return `${inr(p.salary.workRate)}/${p.salary.workType === "HOURLY" ? "hr" : p.salary.workType === "PIECE" ? "pc" : "day"}`;
+    return inr(p.salary.monthlyCtc);
   };
-  const toggleOne = (id: string) =>
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
 
-  const monthlyPay = (e: Employee) =>
-    e.category === "WORK_BASIS" ? e.salary.workRate : e.salary.monthlyCtc;
-
-  const head = ["Name", "Staff ID", "Category", "Department", "Designation", "Phone", "Monthly / Rate"];
-  const data = rows.map((e) => [e.name, e.staffId, categoryConfig(e.category).title, e.department, e.designation, e.phone, monthlyPay(e)]);
+  const head = ["Name", "Email", "Posting", "Department", "Category", "Monthly / Rate", "Setup %"];
+  const data = rows.map((m) => {
+    const p = profiles[m.id];
+    return [
+      m.fullName,
+      m.email,
+      m.staffType === "SITE" ? "Site" : m.staffType === "OFFICE" ? "Office" : "—",
+      m.departmentName ?? "—",
+      p ? categoryConfig(p.category).title : "Not set",
+      payLabel(m),
+      `${profileProgress(p).percent}%`,
+    ];
+  });
 
   return (
     <PayrollShell requireAdmin>
       <div className="space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h2 className="text-lg font-semibold text-gray-800">Staff</h2>
+            <h2 className="text-lg font-semibold text-gray-800">People</h2>
             <p className="mt-0.5 text-sm text-gray-500">
-              {employees.filter((e) => e.active).length} active · {employees.length} total employees
+              {enrolledCount} on payroll · {completeCount} fully set up
             </p>
           </div>
           <div className="flex items-center gap-2">
             <button
-              onClick={() => exportRowsToCsv("staff", head, data)}
+              onClick={() => exportRowsToCsv("payroll-people", head, data)}
               className="flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-600 transition-all duration-150 hover:bg-gray-50 active:scale-95"
             >
               <FileSpreadsheet size={14} /> Export
             </button>
-            <button
-              onClick={() => downloadPdf("Staff List", head, rows.map((e) => [e.name, e.staffId, categoryConfig(e.category).title, e.department, e.designation, e.phone, inr(monthlyPay(e))]), { rightAlignFrom: 6 })}
-              className="flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-600 transition-all duration-150 hover:bg-gray-50 active:scale-95"
-            >
-              <FileText size={14} /> PDF
-            </button>
-            <button
-              onClick={() => setPickUser(true)}
-              className="flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-600 transition-all duration-150 hover:bg-gray-50 active:scale-95"
-              title="Turn an existing ERP user into a staff member"
-            >
-              <Link2 size={14} /> From User
-            </button>
             <Link
-              href="/payroll/staff/add"
+              href="/settings"
               className="flex items-center gap-1.5 rounded-lg bg-brand-accent px-3.5 py-2 text-sm font-semibold text-white transition-all duration-150 hover:opacity-90 active:scale-95"
+              title="People are added in Settings → Members by ticking 'On payroll'"
             >
-              <UserPlus size={15} /> Add Staff
+              <UserRoundPlus size={15} /> Add in Settings
             </Link>
           </div>
+        </div>
+
+        {/* How-to hint — people come from Settings now */}
+        <div className="flex items-start gap-2 rounded-lg border border-cyan-100 bg-cyan-50/50 px-3 py-2 text-xs text-brand-accent">
+          <Settings2 size={14} className="mt-0.5 shrink-0" />
+          <span>
+            Payroll people are Members with <span className="font-semibold">On payroll</span> ticked in{" "}
+            <Link href="/settings" className="font-semibold underline">Settings → Members</Link>. Click a row here to set up their
+            salary, statutory and bank details.
+          </span>
         </div>
 
         {/* Filters */}
         <div className="flex flex-wrap items-center gap-2">
           <div className="flex min-w-[220px] flex-1 items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 transition-colors duration-150 focus-within:border-cyan-500">
             <Search size={15} className="text-gray-400" />
-            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search name, staff ID, phone…" className="w-full bg-transparent text-sm outline-none" />
+            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search name, email, phone…" className="w-full bg-transparent text-sm outline-none" />
           </div>
           <div className="w-44">
             <Select
-              value={cat}
-              onChange={(v) => setCat(v as "all" | StaffCategory)}
-              options={[{ value: "all", label: "All categories" }, ...STAFF_CATEGORIES.map((c) => ({ value: c.key, label: c.title }))]}
+              value={posting}
+              onChange={(v) => setPosting(v as PostingFilter)}
+              options={[
+                { value: "all", label: "All postings" },
+                { value: "OFFICE", label: "Office" },
+                { value: "SITE", label: "Site" },
+              ]}
             />
           </div>
           <div className="w-44">
@@ -125,122 +150,96 @@ export default function StaffListPage() {
           </div>
         </div>
 
-        {/* Bulk bar */}
-        {selected.size > 0 && (
-          <div className="flex items-center justify-between rounded-lg border border-cyan-200 bg-cyan-50 px-4 py-2 text-sm">
-            <span className="font-medium text-brand-accent">{selected.size} selected</span>
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => { selected.forEach((id) => updateEmployee(id, { active: false })); setSelected(new Set()); }}
-                className="rounded-md bg-white px-2.5 py-1 text-xs font-medium text-rose-600 ring-1 ring-rose-200 transition-colors hover:bg-rose-50"
-              >
-                Deactivate
-              </button>
-              <button
-                onClick={() => { selected.forEach((id) => updateEmployee(id, { active: true })); setSelected(new Set()); }}
-                className="rounded-md bg-white px-2.5 py-1 text-xs font-medium text-emerald-600 ring-1 ring-emerald-200 transition-colors hover:bg-emerald-50"
-              >
-                Activate
-              </button>
-              <button onClick={() => setSelected(new Set())} className="rounded-md px-2.5 py-1 text-xs text-gray-500 hover:text-gray-700">Clear</button>
-            </div>
+        {loading ? (
+          <div className="flex items-center justify-center gap-2 rounded-xl border border-dashed border-gray-300 bg-white py-16 text-sm text-gray-400">
+            <Spinner size={16} className="text-brand-accent" /> Loading people…
           </div>
-        )}
-
-        {rows.length === 0 ? (
+        ) : error ? (
+          <div className="rounded-lg bg-rose-50 px-4 py-3 text-sm text-rose-600">{error}</div>
+        ) : profilesError ? (
+          <div className="rounded-lg bg-rose-50 px-4 py-3 text-sm text-rose-600">{profilesError}</div>
+        ) : enrolledCount === 0 ? (
           <PayrollEmpty
             icon={Users}
-            title="No staff match"
-            hint="Try a different search or filter, or add your first employee."
-            action={<Link href="/payroll/staff/add" className="rounded-lg bg-brand-accent px-4 py-2 text-sm font-medium text-white hover:opacity-90">+ Add Staff</Link>}
+            title="No one is on payroll yet"
+            hint="Add a Member in Settings and tick 'On payroll' to enroll them here."
+            action={<Link href="/settings" className="rounded-lg bg-brand-accent px-4 py-2 text-sm font-medium text-white hover:opacity-90">Go to Settings</Link>}
           />
+        ) : rows.length === 0 ? (
+          <PayrollEmpty icon={Users} title="No people match" hint="Try a different search or filter." />
         ) : (
           <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white">
-            <table className="w-full min-w-[820px] border-collapse text-sm">
+            <table className="w-full min-w-[840px] border-collapse text-sm">
               <thead>
                 <tr className="border-b border-gray-100 bg-gray-50 text-left text-gray-500">
-                  <th className="w-10 px-4 py-2">
-                    <input type="checkbox" checked={allSelected} onChange={toggleAll} className="accent-cyan-600" aria-label="Select all" />
-                  </th>
-                  <th className="px-4 py-2 font-medium">Employee</th>
-                  <th className="px-4 py-2 font-medium">Category</th>
+                  <th className="px-4 py-2 font-medium">Person</th>
+                  <th className="px-4 py-2 font-medium">Posting</th>
                   <th className="px-4 py-2 font-medium">Department</th>
-                  <th className="px-4 py-2 font-medium">Designation</th>
+                  <th className="px-4 py-2 font-medium">Category</th>
                   <th className="px-4 py-2 text-right font-medium">Monthly / Rate</th>
-                  <th className="px-4 py-2 font-medium">Login</th>
-                  <th className="px-4 py-2 font-medium">Status</th>
-                  <th className="w-10 px-4 py-2" />
+                  <th className="px-4 py-2 font-medium">Setup</th>
                 </tr>
               </thead>
               <tbody>
-                {rows.map((e) => (
-                  <tr key={e.id} className="border-b border-gray-50 transition-colors duration-150 last:border-b-0 even:bg-gray-50/40 hover:bg-cyan-50/40">
-                    <td className="px-4 py-2.5">
-                      <input type="checkbox" checked={selected.has(e.id)} onChange={() => toggleOne(e.id)} className="accent-cyan-600" aria-label={`Select ${e.name}`} />
-                    </td>
-                    <td className="px-4 py-2.5">
-                      <div className="flex items-center gap-2.5">
-                        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-cyan-50 text-xs font-semibold text-brand-accent">
-                          {e.name.split(" ").map((n) => n[0]).slice(0, 2).join("")}
+                {rows.map((m) => {
+                  const p = profiles[m.id];
+                  return (
+                    <tr
+                      key={m.id}
+                      onClick={() => openProfile(m.id)}
+                      className="cursor-pointer border-b border-gray-50 transition-colors duration-150 last:border-b-0 even:bg-gray-50/40 hover:bg-cyan-50/40"
+                    >
+                      <td className="px-4 py-2.5">
+                        <div className="flex items-center gap-2.5">
+                          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-cyan-50 text-xs font-semibold text-brand-accent">
+                            {m.fullName.split(" ").map((n) => n[0]).slice(0, 2).join("")}
+                          </div>
+                          <div className="min-w-0">
+                            <div className="font-medium text-gray-800">{m.fullName}</div>
+                            <div className="truncate text-xs text-gray-400">{m.email}{m.phoneNumber ? ` · ${m.phoneNumber}` : ""}</div>
+                          </div>
                         </div>
-                        <div className="min-w-0">
-                          <div className="font-medium text-gray-800">{e.name}</div>
-                          <div className="text-xs text-gray-400">{e.staffId} · {e.phone}</div>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="px-4 py-2.5">
-                      <span className={`rounded-md px-2 py-0.5 text-xs font-medium ${CATEGORY_BADGE[e.category]}`}>{categoryConfig(e.category).title}</span>
-                    </td>
-                    <td className="px-4 py-2.5 text-gray-600">{e.department}</td>
-                    <td className="px-4 py-2.5 text-gray-600">{e.designation}</td>
-                    <td className="px-4 py-2.5 text-right font-medium text-gray-800">
-                      {e.category === "WORK_BASIS" ? `${inr(e.salary.workRate)}/${e.salary.workType === "HOURLY" ? "hr" : "day"}` : inr(e.salary.monthlyCtc)}
-                    </td>
-                    <td className="px-4 py-2.5">
-                      {e.userId != null ? (
-                        <span className="inline-flex items-center gap-1 rounded-md bg-cyan-50 px-2 py-0.5 text-xs font-medium text-brand-accent" title="This employee can log in">
-                          <ShieldCheck size={12} /> Login
-                        </span>
-                      ) : (
-                        <button onClick={() => setLoginFor(e)} className="inline-flex items-center gap-1 rounded-md border border-dashed border-gray-300 px-2 py-0.5 text-xs text-gray-400 transition-colors hover:border-brand-accent hover:text-brand-accent">
-                          <KeyRound size={11} /> Create
-                        </button>
-                      )}
-                    </td>
-                    <td className="px-4 py-2.5">
-                      <span className={`rounded-md px-2 py-0.5 text-xs font-medium ${e.active ? "bg-emerald-50 text-emerald-700" : "bg-gray-100 text-gray-500"}`}>
-                        {e.active ? "Active" : "Inactive"}
-                      </span>
-                    </td>
-                    <td className="px-4 py-2.5 text-right">
-                      <div className="inline-flex">
-                        <RowMenu align="right" buttonLabel={`Actions for ${e.name}`}>
-                          {(close) => (
-                            <>
-                              {e.userId == null ? (
-                                <RowMenuItem icon={KeyRound} label="Create / link login" onClick={() => { close(); setLoginFor(e); }} />
-                              ) : (
-                                <RowMenuItem icon={Unlink} label="Unlink login" tone="warning" onClick={() => { close(); linkUser(e.id, null); }} />
-                              )}
-                              <RowMenuItem icon={Power} label={e.active ? "Deactivate" : "Activate"} tone={e.active ? "warning" : "default"} onClick={() => { close(); updateEmployee(e.id, { active: !e.active }); }} />
-                              <RowMenuDivider />
-                              <RowMenuItem icon={FileText} label="Salary slip (PDF)" onClick={() => { close(); downloadPdf(`${e.name} — Details`, ["Field", "Value"], [["Staff ID", e.staffId], ["Category", categoryConfig(e.category).title], ["Department", e.department], ["Designation", e.designation], ["Monthly CTC", inr(e.salary.monthlyCtc)], ["Basic", inr(e.salary.basic)], ["HRA", inr(e.salary.hra)]]); }} />
-                            </>
-                          )}
-                        </RowMenu>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+                      </td>
+                      <td className="px-4 py-2.5">
+                        {m.staffType ? (
+                          <span className={`rounded-md px-2 py-0.5 text-xs font-medium ${m.staffType === "SITE" ? "bg-amber-50 text-amber-700" : "bg-indigo-50 text-indigo-700"}`}>
+                            {m.staffType === "SITE" ? "Site" : "Office"}
+                          </span>
+                        ) : (
+                          <span className="text-xs text-gray-300">—</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-2.5 text-gray-600">{m.departmentName ?? "—"}</td>
+                      <td className="px-4 py-2.5 text-gray-600">
+                        {p ? categoryConfig(p.category).title : <span className="text-gray-300">Not set</span>}
+                      </td>
+                      <td className="px-4 py-2.5 text-right font-medium text-gray-800">{payLabel(m)}</td>
+                      <td className="px-4 py-2.5">
+                        {(() => {
+                          const pct = profileProgress(p).percent;
+                          return (
+                            <div className="flex items-center gap-2">
+                              <div className="h-1.5 w-16 overflow-hidden rounded-full bg-gray-100">
+                                <div
+                                  className={`h-full rounded-full transition-all duration-300 ${pct === 100 ? "bg-emerald-500" : "bg-brand-accent"}`}
+                                  style={{ width: `${pct}%` }}
+                                />
+                              </div>
+                              <span className={`text-xs font-medium ${pct === 100 ? "text-emerald-600" : pct === 0 ? "text-gray-400" : "text-gray-600"}`}>
+                                {pct}%
+                              </span>
+                            </div>
+                          );
+                        })()}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
         )}
       </div>
-
-      {loginFor && <StaffLoginDialog employee={loginFor} onClose={() => setLoginFor(null)} />}
-      {pickUser && <UserPickerDialog onClose={() => setPickUser(false)} />}
     </PayrollShell>
   );
 }

@@ -17,17 +17,18 @@ import {
   CheckSquare,
   ChevronDown,
   ChevronRight,
-  Construction,
   FileText,
   Gift,
   Grid3x3,
   Home,
   Landmark,
   LayoutGrid,
+  MapPin,
   PanelLeftClose,
   PanelLeftOpen,
   Receipt,
   Shield,
+  SlidersHorizontal,
   Trophy,
   Users,
   Wallet,
@@ -42,6 +43,7 @@ const ICONS: Record<string, React.ComponentType<{ size?: number; className?: str
   banknote: Banknote,
   receipt: Receipt,
   landmark: Landmark,
+  pin: MapPin,
   chart: BarChart3,
   grid: LayoutGrid,
   file: FileText,
@@ -49,6 +51,7 @@ const ICONS: Record<string, React.ComponentType<{ size?: number; className?: str
   trophy: Trophy,
   gift: Gift,
   tiles: Grid3x3,
+  sliders: SlidersHorizontal,
 };
 
 /**
@@ -91,13 +94,6 @@ export function PayrollShell({ children, requireAdmin = false }: { children: Rea
 
   return (
     <AppShell title="Payroll">
-      <div className="animate-fade-in mb-4 flex items-center gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-amber-800">
-        <Construction size={18} className="shrink-0 text-amber-500" />
-        <p className="text-[13px] leading-snug">
-          <span className="font-semibold">Payroll — Coming Soon.</span>{" "}
-          This module is a work-in-progress preview. Figures shown are sample data, not live payroll records.
-        </p>
-      </div>
       <div className="animate-fade-in flex min-h-[calc(100vh-140px)] gap-4">
         <aside
           className={`hidden shrink-0 rounded-xl border border-gray-200 bg-white p-2 transition-[width] duration-200 lg:block ${

@@ -2,50 +2,71 @@
 
 import { useMemo } from "react";
 import Link from "next/link";
-import { PayrollShell, PayrollEmpty, StatCard } from "@/components/payroll/PayrollShell";
+import { PayrollShell, StatCard } from "@/components/payroll/PayrollShell";
+import { Spinner } from "@/components/Spinner";
 import { useAuthStore } from "@/lib/authStore";
-import { usePayrollStore, useMyEmployee, daysInMonth, monthlySummary, computePayslip } from "@/lib/payrollApi";
+import {
+  useMyProfile,
+  useMemberAttendance,
+  useMyPayslips,
+  useMyLoans,
+  useMyReimbursements,
+} from "@/lib/usePayrollLive";
 import { categoryConfig } from "@/lib/payrollConfig";
 import { inr } from "@/lib/format";
-import { CalendarDays, CircleCheck, IdCard, Landmark, Plane, Receipt, UserRound, Wallet } from "lucide-react";
+import { CalendarDays, CircleCheck, IdCard, Landmark, Plane, Receipt, Wallet } from "lucide-react";
 
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 
-/** My Payroll — a self-service home for a signed-in employee: their own attendance, pay and claims. */
+/** My Payroll — a self-service home for a signed-in employee: their own attendance, pay and claims. Real backend data. */
 export function MyPayrollHome() {
   const user = useAuthStore((s) => s.user);
-  const me = useMyEmployee();
-  const overrides = usePayrollStore((s) => s.attendanceOverrides);
-  const loans = usePayrollStore((s) => s.loans);
-  const reimbursements = usePayrollStore((s) => s.reimbursements);
-
   const now = new Date();
-  const dates = useMemo(() => daysInMonth(now.getFullYear(), now.getMonth()), [now]);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const from = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-01`;
+  const last = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+  const to = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(last)}`;
 
-  const data = useMemo(() => {
-    if (!me) return null;
-    const summary = monthlySummary(overrides, me, dates);
-    const slip = computePayslip(me, overrides, loans, dates);
-    const myLoans = loans.filter((l) => l.employeeId === me.id);
-    const outstanding = myLoans.reduce((a, l) => a + l.outstanding, 0);
-    const myClaims = reimbursements.filter((r) => r.employeeId === me.id);
-    const pendingClaims = myClaims.filter((r) => r.status === "PENDING").length;
-    return { summary, slip, outstanding, loanCount: myLoans.filter((l) => l.outstanding > 0).length, pendingClaims, claimCount: myClaims.length };
-  }, [me, overrides, loans, reimbursements, dates]);
+  const { profile, loading: profileLoading } = useMyProfile(user?.id ?? null);
+  const { rows, loading: attLoading } = useMemberAttendance(user?.id ?? null, from, to);
+  const { slips } = useMyPayslips();
+  const { loans } = useMyLoans();
+  const { rows: claims } = useMyReimbursements();
 
-  if (!me || !data) {
+  const summary = useMemo(() => {
+    const s = { present: 0, absent: 0, halfDay: 0, paidLeave: 0, overtime: 0, fine: 0, payableDays: 0 };
+    for (const r of rows) {
+      s.overtime += Number(r.overtimeHours ?? 0);
+      s.fine += Number(r.fineHours ?? 0);
+      switch (r.code) {
+        case "P": s.present++; s.payableDays += 1; break;
+        case "HD": s.halfDay++; s.payableDays += 0.5; break;
+        case "PL": s.paidLeave++; s.payableDays += 1; break;
+        case "A": s.absent++; break;
+        case "WO": s.payableDays += 1; break;
+      }
+    }
+    return s;
+  }, [rows]);
+
+  const outstanding = useMemo(() => loans.reduce((a, l) => a + Number(l.outstanding ?? 0), 0), [loans]);
+  const activeLoans = useMemo(() => loans.filter((l) => Number(l.outstanding ?? 0) > 0).length, [loans]);
+  const pendingClaims = useMemo(() => claims.filter((c) => c.status === "PENDING").length, [claims]);
+  const latestSlip = slips[0] ?? null;
+
+  const firstName = (user?.fullName ?? user?.email ?? "there").split(" ")[0];
+  const initials = (user?.fullName ?? user?.email ?? "?").split(" ").map((n) => n[0]).slice(0, 2).join("");
+  const subtitle = profile ? `${profile.designation ?? categoryConfig(profile.category).title}` : user?.email ?? "";
+
+  if (profileLoading || attLoading) {
     return (
       <PayrollShell>
-        <PayrollEmpty
-          icon={UserRound}
-          title="Your staff profile isn't linked yet"
-          hint={`Signed in as ${user?.email ?? "your account"}. Ask HR to add you as a staff member (or link your login) so your attendance and payslips show up here.`}
-        />
+        <div className="flex items-center justify-center gap-2 py-20 text-sm text-gray-400">
+          <Spinner size={16} className="text-brand-accent" /> Loading…
+        </div>
       </PayrollShell>
     );
   }
-
-  const firstName = me.name.split(" ")[0];
 
   return (
     <PayrollShell>
@@ -54,11 +75,11 @@ export function MyPayrollHome() {
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-3">
             <div className="flex h-11 w-11 items-center justify-center rounded-full bg-cyan-50 text-base font-semibold text-brand-accent">
-              {me.name.split(" ").map((n) => n[0]).slice(0, 2).join("")}
+              {initials}
             </div>
             <div>
               <h2 className="text-lg font-semibold text-gray-800">Hi {firstName} 👋</h2>
-              <p className="text-sm text-gray-500">{me.designation} · {me.department} · {me.staffId}</p>
+              <p className="text-sm text-gray-500">{subtitle}</p>
             </div>
           </div>
           <span className="rounded-lg bg-cyan-50 px-3 py-1.5 text-sm font-medium text-brand-accent">{MONTHS[now.getMonth()]} {now.getFullYear()}</span>
@@ -66,35 +87,41 @@ export function MyPayrollHome() {
 
         {/* This month at a glance */}
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-          <StatCard label="Present this month" value={data.summary.present} accent="green" icon={CircleCheck} hint={`${data.summary.payableDays} payable days`} />
-          <StatCard label="On Leave" value={data.summary.paidLeave} accent="blue" icon={Plane} hint={`${data.summary.absent} absent`} />
-          <StatCard label="Est. Net Pay" value={inr(data.slip.net)} accent="cyan" icon={Wallet} hint="This month, so far" />
-          <StatCard label="Overtime" value={`${data.summary.overtime} hrs`} accent="gray" hint={`${data.summary.fine} fine hrs`} />
+          <StatCard label="Present this month" value={summary.present} accent="green" icon={CircleCheck} hint={`${summary.payableDays} payable days`} />
+          <StatCard label="On Leave" value={summary.paidLeave} accent="blue" icon={Plane} hint={`${summary.absent} absent`} />
+          <StatCard label="Latest Net Pay" value={latestSlip ? inr(latestSlip.net) : "—"} accent="cyan" icon={Wallet} hint={latestSlip?.month ? `for ${latestSlip.month}` : "No payslip yet"} />
+          <StatCard label="Overtime" value={`${summary.overtime.toFixed(1)} hrs`} accent="gray" hint={`${summary.fine.toFixed(1)} fine hrs`} />
         </div>
 
-        {/* Payslip snapshot + shortcuts */}
+        {/* Latest payslip snapshot + shortcuts */}
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
           <div className="rounded-xl border border-gray-200 bg-white p-5 lg:col-span-2">
             <div className="mb-3 flex items-center justify-between">
-              <h3 className="text-sm font-semibold text-gray-800">This month&apos;s pay estimate</h3>
+              <h3 className="text-sm font-semibold text-gray-800">{latestSlip?.month ? `Payslip — ${latestSlip.month}` : "Latest payslip"}</h3>
               <Link href="/payroll/me/payslips" className="text-xs font-medium text-brand-accent hover:underline">All payslips →</Link>
             </div>
-            <div className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm sm:grid-cols-3">
-              <PayRow label="Gross" value={inr(data.slip.gross)} />
-              <PayRow label="PF" value={data.slip.pf ? `- ${inr(data.slip.pf)}` : "—"} />
-              <PayRow label="ESIC" value={data.slip.esic ? `- ${inr(data.slip.esic)}` : "—"} />
-              <PayRow label="Professional Tax" value={data.slip.pt ? `- ${inr(data.slip.pt)}` : "—"} />
-              <PayRow label="Loan EMI" value={data.slip.loanEmi ? `- ${inr(data.slip.loanEmi)}` : "—"} />
-              <PayRow label="Net Pay" value={inr(data.slip.net)} strong />
-            </div>
-            <p className="mt-3 text-[11px] text-gray-400">Estimate based on attendance so far this month. Final payslip is issued when HR runs payroll.</p>
+            {latestSlip ? (
+              <>
+                <div className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm sm:grid-cols-3">
+                  <PayRow label="Gross" value={inr(latestSlip.gross)} />
+                  <PayRow label="PF" value={latestSlip.pf ? `- ${inr(latestSlip.pf)}` : "—"} />
+                  <PayRow label="ESIC" value={latestSlip.esic ? `- ${inr(latestSlip.esic)}` : "—"} />
+                  <PayRow label="Professional Tax" value={latestSlip.pt ? `- ${inr(latestSlip.pt)}` : "—"} />
+                  <PayRow label="Loan EMI" value={latestSlip.loanEmi ? `- ${inr(latestSlip.loanEmi)}` : "—"} />
+                  <PayRow label="Net Pay" value={inr(latestSlip.net)} strong />
+                </div>
+                <p className="mt-3 text-[11px] text-gray-400">Payable {latestSlip.payableDays} / {latestSlip.totalDays} days. Issued by HR&apos;s monthly payroll run.</p>
+              </>
+            ) : (
+              <p className="py-6 text-center text-sm text-gray-400">No payslip yet — it appears here once HR runs payroll for a month.</p>
+            )}
           </div>
 
           <div className="space-y-3">
             <ShortcutCard href="/payroll/me/attendance" icon={CalendarDays} title="My Attendance" hint="Your monthly calendar" />
-            <ShortcutCard href="/payroll/me/loans" icon={Landmark} title="My Loans" hint={data.outstanding > 0 ? `${inr(data.outstanding)} outstanding` : "No active loans"} />
-            <ShortcutCard href="/payroll/me/reimbursements" icon={Receipt} title="My Reimbursements" hint={data.pendingClaims > 0 ? `${data.pendingClaims} pending` : "Apply for a claim"} />
-            <ShortcutCard href="/payroll/me/profile" icon={IdCard} title="My Profile" hint={`${categoryConfig(me.category).title}`} />
+            <ShortcutCard href="/payroll/me/loans" icon={Landmark} title="My Loans" hint={outstanding > 0 ? `${inr(outstanding)} outstanding · ${activeLoans} active` : "No active loans"} />
+            <ShortcutCard href="/payroll/me/reimbursements" icon={Receipt} title="My Reimbursements" hint={pendingClaims > 0 ? `${pendingClaims} pending` : "Apply for a claim"} />
+            <ShortcutCard href="/payroll/me/profile" icon={IdCard} title="My Profile" hint={profile ? categoryConfig(profile.category).title : "View details"} />
           </div>
         </div>
       </div>

@@ -12,42 +12,33 @@ export interface PayrollNavNode {
   badge?: string;
 }
 
-/** Left rail, mirroring PagarBook's sections. */
+/** Left rail — flat, deduplicated. Attendance is one page with a Day/Month toggle; shift + weekly-off
+ *  + grace + OT rules live on the Shift record in Setup (no separate "Attendance Settings" screen).
+ *  Payroll Run's lock/unlock is inline on the runs page (no separate "Approvals" screen). */
 export const PAYROLL_NAV: PayrollNavNode[] = [
   { label: "Dashboard", href: "/payroll", icon: "home" },
+  // Pre-setup: reusable policies (shifts, holidays, leave) configured once and assigned to people.
+  { label: "Setup", href: "/payroll/setup", icon: "sliders" },
+  { label: "People", href: "/payroll/staff", icon: "users" },
+  { label: "Locations", href: "/payroll/locations", icon: "pin" },
+  // Combined Day + Month view (formerly two pages).
+  { label: "Attendance", href: "/payroll/attendance", icon: "calendar" },
   {
-    label: "Staff",
-    icon: "users",
-    children: [
-      { label: "Staff List", href: "/payroll/staff" },
-      { label: "Add Staff", href: "/payroll/staff/add" },
-      { label: "Bulk Add Staff", href: "/payroll/staff/bulk" },
-    ],
-  },
-  {
-    label: "Attendance",
+    label: "Leave",
     icon: "calendar",
     children: [
-      { label: "Daily Attendance", href: "/payroll/attendance" },
-      { label: "Muster Roll", href: "/payroll/attendance/muster" },
-      { label: "Attendance Settings", href: "/payroll/attendance/settings" },
+      { label: "All Requests", href: "/payroll/leave" },
+      { label: "Approval Queue", href: "/payroll/leave/approvals" },
     ],
   },
+  { label: "Monthly Runs", href: "/payroll/run", icon: "wallet" },
+  { label: "Loans", href: "/payroll/loans", icon: "landmark" },
+  { label: "Reimbursements", href: "/payroll/reimbursements", icon: "receipt" },
+  // Payments (payout tracking) and Tax Profiles are not wired to the backend yet — hidden from
+  // nav so no mock data reaches users. Re-add once Phase 6 (payroll_payments) ships.
+  { label: "Reports", href: "/payroll/reports", icon: "chart" },
   // Tasks are handled by the dedicated Taskopad module — link out to it rather than duplicating.
   { label: "Tasks", href: "/taskopad", icon: "check" },
-  {
-    label: "Payroll",
-    icon: "wallet",
-    children: [
-      { label: "Payroll Overview", href: "/payroll/run" },
-      { label: "Approvals", href: "/payroll/run/approvals" },
-      { label: "Tax Profiles", href: "/payroll/run/tax-profiles" },
-    ],
-  },
-  { label: "Payments", href: "/payroll/payments", icon: "banknote" },
-  { label: "Reimbursements", href: "/payroll/reimbursements", icon: "receipt" },
-  { label: "Loans", href: "/payroll/loans", icon: "landmark" },
-  { label: "Reports", href: "/payroll/reports", icon: "chart" },
   { label: "Others", href: "/payroll/others", icon: "grid" },
 ];
 
@@ -55,6 +46,7 @@ export const PAYROLL_NAV: PayrollNavNode[] = [
 export const PAYROLL_SELF_NAV: PayrollNavNode[] = [
   { label: "My Dashboard", href: "/payroll", icon: "home" },
   { label: "My Attendance", href: "/payroll/me/attendance", icon: "calendar" },
+  { label: "My Leave", href: "/payroll/me/leave", icon: "calendar" },
   { label: "My Payslips", href: "/payroll/me/payslips", icon: "wallet" },
   { label: "My Loans", href: "/payroll/me/loans", icon: "landmark" },
   { label: "My Reimbursements", href: "/payroll/me/reimbursements", icon: "receipt" },

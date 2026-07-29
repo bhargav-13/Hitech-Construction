@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import {
   CornerDownLeft,
   FolderKanban,
+  HardHat,
   ListChecks,
   Search,
   UserRound,
@@ -12,10 +13,11 @@ import {
 } from "lucide-react";
 import * as api from "@/lib/api";
 import { listTasks } from "@/lib/tasksApi";
+import { usePayrollStore } from "@/lib/payrollApi";
 import { projectAvatarColor, projectInitials } from "@/lib/projectHelpers";
 import { Spinner } from "./Spinner";
 
-type ItemType = "Project" | "Task" | "People";
+type ItemType = "Project" | "Task" | "Staff" | "People";
 
 interface SearchItem {
   key: string;
@@ -26,9 +28,9 @@ interface SearchItem {
   keywords: string;
 }
 
-const TABS: ("All" | ItemType)[] = ["All", "Project", "Task", "People"];
-const GROUP_LABEL: Record<ItemType, string> = { Project: "Projects", Task: "Tasks", People: "People" };
-const ORDER: ItemType[] = ["Project", "Task", "People"];
+const TABS: ("All" | ItemType)[] = ["All", "Project", "Task", "Staff", "People"];
+const GROUP_LABEL: Record<ItemType, string> = { Project: "Projects", Task: "Tasks", Staff: "Staff", People: "People" };
+const ORDER: ItemType[] = ["Project", "Task", "Staff", "People"];
 
 export function GlobalSearch() {
   const router = useRouter();
@@ -66,6 +68,14 @@ export function GlobalSearch() {
           subtitle: [t.code, t.clientName].filter(Boolean).join(" · "),
           href: `/taskopad/tasks`,
           keywords: `${t.title} ${t.code} ${t.clientName ?? ""}`.toLowerCase(),
+        })),
+        ...usePayrollStore.getState().employees.map((e) => ({
+          key: `s-${e.id}`,
+          type: "Staff" as const,
+          title: e.name,
+          subtitle: [e.staffId, e.designation, e.department].filter(Boolean).join(" · "),
+          href: `/payroll/staff`,
+          keywords: `${e.name} ${e.staffId} ${e.designation} ${e.department} ${e.phone}`.toLowerCase(),
         })),
         ...team.map((u) => ({
           key: `u-${u.id}`,
@@ -277,6 +287,13 @@ function ItemIcon({ item }: { item: SearchItem }) {
     return (
       <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-indigo-50 text-indigo-600">
         <FolderKanban size={16} />
+      </div>
+    );
+  }
+  if (item.type === "Staff") {
+    return (
+      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-amber-50 text-amber-600">
+        <HardHat size={16} />
       </div>
     );
   }

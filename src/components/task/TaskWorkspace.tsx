@@ -107,6 +107,9 @@ export function TaskWorkspace({ projectId }: { projectId?: string }) {
   const bulkRemove = useTaskStore((s) => s.bulkRemove);
   const createTask = useTaskStore((s) => s.createTask);
   const authUserId = useAuthStore((s) => s.user?.id);
+  const roleName = useAuthStore((s) => s.user?.role?.name);
+  const isSuperAdmin = roleName === "Super Admin";
+  const meId = authUserId != null ? String(authUserId) : "";
 
   const { users } = useUsers();
   const { departments, departmentName } = useDepartments();
@@ -138,6 +141,10 @@ export function TaskWorkspace({ projectId }: { projectId?: string }) {
   // Which optional columns the list shows — persisted so the choice sticks between visits.
   const [columns, setColumns] = useState<ColumnKey[]>(DEFAULT_COLUMNS);
   const [showColumns, setShowColumns] = useState(false);
+  // Completed tasks are hidden by default (client request); "Show completed" reveals them.
+  const [hideCompleted, setHideCompleted] = useState(true);
+  // Super Admin can switch between their own tasks (default) and everyone's.
+  const [scopeAll, setScopeAll] = useState(false);
 
   // Drill-down: apply any filters passed in the URL (e.g. from a dashboard score card/chart).
   useEffect(() => {
@@ -193,6 +200,13 @@ export function TaskWorkspace({ projectId }: { projectId?: string }) {
   const tasks = useMemo(() => {
     let list = allTasks.filter((t) => (effectiveProjectId ? t.projectId === effectiveProjectId : true));
     list = list.filter((t) => (showDrafts ? t.isDraft : !t.isDraft));
+    // Super Admin's default view is their own work (assignee/follower); "All Users" shows everyone's.
+    // Non-admins are already scoped to their own tasks by the backend, so no client filter for them.
+    if (isSuperAdmin && !scopeAll) {
+      list = list.filter((t) => t.assigneeId === meId || t.followerIds.includes(meId));
+    }
+    // Hide completed by default unless the user opts in (or is explicitly filtering to Completed).
+    if (hideCompleted && statusFilter !== "Completed") list = list.filter((t) => t.status !== "Completed");
     if (statusFilter !== "All") list = list.filter((t) => t.status === statusFilter);
     if (priorityFilter !== "All") list = list.filter((t) => t.priority === priorityFilter);
     if (assigneeFilter !== "All") list = list.filter((t) => t.assigneeId === assigneeFilter);
@@ -225,6 +239,10 @@ export function TaskWorkspace({ projectId }: { projectId?: string }) {
     sort,
     dueFrom,
     dueTo,
+    hideCompleted,
+    scopeAll,
+    isSuperAdmin,
+    meId,
   ]);
 
   const activeFilters =
@@ -607,9 +625,31 @@ export function TaskWorkspace({ projectId }: { projectId?: string }) {
             </button>
           ))}
         </div>
-        <span className="pb-2 text-xs text-gray-400">
-          {loading && !loaded ? "Loading…" : `${tasks.length} tasks`}
-        </span>
+        <div className="flex items-center gap-3 pb-2">
+          {isSuperAdmin && (
+            <div className="flex items-center overflow-hidden rounded-lg border border-gray-200 text-xs">
+              <button
+                onClick={() => setScopeAll(false)}
+                className={`px-2.5 py-1 font-medium transition-colors ${!scopeAll ? "bg-brand-accent text-white" : "text-gray-500 hover:bg-gray-50"}`}
+              >
+                My Tasks
+              </button>
+              <button
+                onClick={() => setScopeAll(true)}
+                className={`px-2.5 py-1 font-medium transition-colors ${scopeAll ? "bg-brand-accent text-white" : "text-gray-500 hover:bg-gray-50"}`}
+              >
+                All Users
+              </button>
+            </div>
+          )}
+          <label className="flex cursor-pointer items-center gap-1.5 text-xs text-gray-500">
+            <input type="checkbox" checked={!hideCompleted} onChange={(e) => setHideCompleted(!e.target.checked)} className="accent-cyan-600" />
+            Show completed
+          </label>
+          <span className="text-xs text-gray-400">
+            {loading && !loaded ? "Loading…" : `${tasks.length} tasks`}
+          </span>
+        </div>
       </div>
 
       {error && (
@@ -652,6 +692,31 @@ export function TaskWorkspace({ projectId }: { projectId?: string }) {
       {creating && <TaskDrawer defaultProjectId={effectiveProjectId ?? null} onClose={() => setCreating(false)} />}
       {editing && <TaskDrawer existing={editing} onClose={() => setEditing(null)} />}
     </div>
+  );
+}
+
+/** A small pill on a task showing the signed-in user's relationship to it — assignee or follower. */
+function MyRoleBadge({ task }: { task: Task }) {
+  const meId = useAuthStore((s) => s.user?.id);
+  if (meId == null) return null;
+  const me = String(meId);
+  const isAssignee = String(task.assigneeId ?? "") === me;
+  const isCreator = String(task.createdBy ?? "") === me;
+  const isFollower = (task.followerIds ?? []).map(String).includes(me);
+  // Priority: assignee > creator > follower (the creator auto-follows, so show "Creator" not "Follower").
+  const role = isAssignee ? "Assignee" : isCreator ? "Creator" : isFollower ? "Follower" : null;
+  if (!role) return null;
+  const style =
+    role === "Assignee" ? "bg-emerald-50 text-emerald-700"
+    : role === "Creator" ? "bg-amber-50 text-amber-700"
+    : "bg-violet-50 text-violet-600";
+  return (
+    <span
+      title={role === "Assignee" ? "Assigned to you" : role === "Creator" ? "You created this task" : "You follow this task"}
+      className={`inline-flex shrink-0 items-center rounded-md px-1.5 py-0.5 text-[10px] font-medium ${style}`}
+    >
+      You · {role}
+    </span>
   );
 }
 
@@ -808,6 +873,7 @@ function ListView({
                     <span className={`font-medium ${t.status === "Completed" ? "text-gray-400 line-through" : "text-gray-800"}`}>
                       {t.title}
                     </span>
+                    <MyRoleBadge task={t} />
                     {t.recurrenceRule && t.recurrenceRule !== "NONE" && (
                       <span
                         title={`Repeats ${recurrenceLabel(t.recurrenceRule as RecurrenceRule, t.recurrenceInterval)}`}

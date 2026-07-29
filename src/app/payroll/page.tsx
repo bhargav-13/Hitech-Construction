@@ -1,12 +1,16 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { PayrollShell, StatCard } from "@/components/payroll/PayrollShell";
 import { MyPayrollHome } from "@/components/payroll/self/MyPayrollHome";
 import { DatePicker } from "@/components/DatePicker";
-import { usePayrollStore, getAttendance, usePayrollAccess } from "@/lib/payrollApi";
-import { ATTENDANCE_META, DEPARTMENTS } from "@/lib/payrollConfig";
+import { Spinner } from "@/components/Spinner";
+import { usePayrollAccess } from "@/lib/payrollApi";
+import { useMuster } from "@/lib/usePayrollLive";
+import { getTeam } from "@/lib/api";
+import type { TeamMemberResponse } from "@/lib/api";
+import { ATTENDANCE_META } from "@/lib/payrollConfig";
 import type { AttendanceCode } from "@/lib/payrollConfig";
 import {
   CalendarDays,
@@ -21,13 +25,8 @@ import {
   UserMinus,
 } from "lucide-react";
 
-const iso = (d: Date) => d.toISOString().slice(0, 10);
-/** Most recent working day (skip Sundays) so the dashboard lands on a populated day, not a week-off. */
-function latestWorkingDay(): string {
-  const d = new Date();
-  while (d.getDay() === 0) d.setDate(d.getDate() - 1);
-  return iso(d);
-}
+// Local calendar date (not UTC) so keys match muster / punch.
+const iso = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 
 /** The Payroll landing routes by access: HR admins get the full attendance dashboard, everyone
  * else (project managers, team members, workers) gets their own self-service payroll home. */
@@ -36,57 +35,89 @@ export default function PayrollLanding() {
   return isAdmin ? <AdminAttendanceDashboard /> : <MyPayrollHome />;
 }
 
-/** Attendance Dashboard — the day's staff attendance at a glance, by department and per employee. */
+/** Attendance Dashboard — the day's staff attendance at a glance, by department and per member. Real backend data. */
 function AdminAttendanceDashboard() {
-  const employees = usePayrollStore((s) => s.employees);
-  const overrides = usePayrollStore((s) => s.attendanceOverrides);
-  const [date, setDate] = useState(latestWorkingDay);
+  const [date, setDate] = useState(iso(new Date()));
+  const [team, setTeam] = useState<TeamMemberResponse[]>([]);
+  const [teamLoading, setTeamLoading] = useState(true);
+  const { rows, loading: musterLoading, error } = useMuster(date, date);
 
-  const active = useMemo(() => employees.filter((e) => e.active), [employees]);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await getTeam();
+        if (!cancelled) setTeam(res);
+      } catch {
+        if (!cancelled) setTeam([]);
+      } finally {
+        if (!cancelled) setTeamLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
-  const rows = useMemo(
-    () => active.map((e) => ({ emp: e, att: getAttendance(overrides, e, date) })),
-    [active, overrides, date]
+  const active = useMemo(() => team.filter((u) => u.active), [team]);
+  const deactivated = team.length - active.length;
+
+  // Join the day's real attendance rows onto the active roster so unmarked members show as NM.
+  const rowByUser = useMemo(() => {
+    const m = new Map<number, typeof rows[number]>();
+    for (const r of rows) m.set(r.userId, r);
+    return m;
+  }, [rows]);
+
+  const detailRows = useMemo(
+    () => active.map((u) => ({ user: u, att: rowByUser.get(u.id) ?? null })),
+    [active, rowByUser]
   );
 
   const totals = useMemo(() => {
     const t = { present: 0, absent: 0, halfDay: 0, paidLeave: 0, notMarked: 0, weekOff: 0, punchedIn: 0, punchedOut: 0, overtime: 0, fine: 0 };
-    for (const { att } of rows) {
-      if (att.code === "P") t.present++;
-      else if (att.code === "A") t.absent++;
-      else if (att.code === "HD") t.halfDay++;
-      else if (att.code === "PL") t.paidLeave++;
-      else if (att.code === "NM") t.notMarked++;
-      else if (att.code === "WO") t.weekOff++;
-      if (att.inTime) t.punchedIn++;
-      if (att.outTime) t.punchedOut++;
-      t.overtime += att.overtimeHours;
-      t.fine += att.fineHours;
+    for (const { att } of detailRows) {
+      const code = att?.code ?? "NM";
+      if (code === "P") t.present++;
+      else if (code === "A") t.absent++;
+      else if (code === "HD") t.halfDay++;
+      else if (code === "PL") t.paidLeave++;
+      else if (code === "WO") t.weekOff++;
+      else t.notMarked++;
+      if (att?.inTime) t.punchedIn++;
+      if (att?.outTime) t.punchedOut++;
+      t.overtime += Number(att?.overtimeHours ?? 0);
+      t.fine += Number(att?.fineHours ?? 0);
     }
     return t;
-  }, [rows]);
+  }, [detailRows]);
 
-  const deactivated = employees.length - active.length;
+  const departments = useMemo(() => {
+    const set = new Set<string>();
+    for (const u of active) set.add(u.departmentName ?? "Unassigned");
+    return Array.from(set).sort();
+  }, [active]);
 
   const byDept = useMemo(() => {
-    return DEPARTMENTS.map((dept) => {
-      const deptRows = rows.filter((r) => r.emp.department === dept);
+    return departments.map((dept) => {
+      const deptRows = detailRows.filter((r) => (r.user.departmentName ?? "Unassigned") === dept);
       const c = { dept, count: deptRows.length, P: 0, A: 0, NM: 0, HD: 0, OT: 0, F: 0, L: 0 };
       for (const { att } of deptRows) {
-        if (att.code === "P") c.P++;
-        else if (att.code === "A") c.A++;
-        else if (att.code === "NM") c.NM++;
-        else if (att.code === "HD") c.HD++;
-        else if (att.code === "PL") c.L++;
-        c.OT += att.overtimeHours;
-        c.F += att.fineHours;
+        const code = att?.code ?? "NM";
+        if (code === "P") c.P++;
+        else if (code === "A") c.A++;
+        else if (code === "HD") c.HD++;
+        else if (code === "PL") c.L++;
+        else if (code !== "WO") c.NM++;
+        c.OT += Number(att?.overtimeHours ?? 0);
+        c.F += Number(att?.fineHours ?? 0);
       }
       return c;
     }).filter((c) => c.count > 0);
-  }, [rows]);
+  }, [departments, detailRows]);
 
   const [deptFilter, setDeptFilter] = useState<string | null>(null);
-  const detailRows = deptFilter ? rows.filter((r) => r.emp.department === deptFilter) : rows;
+  const shownRows = deptFilter ? detailRows.filter((r) => (r.user.departmentName ?? "Unassigned") === deptFilter) : detailRows;
+
+  const loading = teamLoading || musterLoading;
 
   return (
     <PayrollShell>
@@ -109,6 +140,8 @@ function AdminAttendanceDashboard() {
           </div>
         </div>
 
+        {error && <div className="rounded-lg bg-rose-50 px-4 py-2 text-sm text-rose-600">{error}</div>}
+
         {/* Overview cards */}
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
           <StatCard label="Present" value={totals.present} accent="green" icon={CircleCheck} />
@@ -123,89 +156,99 @@ function AdminAttendanceDashboard() {
           <StatCard label="Deactivated" value={deactivated} accent="gray" icon={UserMinus} />
         </div>
 
-        {/* Department-wise attendance */}
-        <div className="overflow-hidden rounded-xl border border-gray-200 bg-white">
-          <div className="flex items-center justify-between border-b border-gray-100 px-4 py-3">
-            <h3 className="text-sm font-semibold text-gray-800">Department-wise Attendance</h3>
-            {deptFilter && (
-              <button onClick={() => setDeptFilter(null)} className="text-xs font-medium text-brand-accent hover:underline">
-                Clear filter · {deptFilter}
-              </button>
-            )}
+        {loading ? (
+          <div className="flex items-center justify-center gap-2 rounded-xl border border-dashed border-gray-300 bg-white py-16 text-sm text-gray-400">
+            <Spinner size={16} className="text-brand-accent" /> Loading…
           </div>
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[720px] border-collapse text-sm">
-              <thead>
-                <tr className="border-b border-gray-100 bg-gray-50 text-left text-gray-500">
-                  <th className="px-4 py-2 font-medium">Department</th>
-                  <Th>P</Th>
-                  <Th>A</Th>
-                  <Th>NM</Th>
-                  <Th>HD</Th>
-                  <Th>OT</Th>
-                  <Th>F</Th>
-                  <Th>L</Th>
-                </tr>
-              </thead>
-              <tbody>
-                {byDept.map((c) => (
-                  <tr
-                    key={c.dept}
-                    onClick={() => setDeptFilter(c.dept === deptFilter ? null : c.dept)}
-                    className={`cursor-pointer border-b border-gray-50 transition-colors duration-150 last:border-b-0 hover:bg-cyan-50/40 ${
-                      deptFilter === c.dept ? "bg-cyan-50/60" : ""
-                    }`}
-                  >
-                    <td className="px-4 py-2.5 font-medium text-gray-700">{c.dept}</td>
-                    <Td className="text-emerald-600">{c.P}</Td>
-                    <Td className="text-rose-600">{c.A}</Td>
-                    <Td className="text-gray-400">{c.NM}</Td>
-                    <Td className="text-amber-600">{c.HD}</Td>
-                    <Td>{c.OT}</Td>
-                    <Td className="text-rose-500">{c.F}</Td>
-                    <Td className="text-blue-600">{c.L}</Td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
+        ) : (
+          <>
+            {/* Department-wise attendance */}
+            <div className="overflow-hidden rounded-xl border border-gray-200 bg-white">
+              <div className="flex items-center justify-between border-b border-gray-100 px-4 py-3">
+                <h3 className="text-sm font-semibold text-gray-800">Department-wise Attendance</h3>
+                {deptFilter && (
+                  <button onClick={() => setDeptFilter(null)} className="text-xs font-medium text-brand-accent hover:underline">
+                    Clear filter · {deptFilter}
+                  </button>
+                )}
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[720px] border-collapse text-sm">
+                  <thead>
+                    <tr className="border-b border-gray-100 bg-gray-50 text-left text-gray-500">
+                      <th className="px-4 py-2 font-medium">Department</th>
+                      <Th>P</Th>
+                      <Th>A</Th>
+                      <Th>NM</Th>
+                      <Th>HD</Th>
+                      <Th>OT</Th>
+                      <Th>F</Th>
+                      <Th>L</Th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {byDept.length === 0 ? (
+                      <tr><td colSpan={8} className="px-4 py-6 text-center text-sm text-gray-400">No members on payroll yet.</td></tr>
+                    ) : byDept.map((c) => (
+                      <tr
+                        key={c.dept}
+                        onClick={() => setDeptFilter(c.dept === deptFilter ? null : c.dept)}
+                        className={`cursor-pointer border-b border-gray-50 transition-colors duration-150 last:border-b-0 hover:bg-cyan-50/40 ${
+                          deptFilter === c.dept ? "bg-cyan-50/60" : ""
+                        }`}
+                      >
+                        <td className="px-4 py-2.5 font-medium text-gray-700">{c.dept}</td>
+                        <Td className="text-emerald-600">{c.P}</Td>
+                        <Td className="text-rose-600">{c.A}</Td>
+                        <Td className="text-gray-400">{c.NM}</Td>
+                        <Td className="text-amber-600">{c.HD}</Td>
+                        <Td>{c.OT}</Td>
+                        <Td className="text-rose-500">{c.F}</Td>
+                        <Td className="text-blue-600">{c.L}</Td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
 
-        {/* Daily attendance view */}
-        <div className="overflow-hidden rounded-xl border border-gray-200 bg-white">
-          <div className="border-b border-gray-100 px-4 py-3">
-            <h3 className="text-sm font-semibold text-gray-800">
-              Daily Attendance {deptFilter && <span className="text-gray-400">· {deptFilter}</span>}
-            </h3>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[640px] border-collapse text-sm">
-              <thead>
-                <tr className="border-b border-gray-100 bg-gray-50 text-left text-gray-500">
-                  <th className="px-4 py-2 font-medium">Name</th>
-                  <th className="px-4 py-2 font-medium">Department</th>
-                  <th className="px-4 py-2 font-medium">Attendance</th>
-                  <th className="px-4 py-2 font-medium">In Time</th>
-                  <th className="px-4 py-2 font-medium">Out Time</th>
-                </tr>
-              </thead>
-              <tbody>
-                {detailRows.map(({ emp, att }) => (
-                  <tr key={emp.id} className="border-b border-gray-50 transition-colors duration-150 last:border-b-0 even:bg-gray-50/40 hover:bg-cyan-50/40">
-                    <td className="px-4 py-2.5">
-                      <div className="font-medium text-gray-800">{emp.name}</div>
-                      <div className="text-xs text-gray-400">{emp.staffId} · {emp.designation}</div>
-                    </td>
-                    <td className="px-4 py-2.5 text-gray-600">{emp.department}</td>
-                    <td className="px-4 py-2.5"><AttBadge code={att.code} /></td>
-                    <td className="px-4 py-2.5 text-gray-600">{att.inTime ?? "—"}</td>
-                    <td className="px-4 py-2.5 text-gray-600">{att.outTime ?? "—"}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
+            {/* Daily attendance view */}
+            <div className="overflow-hidden rounded-xl border border-gray-200 bg-white">
+              <div className="border-b border-gray-100 px-4 py-3">
+                <h3 className="text-sm font-semibold text-gray-800">
+                  Daily Attendance {deptFilter && <span className="text-gray-400">· {deptFilter}</span>}
+                </h3>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[640px] border-collapse text-sm">
+                  <thead>
+                    <tr className="border-b border-gray-100 bg-gray-50 text-left text-gray-500">
+                      <th className="px-4 py-2 font-medium">Name</th>
+                      <th className="px-4 py-2 font-medium">Department</th>
+                      <th className="px-4 py-2 font-medium">Attendance</th>
+                      <th className="px-4 py-2 font-medium">In Time</th>
+                      <th className="px-4 py-2 font-medium">Out Time</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {shownRows.map(({ user, att }) => (
+                      <tr key={user.id} className="border-b border-gray-50 transition-colors duration-150 last:border-b-0 even:bg-gray-50/40 hover:bg-cyan-50/40">
+                        <td className="px-4 py-2.5">
+                          <div className="font-medium text-gray-800">{user.fullName}</div>
+                          <div className="text-xs text-gray-400">{user.roleName}</div>
+                        </td>
+                        <td className="px-4 py-2.5 text-gray-600">{user.departmentName ?? "—"}</td>
+                        <td className="px-4 py-2.5"><AttBadge code={(att?.code ?? "NM") as AttendanceCode} /></td>
+                        <td className="px-4 py-2.5 text-gray-600">{att?.inTime ?? "—"}</td>
+                        <td className="px-4 py-2.5 text-gray-600">{att?.outTime ?? "—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </>
+        )}
       </div>
     </PayrollShell>
   );

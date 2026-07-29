@@ -12,7 +12,6 @@ import {
   ChevronRight,
   Pencil,
   Search,
-  Settings as SettingsIcon,
   Trash2,
   UserCheck,
   UserMinus,
@@ -149,12 +148,12 @@ function RolesAndAccess() {
     <div className="animate-fade-in space-y-6">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h2 className="text-base font-semibold text-gray-800">Administrators</h2>
+          <h2 className="text-base font-semibold text-gray-800">Members &amp; Roles</h2>
           <p className="mt-0.5 text-sm text-gray-500">
             Access is based on role. Each role unlocks specific menus and features.
           </p>
         </div>
-        <div className="flex shrink-0 gap-2">
+        <div className="flex shrink-0 items-center gap-2">
           <button
             onClick={() => setRoleDrawer({ mode: "create" })}
             className="rounded-lg border border-gray-200 px-4 py-2 text-sm font-medium text-gray-600 transition-all duration-150 hover:border-gray-300 hover:bg-gray-50 active:scale-95"
@@ -172,17 +171,11 @@ function RolesAndAccess() {
 
       {error && <div className="rounded-lg bg-rose-50 px-4 py-2 text-sm text-rose-600">{error}</div>}
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {roles.map((role) => (
-          <RoleCard
-            key={role.id}
-            role={role}
-            members={usersByRoleId.get(role.id) ?? []}
-            onSeeAll={() => setRoleFilter(role.id)}
-            onManage={() => setRoleDrawer({ mode: "edit", role })}
-          />
-        ))}
-      </div>
+      <RoleHierarchy
+        roles={roles}
+        usersByRoleId={usersByRoleId}
+        onManage={(role) => setRoleDrawer({ mode: "edit", role })}
+      />
 
       <AccountsSection
         roles={roles}
@@ -214,6 +207,7 @@ function RolesAndAccess() {
       {roleDrawer && (
         <RoleDrawer
           modules={modules}
+          roles={roles}
           existing={roleDrawer.mode === "edit" ? roleDrawer.role : undefined}
           onClose={() => setRoleDrawer(null)}
           onSaved={() => {
@@ -251,6 +245,31 @@ function StatusPill({ active }: { active: boolean }) {
   );
 }
 
+/** Office vs Site posting — Site members are project-based, Office members aren't. */
+function PostingPill({ staffType }: { staffType: "OFFICE" | "SITE" | null }) {
+  if (!staffType) return <span className="text-gray-300">—</span>;
+  const isSite = staffType === "SITE";
+  return (
+    <span
+      className={`shrink-0 rounded-md px-2 py-0.5 text-xs font-medium ${
+        isSite ? "bg-amber-50 text-amber-700" : "bg-indigo-50 text-indigo-700"
+      }`}
+    >
+      {isSite ? "Site" : "Office"}
+    </span>
+  );
+}
+
+/** Whether the member is enrolled in payroll (can punch and has a payroll profile). */
+function PayrollPill({ onPayroll }: { onPayroll: boolean }) {
+  if (!onPayroll) return <span className="text-gray-300">—</span>;
+  return (
+    <span className="shrink-0 rounded-md bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700">
+      Enrolled
+    </span>
+  );
+}
+
 function Avatar({ name, id, size = 32 }: { name: string; id: string; size?: number }) {
   return (
     <div
@@ -263,54 +282,6 @@ function Avatar({ name, id, size = 32 }: { name: string; id: string; size?: numb
   );
 }
 
-function RoleCard({
-  role,
-  members,
-  onSeeAll,
-  onManage,
-}: {
-  role: RoleResponse;
-  members: UserResponse[];
-  onSeeAll: () => void;
-  onManage: () => void;
-}) {
-  return (
-    <div className="flex flex-col rounded-xl border border-gray-200 bg-white p-4 transition-shadow duration-150 hover:shadow-md">
-      <div className="mb-3 flex items-center justify-between">
-        <span className="text-sm font-semibold text-gray-800">{role.name}</span>
-        {members.length > 3 && (
-          <button
-            onClick={onSeeAll}
-            className="text-xs font-medium text-brand-accent transition-opacity duration-150 hover:underline hover:opacity-80"
-          >
-            See All
-          </button>
-        )}
-      </div>
-
-      <div className="flex-1 space-y-3">
-        {members.length === 0 && <div className="text-xs text-gray-400">No members yet.</div>}
-        {members.slice(0, 3).map((member) => (
-          <div key={member.id} className="flex items-center gap-3">
-            <Avatar name={member.fullName} id={String(member.id)} />
-            <div className="min-w-0 flex-1">
-              <div className="truncate text-sm font-medium text-gray-800">{member.fullName}</div>
-              <div className="truncate text-xs text-gray-400">{member.email}</div>
-            </div>
-            <StatusPill active={member.isActive} />
-          </div>
-        ))}
-      </div>
-
-      <button
-        onClick={onManage}
-        className="mt-4 flex w-full items-center justify-center gap-1.5 rounded-lg border border-gray-200 py-2 text-xs font-medium text-gray-600 transition-all duration-150 hover:border-gray-300 hover:bg-gray-50 active:scale-[0.98]"
-      >
-        <SettingsIcon size={13} /> Manage
-      </button>
-    </div>
-  );
-}
 
 function AccountsSection({
   roles,
@@ -343,7 +314,10 @@ function AccountsSection({
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between gap-4">
-        <h3 className="text-sm font-semibold text-gray-800">Administrator Accounts</h3>
+        <div>
+          <h3 className="text-sm font-semibold text-gray-800">Member Directory</h3>
+          <p className="mt-0.5 text-xs text-gray-400">Everyone with an account — their role, posting and payroll status.</p>
+        </div>
         <div className="flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-1.5 transition-colors duration-150 focus-within:border-cyan-400">
           <Search size={14} className="text-gray-400" />
           <input
@@ -378,13 +352,14 @@ function AccountsSection({
       </div>
 
       <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white">
-        <table className="w-full min-w-[640px] border-collapse text-sm">
+        <table className="w-full min-w-[860px] border-collapse text-sm">
           <thead>
             <tr className="border-b border-gray-100 bg-gray-50 text-left text-gray-500">
               <th className="px-4 py-2 font-medium">Account</th>
-              <th className="px-4 py-2 font-medium">Email Address</th>
               <th className="px-4 py-2 font-medium">Role</th>
-              <th className="px-4 py-2 font-medium">Permissions</th>
+              <th className="px-4 py-2 font-medium">Department</th>
+              <th className="px-4 py-2 font-medium">Posting</th>
+              <th className="px-4 py-2 font-medium">Payroll</th>
               <th className="px-4 py-2 font-medium">Status</th>
               <th className="px-4 py-2" />
             </tr>
@@ -393,23 +368,30 @@ function AccountsSection({
             {filtered.map((user) => (
               <tr
                 key={user.id}
-                className="border-b border-gray-50 transition-colors duration-150 last:border-b-0 even:bg-gray-50/50 hover:bg-cyan-50/40"
+                onClick={() => onEditUser(user)}
+                className="cursor-pointer border-b border-gray-50 transition-colors duration-150 last:border-b-0 even:bg-gray-50/50 hover:bg-cyan-50/40"
               >
                 <td className="px-4 py-2">
                   <div className="flex items-center gap-2.5">
-                    <Avatar name={user.fullName} id={String(user.id)} size={28} />
-                    <span className="font-medium text-gray-800">{user.fullName}</span>
+                    <Avatar name={user.fullName} id={String(user.id)} size={30} />
+                    <div className="min-w-0">
+                      <div className="font-medium text-gray-800">{user.fullName}</div>
+                      <div className="truncate text-xs text-gray-400">{user.email}</div>
+                    </div>
                   </div>
                 </td>
-                <td className="px-4 py-2 text-gray-600">{user.email}</td>
                 <td className="px-4 py-2 text-gray-600">{user.role.name}</td>
-                <td className="px-4 py-2 text-gray-600">
-                  {user.role.id != null ? (roleById.get(user.role.id)?.permissions.length ?? "—") : "—"}
+                <td className="px-4 py-2 text-gray-600">{user.departmentName ?? "—"}</td>
+                <td className="px-4 py-2">
+                  <PostingPill staffType={user.staffType} />
+                </td>
+                <td className="px-4 py-2">
+                  <PayrollPill onPayroll={user.onPayroll} />
                 </td>
                 <td className="px-4 py-2">
                   <StatusPill active={user.isActive} />
                 </td>
-                <td className="px-4 py-2 text-right">
+                <td className="px-4 py-2 text-right" onClick={(e) => e.stopPropagation()}>
                   <div className="inline-flex">
                     <RowMenu align="right" buttonLabel={`Actions for ${user.fullName}`}>
                       {(close) => (
@@ -450,8 +432,8 @@ function AccountsSection({
             ))}
             {filtered.length === 0 && (
               <tr>
-                <td colSpan={6} className="px-4 py-8 text-center text-sm text-gray-400">
-                  No accounts match.
+                <td colSpan={7} className="px-4 py-8 text-center text-sm text-gray-400">
+                  No members match.
                 </td>
               </tr>
             )}
@@ -462,24 +444,118 @@ function AccountsSection({
   );
 }
 
+/**
+ * The org ladder — roles laid out as an indented tree by "reports to". Makes the hierarchy readable
+ * at a glance: who's at the top, who reports to whom, and how many people hold each role.
+ */
+function RoleHierarchy({
+  roles,
+  usersByRoleId,
+  onManage,
+}: {
+  roles: RoleResponse[];
+  usersByRoleId: Map<number, UserResponse[]>;
+  onManage: (role: RoleResponse) => void;
+}) {
+  const byId = new Map(roles.map((r) => [r.id, r]));
+  // Super Admin is the fixed top of the ladder — it reports to no one and everything sits under it.
+  const superAdmin =
+    roles.find((r) => r.name.toLowerCase() === "super admin") ?? roles.find((r) => r.isSystem);
+  // Group each role under its parent. Any role without a valid parent falls under Super Admin
+  // (rather than floating at the root) so the tree always has a single owner at the top.
+  const childrenOf = new Map<number | "root", RoleResponse[]>();
+  for (const r of roles) {
+    if (superAdmin && r.id === superAdmin.id) continue; // the root itself
+    const hasParent = r.reportsToRoleId != null && byId.has(r.reportsToRoleId);
+    const key: number | "root" = hasParent
+      ? r.reportsToRoleId!
+      : superAdmin
+        ? superAdmin.id
+        : "root";
+    const list = childrenOf.get(key) ?? [];
+    list.push(r);
+    childrenOf.set(key, list);
+  }
+  const roots = superAdmin
+    ? [superAdmin]
+    : (childrenOf.get("root") ?? []).sort((a, b) => a.name.localeCompare(b.name));
+
+  function Node({ role, seen }: { role: RoleResponse; seen: Set<number> }) {
+    if (seen.has(role.id)) return null; // defensive against a data loop
+    const nextSeen = new Set(seen).add(role.id);
+    const kids = (childrenOf.get(role.id) ?? []).sort((a, b) => a.name.localeCompare(b.name));
+    const count = usersByRoleId.get(role.id)?.length ?? 0;
+    return (
+      <li>
+        <button
+          onClick={() => onManage(role)}
+          className="group flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left transition-all duration-150 hover:bg-cyan-50/60 hover:shadow-sm active:scale-[0.99]"
+        >
+          <span className="h-2 w-2 shrink-0 rounded-full bg-brand-accent/70 transition-transform duration-150 group-hover:scale-125" />
+          <span className="text-sm font-medium text-gray-800 group-hover:text-brand-accent">{role.name}</span>
+          {role.isSystem && (
+            <span className="rounded-full bg-gray-100 px-1.5 py-0.5 text-[10px] font-medium text-gray-500">System</span>
+          )}
+          <span className="rounded-full bg-cyan-50 px-2 py-0.5 text-[10px] font-medium text-brand-accent">
+            {count} {count === 1 ? "person" : "people"}
+          </span>
+          <ChevronRight size={14} className="ml-auto text-gray-300 transition-all duration-150 group-hover:translate-x-0.5 group-hover:text-brand-accent" />
+        </button>
+        {kids.length > 0 && (
+          <ul className="ml-3 space-y-0.5 border-l border-gray-200 pl-3">
+            {kids.map((k) => (
+              <Node key={k.id} role={k} seen={nextSeen} />
+            ))}
+          </ul>
+        )}
+      </li>
+    );
+  }
+
+  if (roles.length === 0) {
+    return <div className="rounded-xl border border-dashed border-gray-300 bg-white py-10 text-center text-sm text-gray-400">No roles yet.</div>;
+  }
+
+  return (
+    <div className="rounded-xl border border-gray-200 bg-white p-3">
+      <p className="mb-2 px-1 text-xs text-gray-400">
+        Top of the ladder first. Set a role&apos;s manager with the &ldquo;Reports to&rdquo; field when you edit it.
+      </p>
+      <ul className="space-y-0.5">
+        {roots.map((r) => (
+          <Node key={r.id} role={r} seen={new Set()} />
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 function RoleDrawer({
   modules,
+  roles,
   existing,
   onClose,
   onSaved,
 }: {
   modules: ModuleResponse[];
+  roles: RoleResponse[];
   existing?: RoleResponse;
   onClose: () => void;
   onSaved: () => void;
 }) {
   const [name, setName] = useState(existing?.name ?? "");
   const [description, setDescription] = useState(existing?.description ?? "");
+  const [reportsToRoleId, setReportsToRoleId] = useState<number | "">(existing?.reportsToRoleId ?? "");
   const [selected, setSelected] = useState<Set<number>>(
     new Set(existing?.permissions.map((p) => p.id) ?? [])
   );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+
+  // Super Admin is the fixed top of the ladder — it can't report to anyone, so its "Reports to" is frozen.
+  const isSuperAdmin = existing != null && existing.name.toLowerCase() === "super admin";
+  // A role can't report to itself; other roles are valid parents (the backend rejects deeper loops).
+  const parentOptions = roles.filter((r) => r.id !== existing?.id);
 
   function toggle(id: number) {
     setSelected((prev) => {
@@ -513,6 +589,7 @@ function RoleDrawer({
       const body = {
         name: name.trim(),
         description: description.trim() || undefined,
+        reportsToRoleId: reportsToRoleId === "" ? null : reportsToRoleId,
         permissionIds: Array.from(selected),
       };
       if (existing) {
@@ -557,6 +634,36 @@ function RoleDrawer({
             className="input"
             placeholder="What can this role do?"
           />
+        </DrawerField>
+
+        <DrawerField label="Reports to">
+          {isSuperAdmin ? (
+            <>
+              <div className="flex items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-500">
+                <span className="rounded-full bg-gray-200 px-1.5 py-0.5 text-[10px] font-medium text-gray-600">Top</span>
+                Top of the ladder — reports to no one
+              </div>
+              <p className="mt-1 text-xs text-gray-400">
+                Super Admin is the superior role. Every other role sits under it, so this can&apos;t be changed.
+              </p>
+            </>
+          ) : (
+            <>
+              <select
+                value={reportsToRoleId}
+                onChange={(e) => setReportsToRoleId(e.target.value === "" ? "" : Number(e.target.value))}
+                className="input"
+              >
+                <option value="">— Reports to Super Admin —</option>
+                {parentOptions.map((r) => (
+                  <option key={r.id} value={r.id}>{r.name}</option>
+                ))}
+              </select>
+              <p className="mt-1 text-xs text-gray-400">
+                Who this role answers to. This builds your org ladder — a manager can see the attendance of the roles below them. Left unset, it sits directly under Super Admin.
+              </p>
+            </>
+          )}
         </DrawerField>
 
         <DrawerField label={`Module Permissions (${selected.size} selected)`}>
@@ -636,6 +743,8 @@ function UserDrawer({
   );
   const { departments } = useDepartments();
   const [departmentId, setDepartmentId] = useState<number | "">(existing?.departmentId ?? "");
+  const [staffType, setStaffType] = useState<"OFFICE" | "SITE" | "">(existing?.staffType ?? "");
+  const [onPayroll, setOnPayroll] = useState(existing?.onPayroll ?? false);
   const [isActive, setIsActive] = useState(existing?.isActive ?? true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -654,6 +763,8 @@ function UserDrawer({
           phoneNumber: phoneNumber.trim() || undefined,
           roleId: roleId as number,
           departmentId: departmentId === "" ? null : (departmentId as number),
+          staffType: staffType || null,
+          onPayroll,
           isActive,
         });
       } else {
@@ -664,6 +775,8 @@ function UserDrawer({
           phoneNumber: phoneNumber.trim() || undefined,
           roleId: roleId as number,
           departmentId: departmentId === "" ? null : (departmentId as number),
+          staffType: staffType || null,
+          onPayroll,
         });
       }
       onSaved();
@@ -725,6 +838,37 @@ function UserDrawer({
             placeholder="Select role"
             options={roles.map((role) => ({ value: String(role.id), label: role.name }))}
           />
+        </DrawerField>
+
+        <DrawerField label="Staff Type">
+          <div className="flex gap-1 rounded-lg border border-gray-200 p-1">
+            {([["", "Not set"], ["OFFICE", "Office"], ["SITE", "Site"]] as const).map(([val, lbl]) => (
+              <button
+                key={val}
+                type="button"
+                onClick={() => setStaffType(val as typeof staffType)}
+                className={`flex-1 rounded-md px-3 py-1.5 text-sm font-medium transition-all duration-150 ${
+                  staffType === val
+                    ? "bg-brand-accent text-white shadow-sm"
+                    : "text-gray-500 hover:bg-gray-50 hover:text-gray-700"
+                }`}
+              >
+                {lbl}
+              </button>
+            ))}
+          </div>
+        </DrawerField>
+
+        <DrawerField label="On Payroll">
+          <label className="flex items-center gap-2 text-sm text-gray-700">
+            <input
+              type="checkbox"
+              checked={onPayroll}
+              onChange={(e) => setOnPayroll(e.target.checked)}
+              className="h-4 w-4 accent-cyan-600"
+            />
+            Member can punch and has a payroll profile
+          </label>
         </DrawerField>
 
         {existing && (
