@@ -26,6 +26,7 @@ import { useAuthStore } from "@/lib/authStore";
 import { useProjects } from "@/lib/useProjects";
 import { useProjectScope } from "@/lib/projectScope";
 import { useTaskStore } from "@/lib/taskStore";
+import { getAccessSelf } from "@/lib/api";
 import {
   TASK_PRIORITIES,
   TASK_STATUSES,
@@ -109,7 +110,23 @@ export function TaskWorkspace({ projectId }: { projectId?: string }) {
   const authUserId = useAuthStore((s) => s.user?.id);
   const roleName = useAuthStore((s) => s.user?.role?.name);
   const isSuperAdmin = roleName === "Super Admin";
-  const meId = authUserId != null ? String(authUserId) : "";
+  const scopeMode = useTaskStore((s) => s.scope);
+  const setStoreScope = useTaskStore((s) => s.setScope);
+  const [hasSubtree, setHasSubtree] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    getAccessSelf()
+      .then((r) => {
+        if (!cancelled) setHasSubtree(!!r.hasSubtree);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  const showScopeToggle = isSuperAdmin || hasSubtree;
+  const scopeAll = scopeMode === "ALL";
+  const setScopeAll = (v: boolean) => void setStoreScope(v ? "ALL" : "MINE");
 
   const { users } = useUsers();
   const { departments, departmentName } = useDepartments();
@@ -143,8 +160,7 @@ export function TaskWorkspace({ projectId }: { projectId?: string }) {
   const [showColumns, setShowColumns] = useState(false);
   // Completed tasks are hidden by default (client request); "Show completed" reveals them.
   const [hideCompleted, setHideCompleted] = useState(true);
-  // Super Admin can switch between their own tasks (default) and everyone's.
-  const [scopeAll, setScopeAll] = useState(false);
+  // My/All scope now lives in the task store (server-driven); see above.
 
   // Drill-down: apply any filters passed in the URL (e.g. from a dashboard score card/chart).
   useEffect(() => {
@@ -200,11 +216,7 @@ export function TaskWorkspace({ projectId }: { projectId?: string }) {
   const tasks = useMemo(() => {
     let list = allTasks.filter((t) => (effectiveProjectId ? t.projectId === effectiveProjectId : true));
     list = list.filter((t) => (showDrafts ? t.isDraft : !t.isDraft));
-    // Super Admin's default view is their own work (assignee/follower); "All Users" shows everyone's.
-    // Non-admins are already scoped to their own tasks by the backend, so no client filter for them.
-    if (isSuperAdmin && !scopeAll) {
-      list = list.filter((t) => t.assigneeId === meId || t.followerIds.includes(meId));
-    }
+    // Server already scoped the list via ?scope=MINE|ALL; no client involvement filter needed.
     // Hide completed by default unless the user opts in (or is explicitly filtering to Completed).
     if (hideCompleted && statusFilter !== "Completed") list = list.filter((t) => t.status !== "Completed");
     if (statusFilter !== "All") list = list.filter((t) => t.status === statusFilter);
@@ -240,9 +252,6 @@ export function TaskWorkspace({ projectId }: { projectId?: string }) {
     dueFrom,
     dueTo,
     hideCompleted,
-    scopeAll,
-    isSuperAdmin,
-    meId,
   ]);
 
   const activeFilters =
@@ -626,7 +635,7 @@ export function TaskWorkspace({ projectId }: { projectId?: string }) {
           ))}
         </div>
         <div className="flex items-center gap-3 pb-2">
-          {isSuperAdmin && (
+          {showScopeToggle && (
             <div className="flex items-center overflow-hidden rounded-lg border border-gray-200 text-xs">
               <button
                 onClick={() => setScopeAll(false)}
