@@ -812,3 +812,13 @@ export function markPayrollRunPaid(month: string) {
 export function myPayslips() {
   return request<PayslipApi[]>("/api/v1/payroll/payslips/mine");
 }
+
+// ---- Access introspection ----
+export interface AccessSelfApi {
+  superAdmin: boolean;
+  hasSubtree: boolean;
+}
+
+export function getAccessSelf() {
+  return request<AccessSelfApi>("/api/v1/access/me");
+}

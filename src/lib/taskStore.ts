@@ -54,11 +54,16 @@ function toUpsert(input: TaskInput): tasksApi.TaskUpsertRequest {
   };
 }
 
+export type TaskScope = "MINE" | "ALL";
+
 interface TaskState {
   tasks: Task[];
   loading: boolean;
   loaded: boolean;
   error: string | null;
+  /** Server-side visibility mode: MINE = my involvement only, ALL = MINE ∪ subtree∩projects. */
+  scope: TaskScope;
+  setScope: (scope: TaskScope) => Promise<void>;
   load: (force?: boolean) => Promise<void>;
   createTask: (input: TaskInput) => Promise<Task>;
   saveTask: (id: string, input: TaskInput) => Promise<void>;
@@ -100,13 +105,20 @@ export const useTaskStore = create<TaskState>((set, get) => ({
   loading: false,
   loaded: false,
   error: null,
+  scope: "MINE",
+
+  setScope: async (scope) => {
+    if (get().scope === scope) return;
+    set({ scope, loaded: false });
+    await get().load(true);
+  },
 
   load: async (force = false) => {
     if (get().loading) return;
     if (get().loaded && !force) return;
     set({ loading: true, error: null });
     try {
-      const res = await tasksApi.listTasks();
+      const res = await tasksApi.listTasks({ scope: get().scope });
       set({ tasks: res.map(taskFromApi), loading: false, loaded: true });
     } catch (err) {
       set({ loading: false, error: err instanceof Error ? err.message : "Failed to load tasks" });

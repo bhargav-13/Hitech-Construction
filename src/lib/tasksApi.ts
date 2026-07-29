@@ -103,9 +103,14 @@ export interface TaskPatchRequest {
   reminderAt?: string | null;
 }
 
-export function listTasks(projectId?: number) {
-  const qs = projectId != null ? `?projectId=${projectId}` : "";
-  return apiRequest<TaskResponse[]>(`/api/v1/tasks${qs}`);
+export type TaskScope = "MINE" | "ALL";
+
+export function listTasks(opts?: { projectId?: number; scope?: TaskScope }) {
+  const params = new URLSearchParams();
+  if (opts?.projectId != null) params.set("projectId", String(opts.projectId));
+  if (opts?.scope) params.set("scope", opts.scope);
+  const qs = params.toString();
+  return apiRequest<TaskResponse[]>(`/api/v1/tasks${qs ? "?" + qs : ""}`);
 }
 
 export function getTask(id: number) {
