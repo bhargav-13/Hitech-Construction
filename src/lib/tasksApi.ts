@@ -65,6 +65,8 @@ export interface TaskResponse {
   activity: ActivityDto[];
   createdAt: string | null;
   updatedAt: string | null;
+  completionRequestedBy?: number | null;
+  completionNote?: string | null;
 }
 
 export interface SubtaskInput {

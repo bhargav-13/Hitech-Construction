@@ -81,6 +81,10 @@ export interface Task {
   comments: TaskComment[];
   attachments: TaskAttachment[];
   activity: TaskActivity[];
+  /** User id of the person who requested completion (set when status = Awaiting Approval). */
+  completionRequestedBy?: string | null;
+  /** Rejection note left by an approver when sending a completion request back. */
+  completionNote?: string | null;
 }
 
 // ---- Backend enum <-> UI label conversions (project-service com.hitech.erp.task) ----
@@ -171,6 +175,8 @@ export function taskFromApi(t: ApiTask): Task {
       at: a.at,
       userId: a.actorId != null ? String(a.actorId) : "",
     })),
+    completionRequestedBy: t.completionRequestedBy != null ? String(t.completionRequestedBy) : null,
+    completionNote: t.completionNote ?? null,
   };
 }
 

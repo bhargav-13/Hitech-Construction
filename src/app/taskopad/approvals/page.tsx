@@ -115,7 +115,7 @@ function ApprovalsList() {
                         <UserAvatar id={t.assigneeId} name={userName(t.assigneeId)} size={18} />
                         {userName(t.assigneeId)}
                       </span>
-                      <span>Requested by <span className="font-medium text-gray-700">{userName(t.completionRequestedBy)}</span></span>
+                      <span>Requested by <span className="font-medium text-gray-700">{userName(t.completionRequestedBy ?? null)}</span></span>
                       <span>Project · {projectName(t.projectId)}</span>
                       {t.dueDate && <span>Due {formatTaskDate(t.dueDate)}</span>}
                     </div>
