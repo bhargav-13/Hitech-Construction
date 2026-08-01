@@ -10,7 +10,6 @@ import {
   History,
   Save,
   Users2,
-  ChevronLeft,
   FolderKanban,
   Repeat,
   Building2,
@@ -69,42 +68,28 @@ const REPORTS: {
 ];
 
 export default function TaskopadReportsPage() {
-  const [open, setOpen] = useState<ReportId | null>(null);
-  const report = REPORTS.find((r) => r.id === open);
+  const [selected, setSelected] = useState<ReportId>("user-wise");
+  const report = REPORTS.find((r) => r.id === selected)!;
 
   return (
     <TaskopadShell>
-      {!open ? (
-        <div className="animate-fade-in grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {REPORTS.map((r) => (
-            <button
-              key={r.id}
-              onClick={() => setOpen(r.id)}
-              className="flex items-start gap-3 rounded-xl border border-gray-200 bg-white p-4 text-left transition-all duration-150 hover:-translate-y-0.5 hover:shadow-md active:scale-[0.99]"
-            >
-              <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full ${r.tint}`}>
-                <r.icon size={20} />
-              </div>
-              <div className="min-w-0">
-                <div className="text-sm font-semibold text-gray-800">{r.title}</div>
-                <div className="mt-0.5 text-xs text-gray-400">{r.desc}</div>
-              </div>
-            </button>
-          ))}
-        </div>
-      ) : (
-        <ReportDetail report={report!} onBack={() => setOpen(null)} />
-      )}
+      <ReportDetail
+        report={report}
+        selected={selected}
+        onSelect={setSelected}
+      />
     </TaskopadShell>
   );
 }
 
 function ReportDetail({
   report,
-  onBack,
+  selected,
+  onSelect,
 }: {
   report: (typeof REPORTS)[number];
-  onBack: () => void;
+  selected: ReportId;
+  onSelect: (id: ReportId) => void;
 }) {
   const tasks = useTaskStore((s) => s.tasks);
   const load = useTaskStore((s) => s.load);
@@ -165,15 +150,20 @@ function ReportDetail({
 
   return (
     <div className="animate-fade-in space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex items-center gap-2">
-          <button
-            onClick={onBack}
-            className="rounded-lg border border-gray-200 p-1.5 text-gray-500 transition-all duration-150 hover:bg-gray-50 active:scale-90"
-          >
-            <ChevronLeft size={16} />
-          </button>
-          <h2 className="text-base font-semibold text-gray-800">{report.title}</h2>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${report.tint}`}>
+            <report.icon size={18} />
+          </div>
+          <div className="min-w-[240px]">
+            <UiSelect
+              value={selected}
+              onChange={(v) => onSelect(v as ReportId)}
+              options={REPORTS.map((r) => ({ value: r.id, label: r.title }))}
+              className="min-w-[240px]"
+            />
+            <div className="mt-1 pl-1 text-xs text-gray-400">{report.desc}</div>
+          </div>
         </div>
         <div className="flex gap-2">
           <button
@@ -475,6 +465,7 @@ const STATUS_HEX: Record<TaskStatus, string> = {
   "On Hold": "#3b82f6",
   Stuck: "#f97316",
   Completed: "#0ca30c",
+  "Awaiting Approval": "#0891b2",
 };
 
 function ReportBody({

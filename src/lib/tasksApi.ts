@@ -2,7 +2,7 @@
 // Shares the auth/refresh plumbing in lib/api.ts via the exported `apiRequest`.
 import { apiRequest } from "./api";
 
-export type TaskStatusApi = "PENDING" | "IN_PROGRESS" | "ON_HOLD" | "STUCK" | "COMPLETED";
+export type TaskStatusApi = "PENDING" | "IN_PROGRESS" | "ON_HOLD" | "STUCK" | "COMPLETED" | "AWAITING_APPROVAL";
 export type TaskPriorityApi = "LOW" | "MEDIUM" | "HIGH";
 
 export interface SubtaskDto {
@@ -131,6 +131,22 @@ export function patchTask(id: number, body: TaskPatchRequest) {
 
 export function deleteTask(id: number) {
   return apiRequest<void>(`/api/v1/tasks/${id}`, { method: "DELETE" });
+}
+
+// ---- Completion approval workflow ----
+export function getPendingApprovals() {
+  return apiRequest<TaskResponse[]>("/api/v1/tasks/approvals");
+}
+
+export function approveTaskCompletion(id: number) {
+  return apiRequest<TaskResponse>(`/api/v1/tasks/${id}/approve`, { method: "POST" });
+}
+
+export function rejectTaskCompletion(id: number, note?: string) {
+  return apiRequest<TaskResponse>(`/api/v1/tasks/${id}/reject`, {
+    method: "POST",
+    body: note ? { note } : undefined,
+  });
 }
 
 // ---- Bulk actions on the task list ----

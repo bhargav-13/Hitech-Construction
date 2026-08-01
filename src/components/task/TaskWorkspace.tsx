@@ -8,6 +8,8 @@ import {
   List as ListIcon,
   Download,
   Loader2,
+  MessageCircle,
+  Paperclip,
   Pin,
   Repeat,
   Search,
@@ -27,6 +29,7 @@ import { useProjects } from "@/lib/useProjects";
 import { useProjectScope } from "@/lib/projectScope";
 import { useTaskStore } from "@/lib/taskStore";
 import { getAccessSelf } from "@/lib/api";
+import { useTaskUnread } from "@/lib/taskNotifications";
 import {
   TASK_PRIORITIES,
   TASK_STATUSES,
@@ -158,8 +161,8 @@ export function TaskWorkspace({ projectId }: { projectId?: string }) {
   // Which optional columns the list shows — persisted so the choice sticks between visits.
   const [columns, setColumns] = useState<ColumnKey[]>(DEFAULT_COLUMNS);
   const [showColumns, setShowColumns] = useState(false);
-  // Completed tasks are hidden by default (client request); "Show completed" reveals them.
-  const [hideCompleted, setHideCompleted] = useState(true);
+  // Completed tasks are shown by default; unchecking "Show completed" hides them.
+  const [hideCompleted, setHideCompleted] = useState(false);
   // My/All scope now lives in the task store (server-driven); see above.
 
   // Drill-down: apply any filters passed in the URL (e.g. from a dashboard score card/chart).
@@ -729,6 +732,34 @@ function MyRoleBadge({ task }: { task: Task }) {
   );
 }
 
+/** Unread comments/attachments badge — clears when the task drawer opens. */
+function UnreadBadge({ task }: { task: Task }) {
+  const { comments, attachments, total } = useTaskUnread(task);
+  if (total === 0) return null;
+  const bits: string[] = [];
+  if (comments) bits.push(`${comments} new comment${comments === 1 ? "" : "s"}`);
+  if (attachments) bits.push(`${attachments} new attachment${attachments === 1 ? "" : "s"}`);
+  return (
+    <span
+      title={bits.join(" · ")}
+      className="inline-flex shrink-0 items-center gap-1 rounded-full bg-rose-50 px-1.5 py-0.5 text-[10px] font-semibold text-rose-600"
+    >
+      {comments > 0 && (
+        <span className="inline-flex items-center gap-0.5">
+          <MessageCircle size={10} />
+          {comments}
+        </span>
+      )}
+      {attachments > 0 && (
+        <span className="inline-flex items-center gap-0.5">
+          <Paperclip size={10} />
+          {attachments}
+        </span>
+      )}
+    </span>
+  );
+}
+
 function FilterSelect({
   label,
   value,
@@ -883,6 +914,7 @@ function ListView({
                       {t.title}
                     </span>
                     <MyRoleBadge task={t} />
+                    <UnreadBadge task={t} />
                     {t.recurrenceRule && t.recurrenceRule !== "NONE" && (
                       <span
                         title={`Repeats ${recurrenceLabel(t.recurrenceRule as RecurrenceRule, t.recurrenceInterval)}`}

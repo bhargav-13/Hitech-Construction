@@ -25,7 +25,8 @@ import { useProjects } from "@/lib/useProjects";
 import { useTaskStore } from "@/lib/taskStore";
 import { TASK_PRIORITIES, TASK_STATUSES, formatTaskDate, formatTaskDateTime, toIso } from "@/lib/taskTypes";
 import type { SubTask, Task, TaskAttachment, TaskComment, TaskPriority, TaskStatus } from "@/lib/taskTypes";
-import { UserAvatar } from "./TaskBits";
+import { UserAvatar, PeopleSelect, PeopleMultiSelect } from "./TaskBits";
+import type { Person } from "./TaskBits";
 import { Select } from "@/components/Select";
 import { DatePicker } from "@/components/DatePicker";
 import type { RecurrenceRule } from "@/components/DatePicker";
@@ -270,6 +271,12 @@ export function TaskDrawer({
   // A repeating task reminds at a time of day on each occurrence, so it carries no reminder date.
   const isRepeating = recurrenceRule !== "NONE";
 
+  // People for the searchable pickers. Assignee is scoped to the chosen department; followers span all.
+  const allPeople: Person[] = users.map((u) => ({ id: u.id, name: u.name, role: u.role }));
+  const assigneePeople: Person[] = departmentId
+    ? users.filter((u) => String(u.departmentId ?? "") === departmentId).map((u) => ({ id: u.id, name: u.name, role: u.role }))
+    : allPeople;
+
   async function save(asDraft: boolean) {
     if (!title.trim()) return setError("Task title is required.");
     if (!dueDate) return setError("Due date is required.");
@@ -415,9 +422,26 @@ export function TaskDrawer({
                 autoFocus
               />
 
-              <div className="flex flex-wrap items-center gap-3">
-                <label className="flex items-center gap-2">
-                  <span className="text-xs font-medium text-gray-400">Due Date *</span>
+              {existing?.status === "Awaiting Approval" && (
+                <div className="flex items-center gap-2 rounded-lg border border-cyan-200 bg-cyan-50 px-3 py-2 text-xs font-medium text-cyan-800">
+                  <Bell size={13} className="shrink-0" /> Completion requested — awaiting your manager&apos;s approval.
+                </div>
+              )}
+              {existing?.completionNote && existing.status !== "Awaiting Approval" && existing.status !== "Completed" && (
+                <div className="flex items-start gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">
+                  <X size={13} className="mt-0.5 shrink-0" />
+                  <span>Completion was sent back: {existing.completionNote}</span>
+                </div>
+              )}
+
+              {/*
+                Compact meta row: Due Date + Reminder (date + time + presets) on one line, Status and
+                Priority on the next. A repeating task's reminder is a time of day only — it fires on
+                each occurrence's own due date, so pinning it to one calendar date would be wrong.
+              */}
+              <div className="flex flex-wrap items-end gap-x-4 gap-y-3">
+                <div>
+                  <div className="mb-1 text-[11px] font-medium uppercase tracking-wide text-gray-400">Due Date *</div>
                   <DatePicker
                     value={dueDate}
                     onChange={setDueDate}
@@ -428,82 +452,74 @@ export function TaskDrawer({
                     recurrenceInterval={recurrenceInterval}
                     onRecurrenceIntervalChange={setRecurrenceInterval}
                   />
-                </label>
+                </div>
 
-                {/*
-                  Per-task reminder. A repeating task gets a time of day only — it fires on each
-                  occurrence's own due date, so pinning it to one calendar date would be wrong.
-                  A one-off task gets a date (with quick presets) plus an optional time.
-                */}
-                <label className="flex items-center gap-2">
-                  <span className="flex items-center gap-1 text-xs font-medium text-gray-400">
-                    <Bell size={12} /> Reminder
-                  </span>
-
-                  {!isRepeating && (
-                    <DatePicker
-                      value={reminderDate}
-                      onChange={setReminderDate}
-                      placeholder="Remind me on"
-                      className="py-1.5"
+                <div>
+                  <div className="mb-1 flex items-center gap-1 text-[11px] font-medium uppercase tracking-wide text-gray-400">
+                    <Bell size={11} /> Reminder
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    {!isRepeating && (
+                      <DatePicker value={reminderDate} onChange={setReminderDate} placeholder="Date" className="py-1.5" />
+                    )}
+                    <input
+                      type="time"
+                      value={reminderTime}
+                      onChange={(e) => setReminderTime(e.target.value)}
+                      aria-label={isRepeating ? "Reminder time for each occurrence" : "Reminder time"}
+                      className="rounded-lg border border-gray-200 px-2 py-1.5 text-sm text-gray-700 outline-none transition-colors duration-150 focus:border-cyan-500"
                     />
-                  )}
+                    {isRepeating && <span className="text-[10px] text-gray-400">each occurrence</span>}
+                    {(isRepeating ? reminderTime : reminderDate || reminderTime) ? (
+                      <button
+                        type="button"
+                        onClick={() => { setReminderDate(""); setReminderTime(""); }}
+                        title="Clear reminder"
+                        className="rounded-md p-1 text-gray-400 transition-colors duration-150 hover:bg-rose-50 hover:text-rose-600"
+                      >
+                        <X size={13} />
+                      </button>
+                    ) : (
+                      !isRepeating && (
+                        <div className="flex gap-1">
+                          {REMINDER_PRESETS.map((p) => (
+                            <button
+                              key={p.label}
+                              type="button"
+                              onClick={() => setReminderDate(p.from(dueDate))}
+                              className="rounded-md border border-gray-200 px-1.5 py-1 text-[10px] font-medium text-gray-500 transition-all duration-150 hover:border-brand-accent hover:text-brand-accent active:scale-95"
+                            >
+                              {p.label}
+                            </button>
+                          ))}
+                        </div>
+                      )
+                    )}
+                  </div>
+                </div>
+              </div>
 
-                  <input
-                    type="time"
-                    value={reminderTime}
-                    onChange={(e) => setReminderTime(e.target.value)}
-                    aria-label={isRepeating ? "Reminder time for each occurrence" : "Reminder time"}
-                    className="rounded-lg border border-gray-200 px-2 py-1.5 text-sm text-gray-700 outline-none transition-colors duration-150 focus:border-cyan-500"
+              {/* Status + Priority on their own line — keeps the date row clean. */}
+              <div className="flex flex-wrap items-end gap-x-4 gap-y-3">
+                <div>
+                  <div className="mb-1 text-[11px] font-medium uppercase tracking-wide text-gray-400">Status</div>
+                  <Select
+                    value={status}
+                    onChange={(v) => setStatus(v as TaskStatus)}
+                    size="sm"
+                    options={TASK_STATUSES.map((s) => ({ value: s, label: s }))}
                   />
+                </div>
 
-                  {isRepeating && (
-                    <span className="text-[10px] text-gray-400">on each occurrence</span>
-                  )}
-
-                  {(isRepeating ? reminderTime : reminderDate || reminderTime) ? (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setReminderDate("");
-                        setReminderTime("");
-                      }}
-                      title="Clear reminder"
-                      className="rounded-md p-1 text-gray-400 transition-colors duration-150 hover:bg-rose-50 hover:text-rose-600"
-                    >
-                      <X size={13} />
-                    </button>
-                  ) : (
-                    !isRepeating && (
-                      <div className="flex gap-1">
-                        {REMINDER_PRESETS.map((p) => (
-                          <button
-                            key={p.label}
-                            type="button"
-                            onClick={() => setReminderDate(p.from(dueDate))}
-                            className="rounded-md border border-gray-200 px-1.5 py-1 text-[10px] font-medium text-gray-500 transition-all duration-150 hover:border-brand-accent hover:text-brand-accent active:scale-95"
-                          >
-                            {p.label}
-                          </button>
-                        ))}
-                      </div>
-                    )
-                  )}
-                </label>
-
-                <Select
-                  value={status}
-                  onChange={(v) => setStatus(v as TaskStatus)}
-                  size="sm"
-                  options={TASK_STATUSES.map((s) => ({ value: s, label: s }))}
-                />
-
-                <Select
-                  value={priority}
-                  onChange={(v) => setPriority(v as TaskPriority)}
-                  size="sm"
-                  options={TASK_PRIORITIES.map((p) => ({ value: p, label: p }))}
-                />
+                <div>
+                  <div className="mb-1 text-[11px] font-medium uppercase tracking-wide text-gray-400">Priority</div>
+                  <Select
+                    value={priority}
+                    onChange={(v) => setPriority(v as TaskPriority)}
+                    size="sm"
+                    options={TASK_PRIORITIES.map((p) => ({ value: p, label: p }))}
+                  />
+                </div>
               </div>
 
               <textarea
@@ -552,14 +568,11 @@ export function TaskDrawer({
               </Field>
 
               <Field label="Assignee *">
-                <Select
+                <PeopleSelect
+                  people={assigneePeople}
                   value={assigneeId}
                   onChange={setAssigneeId}
                   placeholder={departmentId ? "Select from this department" : "Select assignee"}
-                  // Narrow the people list to the chosen department, so a long directory stays usable.
-                  options={users
-                    .filter((u) => !departmentId || String(u.departmentId ?? "") === departmentId)
-                    .map((u) => ({ value: u.id, label: `${u.name} · ${u.role}` }))}
                 />
               </Field>
 
@@ -576,27 +589,12 @@ export function TaskDrawer({
               </Field>
 
               <Field label="Followers">
-                <div className="flex flex-wrap gap-2">
-                  {users.map((u) => {
-                    const on = followerIds.includes(u.id);
-                    return (
-                      <button
-                        key={u.id}
-                        onClick={() =>
-                          setFollowerIds((ids) => (on ? ids.filter((i) => i !== u.id) : [...ids, u.id]))
-                        }
-                        className={`flex items-center gap-1.5 rounded-full border px-2 py-1 text-xs transition-all duration-150 active:scale-95 ${
-                          on
-                            ? "border-brand-accent bg-cyan-50 text-brand-accent"
-                            : "border-gray-200 text-gray-500 hover:border-gray-300"
-                        }`}
-                      >
-                        <UserAvatar id={u.id} name={u.name} size={18} />
-                        {u.name.split(" ")[0]}
-                      </button>
-                    );
-                  })}
-                </div>
+                <PeopleMultiSelect
+                  people={allPeople}
+                  values={followerIds}
+                  onChange={setFollowerIds}
+                  placeholder="Search and add followers…"
+                />
               </Field>
 
               {/* Subtasks */}

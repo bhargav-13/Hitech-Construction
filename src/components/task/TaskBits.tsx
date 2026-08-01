@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { Check, ChevronDown, UserRound } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Check, ChevronDown, Search, UserRound, X } from "lucide-react";
 import { projectAvatarColor } from "@/lib/projectHelpers";
 import { PRIORITY_STYLE, STATUS_STYLE, TASK_PRIORITIES, TASK_STATUSES } from "@/lib/taskTypes";
 import type { TaskPriority, TaskStatus } from "@/lib/taskTypes";
@@ -211,6 +211,189 @@ export function ProgressBar({ value, className = "" }: { value: number; classNam
         className="h-1.5 rounded-full bg-brand-accent transition-all duration-500"
         style={{ width: `${Math.min(100, Math.max(0, value))}%` }}
       />
+    </div>
+  );
+}
+
+export interface Person {
+  id: string;
+  name: string;
+  role?: string;
+}
+
+/** Shared behaviour for the searchable people dropdowns: outside-click / Escape closes the panel. */
+function useDismiss(open: boolean, close: () => void) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) close();
+    };
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && close();
+    window.addEventListener("mousedown", onDown);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mousedown", onDown);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [open, close]);
+  return ref;
+}
+
+function matchPeople(people: Person[], q: string): Person[] {
+  const ql = q.trim().toLowerCase();
+  if (!ql) return people;
+  return people.filter((p) => p.name.toLowerCase().includes(ql) || (p.role ?? "").toLowerCase().includes(ql));
+}
+
+/** A searchable single-select for people, rendered with avatars. */
+export function PeopleSelect({
+  people,
+  value,
+  onChange,
+  placeholder = "Select person",
+}: {
+  people: Person[];
+  value: string;
+  onChange: (id: string) => void;
+  placeholder?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState("");
+  const ref = useDismiss(open, () => setOpen(false));
+  const selected = useMemo(() => people.find((p) => p.id === value), [people, value]);
+  const filtered = useMemo(() => matchPeople(people, q), [people, q]);
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className={`flex w-full items-center justify-between gap-2 rounded-lg border bg-white px-3 py-2 text-left text-sm outline-none transition-colors duration-150 ${
+          open ? "border-cyan-500 ring-2 ring-cyan-500/15" : "border-gray-200 hover:border-gray-300"
+        }`}
+      >
+        {selected ? (
+          <span className="flex min-w-0 items-center gap-2">
+            <UserAvatar id={selected.id} name={selected.name} size={20} />
+            <span className="truncate text-gray-700">{selected.name}{selected.role ? ` · ${selected.role}` : ""}</span>
+          </span>
+        ) : (
+          <span className="text-gray-400">{placeholder}</span>
+        )}
+        <ChevronDown size={15} className={`shrink-0 text-gray-400 transition-transform duration-200 ${open ? "rotate-180" : ""}`} />
+      </button>
+
+      {open && (
+        <div className="animate-fade-in-scale absolute z-50 mt-1 w-full origin-top overflow-hidden rounded-lg border border-gray-200 bg-white shadow-lg">
+          <div className="flex items-center gap-1.5 border-b border-gray-100 px-2.5 py-1.5">
+            <Search size={13} className="text-gray-400" />
+            <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search people…" className="w-full bg-transparent text-sm outline-none" />
+          </div>
+          <div className="max-h-56 overflow-auto py-1">
+            {filtered.length === 0 ? (
+              <div className="px-3 py-2 text-xs text-gray-400">No people found</div>
+            ) : (
+              filtered.map((p) => (
+                <button
+                  key={p.id}
+                  type="button"
+                  onClick={() => { onChange(p.id); setOpen(false); setQ(""); }}
+                  className={`flex w-full items-center justify-between gap-2 px-3 py-1.5 text-left text-sm transition-colors duration-100 hover:bg-cyan-50 ${
+                    p.id === value ? "font-medium text-brand-accent" : "text-gray-700"
+                  }`}
+                >
+                  <span className="flex min-w-0 items-center gap-2">
+                    <UserAvatar id={p.id} name={p.name} size={20} />
+                    <span className="truncate">{p.name}{p.role ? ` · ${p.role}` : ""}</span>
+                  </span>
+                  {p.id === value && <Check size={14} className="shrink-0 text-brand-accent" />}
+                </button>
+              ))
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** A searchable multi-select for people — selected people show as removable chips. */
+export function PeopleMultiSelect({
+  people,
+  values,
+  onChange,
+  placeholder = "Add people",
+}: {
+  people: Person[];
+  values: string[];
+  onChange: (ids: string[]) => void;
+  placeholder?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState("");
+  const ref = useDismiss(open, () => setOpen(false));
+  const selected = useMemo(() => people.filter((p) => values.includes(p.id)), [people, values]);
+  const filtered = useMemo(() => matchPeople(people, q), [people, q]);
+  const toggle = (id: string) => onChange(values.includes(id) ? values.filter((x) => x !== id) : [...values, id]);
+
+  return (
+    <div ref={ref} className="relative">
+      <div
+        onClick={() => setOpen(true)}
+        className={`flex min-h-[38px] w-full cursor-text flex-wrap items-center gap-1.5 rounded-lg border bg-white px-2 py-1.5 text-sm transition-colors duration-150 ${
+          open ? "border-cyan-500 ring-2 ring-cyan-500/15" : "border-gray-200 hover:border-gray-300"
+        }`}
+      >
+        {selected.length === 0 && <span className="px-1 text-gray-400">{placeholder}</span>}
+        {selected.map((p) => (
+          <span key={p.id} className="flex items-center gap-1 rounded-full bg-cyan-50 py-0.5 pl-1 pr-1 text-xs font-medium text-brand-accent">
+            <UserAvatar id={p.id} name={p.name} size={16} />
+            {p.name.split(" ")[0]}
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); toggle(p.id); }}
+              className="rounded-full p-0.5 text-brand-accent/70 transition-colors hover:bg-cyan-100 hover:text-brand-accent"
+              title="Remove"
+            >
+              <X size={11} />
+            </button>
+          </span>
+        ))}
+        <ChevronDown size={14} className={`ml-auto shrink-0 text-gray-400 transition-transform duration-200 ${open ? "rotate-180" : ""}`} />
+      </div>
+
+      {open && (
+        <div className="animate-fade-in-scale absolute z-50 mt-1 w-full origin-top overflow-hidden rounded-lg border border-gray-200 bg-white shadow-lg">
+          <div className="flex items-center gap-1.5 border-b border-gray-100 px-2.5 py-1.5">
+            <Search size={13} className="text-gray-400" />
+            <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search people…" className="w-full bg-transparent text-sm outline-none" />
+          </div>
+          <div className="max-h-56 overflow-auto py-1">
+            {filtered.length === 0 ? (
+              <div className="px-3 py-2 text-xs text-gray-400">No people found</div>
+            ) : (
+              filtered.map((p) => {
+                const on = values.includes(p.id);
+                return (
+                  <button
+                    key={p.id}
+                    type="button"
+                    onClick={() => toggle(p.id)}
+                    className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm transition-colors duration-100 hover:bg-cyan-50 ${on ? "text-brand-accent" : "text-gray-700"}`}
+                  >
+                    <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${on ? "border-brand-accent bg-brand-accent text-white" : "border-gray-300"}`}>
+                      {on && <Check size={11} />}
+                    </span>
+                    <UserAvatar id={p.id} name={p.name} size={20} />
+                    <span className="truncate">{p.name}{p.role ? ` · ${p.role}` : ""}</span>
+                  </button>
+                );
+              })
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

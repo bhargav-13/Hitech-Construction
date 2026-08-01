@@ -84,6 +84,13 @@ interface TaskState {
   ) => Promise<void>;
   bulkRemove: (ids: string[]) => Promise<void>;
   removeTask: (id: string) => Promise<void>;
+  // ---- Completion approvals ----
+  /** Tasks awaiting the signed-in user's approval. */
+  approvals: Task[];
+  approvalsLoaded: boolean;
+  loadApprovals: () => Promise<void>;
+  approve: (id: string) => Promise<void>;
+  reject: (id: string, note?: string) => Promise<void>;
   toggleSubtask: (taskId: string, subtaskId: string) => Promise<void>;
   addComment: (taskId: string, text: string) => Promise<void>;
   addAttachment: (
@@ -169,6 +176,34 @@ export const useTaskStore = create<TaskState>((set, get) => ({
   removeTask: async (id) => {
     await tasksApi.deleteTask(Number(id));
     set({ tasks: get().tasks.filter((t) => t.id !== id) });
+  },
+
+  approvals: [],
+  approvalsLoaded: false,
+
+  loadApprovals: async () => {
+    try {
+      const res = await tasksApi.getPendingApprovals();
+      set({ approvals: res.map(taskFromApi), approvalsLoaded: true });
+    } catch {
+      set({ approvals: [], approvalsLoaded: true });
+    }
+  },
+
+  approve: async (id) => {
+    const updated = taskFromApi(await tasksApi.approveTaskCompletion(Number(id)));
+    set({
+      tasks: upsertLocal(get().tasks, updated),
+      approvals: get().approvals.filter((t) => t.id !== id),
+    });
+  },
+
+  reject: async (id, note) => {
+    const updated = taskFromApi(await tasksApi.rejectTaskCompletion(Number(id), note));
+    set({
+      tasks: upsertLocal(get().tasks, updated),
+      approvals: get().approvals.filter((t) => t.id !== id),
+    });
   },
 
   toggleSubtask: async (taskId, subtaskId) => {

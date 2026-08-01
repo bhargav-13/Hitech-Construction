@@ -1,10 +1,10 @@
 // TaskOPad-style task model. Richer than the legacy `TodoTask` in types.ts (which is left
 // untouched for the existing project To-Do screens) — this one backs the Taskopad module.
 
-export type TaskStatus = "Pending" | "In Progress" | "On Hold" | "Stuck" | "Completed";
+export type TaskStatus = "Pending" | "In Progress" | "On Hold" | "Stuck" | "Completed" | "Awaiting Approval";
 export type TaskPriority = "Low" | "Medium" | "High";
 
-export const TASK_STATUSES: TaskStatus[] = ["Pending", "In Progress", "On Hold", "Stuck", "Completed"];
+export const TASK_STATUSES: TaskStatus[] = ["Pending", "In Progress", "On Hold", "Stuck", "Completed", "Awaiting Approval"];
 export const TASK_PRIORITIES: TaskPriority[] = ["Low", "Medium", "High"];
 
 /** Status chip colours — mirrors TaskOPad's semantics, restyled to our palette. */
@@ -14,6 +14,7 @@ export const STATUS_STYLE: Record<TaskStatus, { dot: string; chip: string }> = {
   "On Hold": { dot: "bg-blue-500", chip: "bg-blue-50 text-blue-700" },
   Stuck: { dot: "bg-orange-500", chip: "bg-orange-50 text-orange-700" },
   Completed: { dot: "bg-green-500", chip: "bg-green-50 text-green-700" },
+  "Awaiting Approval": { dot: "bg-cyan-500", chip: "bg-cyan-50 text-cyan-700" },
 };
 
 export const PRIORITY_STYLE: Record<TaskPriority, { text: string; chip: string; hex: string }> = {
@@ -83,7 +84,7 @@ export interface Task {
 }
 
 // ---- Backend enum <-> UI label conversions (project-service com.hitech.erp.task) ----
-export type TaskStatusApi = "PENDING" | "IN_PROGRESS" | "ON_HOLD" | "STUCK" | "COMPLETED";
+export type TaskStatusApi = "PENDING" | "IN_PROGRESS" | "ON_HOLD" | "STUCK" | "COMPLETED" | "AWAITING_APPROVAL";
 export type TaskPriorityApi = "LOW" | "MEDIUM" | "HIGH";
 
 const STATUS_TO_API: Record<TaskStatus, TaskStatusApi> = {
@@ -92,6 +93,7 @@ const STATUS_TO_API: Record<TaskStatus, TaskStatusApi> = {
   "On Hold": "ON_HOLD",
   Stuck: "STUCK",
   Completed: "COMPLETED",
+  "Awaiting Approval": "AWAITING_APPROVAL",
 };
 const STATUS_FROM_API: Record<TaskStatusApi, TaskStatus> = {
   PENDING: "Pending",
@@ -99,6 +101,7 @@ const STATUS_FROM_API: Record<TaskStatusApi, TaskStatus> = {
   ON_HOLD: "On Hold",
   STUCK: "Stuck",
   COMPLETED: "Completed",
+  AWAITING_APPROVAL: "Awaiting Approval",
 };
 const PRIORITY_TO_API: Record<TaskPriority, TaskPriorityApi> = { Low: "LOW", Medium: "MEDIUM", High: "HIGH" };
 const PRIORITY_FROM_API: Record<TaskPriorityApi, TaskPriority> = { LOW: "Low", MEDIUM: "Medium", HIGH: "High" };

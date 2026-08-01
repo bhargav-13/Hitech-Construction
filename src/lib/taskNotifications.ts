@@ -8,6 +8,7 @@ import { isOverdue, isDueToday } from "@/lib/taskTypes";
 import type { Task } from "@/lib/taskTypes";
 
 const SEEN_KEY = "taskopad:notifSeen";
+const TASK_SEEN_KEY = "taskopad:taskSeen";
 const RECENT_DAYS = 7;
 
 export type NotifKind = "overdue" | "due" | "assigned" | "activity";
@@ -98,6 +99,47 @@ function buildNotifs(tasks: Task[], myId: string): Notif[] {
  * "last seen" marker. Loads the task store on first use so the header bell/sidebar badge work
  * even before the Taskopad module is opened.
  */
+// ---- Per-task "seen" markers for the in-list unread badge ----
+interface TaskSeenState {
+  seenAt: Record<string, number>;
+  markTaskSeen: (taskId: string) => void;
+}
+
+function initialTaskSeen(): Record<string, number> {
+  if (typeof window === "undefined") return {};
+  try {
+    const raw = window.localStorage.getItem(TASK_SEEN_KEY);
+    return raw ? (JSON.parse(raw) as Record<string, number>) : {};
+  } catch {
+    return {};
+  }
+}
+
+export const useTaskSeen = create<TaskSeenState>((set, get) => ({
+  seenAt: initialTaskSeen(),
+  markTaskSeen: (taskId) => {
+    const next = { ...get().seenAt, [taskId]: Date.now() };
+    if (typeof window !== "undefined") window.localStorage.setItem(TASK_SEEN_KEY, JSON.stringify(next));
+    set({ seenAt: next });
+  },
+}));
+
+/** Count of comments + attachments on this task newer than the caller's last visit, ignoring items the caller authored. */
+export function useTaskUnread(task: Task): { comments: number; attachments: number; total: number } {
+  const myId = useAuthStore((s) => (s.user ? String(s.user.id) : ""));
+  const rawSeen = useTaskSeen((s) => s.seenAt[task.id] ?? 0);
+  return useMemo(() => {
+    if (!myId) return { comments: 0, attachments: 0, total: 0 };
+    // Never-visited tasks: only surface activity from the recent window, otherwise every task with
+    // any historic chatter would light up on first login.
+    const cutoff = Date.now() - RECENT_DAYS * 24 * 60 * 60 * 1000;
+    const since = rawSeen > 0 ? rawSeen : cutoff;
+    const comments = task.comments.filter((c) => c.userId !== myId && ms(c.at) > since).length;
+    const attachments = task.attachments.filter((a) => a.userId !== myId && ms(a.at) > since).length;
+    return { comments, attachments, total: comments + attachments };
+  }, [task.comments, task.attachments, myId, rawSeen]);
+}
+
 export function useTaskNotifications() {
   const tasks = useTaskStore((s) => s.tasks);
   const load = useTaskStore((s) => s.load);
