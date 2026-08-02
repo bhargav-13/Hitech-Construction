@@ -5,10 +5,11 @@ import type { NavItem } from "./types";
 // Visibility is still permission-gated per user via NAV_MODULE below.
 export const NAV_ITEMS: NavItem[] = [
   { label: "Dashboard", href: "/" },
+  { label: "Tender", href: "/tender", badge: "Soon" },
   { label: "Project", href: "/project" },
   { label: "Taskopad", href: "/taskopad" },
   { label: "Vyapar", href: "/vyapar" },
-  { label: "Payroll", href: "/payroll", badge: "Soon" },
+  { label: "Payroll", href: "/payroll" },
   { label: "Audit", href: "/audit" },
   { label: "Setting", href: "/settings" },
   // --- Not implemented yet ---
@@ -31,6 +32,8 @@ export const NAV_BREAK_AFTER = new Set(["Report", "Team Schedule", "Payroll", "A
 // user's role carries "<MODULE>:VIEW" — so e.g. a user without DASHBOARD:VIEW never sees Dashboard.
 export const NAV_MODULE: Record<string, string> = {
   "/": "DASHBOARD",
+  // "/tender": "TENDER",  // TODO: gate once the backend defines the TENDER:VIEW permission.
+  //                       // Left unmapped for now so the UI-first module is visible to everyone.
   "/report": "REPORT",
   "/project": "PROJECT",
   "/taskopad": "TASKOPAD",
