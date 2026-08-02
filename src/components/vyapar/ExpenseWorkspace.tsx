@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { VyaparEmpty } from "@/components/vyapar/VyaparShell";
 import { Drawer, DrawerField } from "@/components/Drawer";
@@ -8,6 +8,8 @@ import { Select } from "@/components/Select";
 import { Spinner } from "@/components/Spinner";
 import { DatePicker } from "@/components/DatePicker";
 import { RowMenu, RowMenuDivider, RowMenuItem } from "@/components/RowMenu";
+import { SortTh } from "@/components/vyapar/SortTh";
+import { useTableSort } from "@/lib/useTableSort";
 import { TAX_RATES } from "@/lib/useItemSettings";
 import { inr } from "@/lib/format";
 import { useVyaparBankId, usePaymentTypeOptions } from "@/lib/bankScope";
@@ -58,6 +60,10 @@ export function ExpenseWorkspace() {
     if (params?.get("new") === "1") setCreating(true);
   }, [params]);
 
+  // ?open=<id> — an expense has no editor, so we jump to its category and highlight the row.
+  const openId = params?.get("open");
+  const highlightRef = useRef<HTMLTableRowElement>(null);
+
   const catOf = (e: Invoice) => e.notes?.trim() || UNCATEGORISED;
 
   const categories = useMemo(() => {
@@ -80,7 +86,34 @@ export function ExpenseWorkspace() {
     [expenses]
   );
 
+  // When deep-linked to a specific expense, switch to its category so the row is on screen.
+  useEffect(() => {
+    if (!openId) return;
+    const target = expenses.find((e) => String(e.id) === openId);
+    if (target) setSelectedCat(catOf(target));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openId, expenses]);
+
   const rows = useMemo(() => expenses.filter((e) => catOf(e) === selectedCat), [expenses, selectedCat]);
+
+  const { sorted, sortKey, sortDir, toggle } = useTableSort<Invoice>(
+    rows,
+    {
+      date: (e) => e.invoiceDate,
+      number: (e) => e.invoiceNo,
+      party: (e) => e.partyName,
+      paymentType: (e) => e.paymentType,
+      amount: (e) => e.total,
+      balance: (e) => e.balance,
+      status: (e) => e.status,
+    },
+    { key: "date", dir: "desc" },
+  );
+
+  useEffect(() => {
+    if (openId) highlightRef.current?.scrollIntoView({ block: "center", behavior: "smooth" });
+  }, [openId, sorted, selectedCat]);
+
   const catTotals = useMemo(() => {
     const total = rows.reduce((s, e) => s + e.total, 0);
     const balance = rows.reduce((s, e) => s + e.balance, 0);
@@ -205,19 +238,28 @@ export function ExpenseWorkspace() {
               <table className="w-full min-w-[720px] border-collapse text-sm">
                 <thead>
                   <tr className="border-b border-gray-100 bg-gray-50 text-left text-gray-500">
-                    <th className="px-4 py-2 font-medium">Date</th>
-                    <th className="px-4 py-2 font-medium">Exp No.</th>
-                    <th className="px-4 py-2 font-medium">Party</th>
-                    <th className="px-4 py-2 font-medium">Payment Type</th>
-                    <th className="px-4 py-2 text-right font-medium">Amount</th>
-                    <th className="px-4 py-2 text-right font-medium">Balance</th>
-                    <th className="px-4 py-2 font-medium">Status</th>
+                    <SortTh label="Date" sortKey="date" activeKey={sortKey} dir={sortDir} onSort={toggle} />
+                    <SortTh label="Exp No." sortKey="number" activeKey={sortKey} dir={sortDir} onSort={toggle} />
+                    <SortTh label="Party" sortKey="party" activeKey={sortKey} dir={sortDir} onSort={toggle} />
+                    <SortTh label="Payment Type" sortKey="paymentType" activeKey={sortKey} dir={sortDir} onSort={toggle} />
+                    <SortTh label="Amount" sortKey="amount" activeKey={sortKey} dir={sortDir} onSort={toggle} align="right" />
+                    <SortTh label="Balance" sortKey="balance" activeKey={sortKey} dir={sortDir} onSort={toggle} align="right" />
+                    <SortTh label="Status" sortKey="status" activeKey={sortKey} dir={sortDir} onSort={toggle} />
                     <th className="w-10 px-4 py-2" />
                   </tr>
                 </thead>
                 <tbody>
-                  {rows.map((e) => (
-                    <tr key={e.id} className="border-b border-gray-50 transition-colors duration-150 last:border-b-0 even:bg-gray-50/40 hover:bg-cyan-50/40">
+                  {sorted.map((e) => {
+                    const highlighted = openId != null && String(e.id) === openId;
+                    return (
+                    <tr
+                      key={e.id}
+                      ref={highlighted ? highlightRef : undefined}
+                      className={`border-b border-gray-50 transition-colors duration-150 last:border-b-0 even:bg-gray-50/40 hover:bg-cyan-50/40 ${
+                        highlighted ? "bg-amber-50 ring-2 ring-inset ring-amber-300" : ""
+                      }`}
+                    >
+
                       <td className="px-4 py-2.5 whitespace-nowrap text-gray-600">{formatDate(e.invoiceDate)}</td>
                       <td className="px-4 py-2.5 text-gray-600">{e.invoiceNo || "—"}</td>
                       <td className="px-4 py-2.5 text-gray-700">{e.partyName ?? "—"}</td>
@@ -238,7 +280,8 @@ export function ExpenseWorkspace() {
                         </RowMenu>
                       </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                   {rows.length === 0 && (
                     <tr>
                       <td colSpan={8} className="px-4 py-10 text-center text-sm text-gray-400">No transactions in this category.</td>

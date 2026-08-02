@@ -71,15 +71,9 @@ export interface NavNode {
 
 export const VYAPAR_NAV: NavNode[] = [
   { label: "Home", href: "/vyapar", icon: "home" },
-  {
-    label: "Parties",
-    icon: "users",
-    children: [
-      { label: "Party Details", href: "/vyapar/parties" },
-      { label: "Party Groups", href: "/vyapar/parties/groups" },
-      { label: "Party Settings", href: "/vyapar/parties/settings" },
-    ],
-  },
+  // Parties is a direct link — Details and Groups live as tabs on the one page, and Party
+  // Settings is reached from the main Settings hub, so there's no sub-menu to expand.
+  { label: "Parties", href: "/vyapar/parties", icon: "users" },
   { label: "Items", href: "/vyapar/items", icon: "boxes" },
   {
     label: "Sale",

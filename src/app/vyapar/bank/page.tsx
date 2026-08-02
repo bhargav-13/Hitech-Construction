@@ -4,7 +4,9 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { VyaparShell, VyaparEmpty } from "@/components/vyapar/VyaparShell";
 import { BankAccountDialog, CashBankEntryDialog } from "@/components/vyapar/CashBankDialogs";
 import { RowMenu, RowMenuDivider, RowMenuItem } from "@/components/RowMenu";
+import { SortTh } from "@/components/vyapar/SortTh";
 import { Spinner } from "@/components/Spinner";
+import { useTableSort } from "@/lib/useTableSort";
 import { inr } from "@/lib/format";
 import { exportRowsToCsv, printRows, downloadPdf } from "@/lib/vyaparExport";
 import * as vyapar from "@/lib/vyaparApi";
@@ -335,6 +337,16 @@ export function TxnTable({
   onExport: () => void;
   onPdf: () => void;
 }) {
+  const { sorted, sortKey, sortDir, toggle } = useTableSort<CashBankTxn>(
+    rows,
+    {
+      type: (t) => t.type,
+      name: (t) => t.name,
+      date: (t) => t.date,
+      amount: (t) => (t.direction === "in" ? t.amount : -t.amount),
+    },
+    { key: "date", dir: "desc" },
+  );
   return (
     <div className="overflow-hidden rounded-xl border border-gray-200 bg-white">
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-100 px-4 py-3">
@@ -364,14 +376,14 @@ export function TxnTable({
           <table className="w-full min-w-[600px] border-collapse text-sm">
             <thead>
               <tr className="border-b border-gray-100 bg-gray-50 text-left text-gray-500">
-                <th className="px-4 py-2 font-medium">Type</th>
-                <th className="px-4 py-2 font-medium">Name</th>
-                <th className="px-4 py-2 font-medium">Date</th>
-                <th className="px-4 py-2 text-right font-medium">Amount</th>
+                <SortTh label="Type" sortKey="type" activeKey={sortKey} dir={sortDir} onSort={toggle} />
+                <SortTh label="Name" sortKey="name" activeKey={sortKey} dir={sortDir} onSort={toggle} />
+                <SortTh label="Date" sortKey="date" activeKey={sortKey} dir={sortDir} onSort={toggle} />
+                <SortTh label="Amount" sortKey="amount" activeKey={sortKey} dir={sortDir} onSort={toggle} align="right" />
               </tr>
             </thead>
             <tbody>
-              {rows.map((t) => (
+              {sorted.map((t) => (
                 <tr key={t.id} className="border-b border-gray-50 transition-colors duration-150 last:border-b-0 even:bg-gray-50/40 hover:bg-cyan-50/40">
                   <td className="px-4 py-2.5 font-medium text-gray-700">{t.type}</td>
                   <td className="px-4 py-2.5 text-gray-600">{t.name ?? "—"}</td>

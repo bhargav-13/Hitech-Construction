@@ -4,6 +4,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { VyaparShell, VyaparEmpty } from "@/components/vyapar/VyaparShell";
 import { Spinner } from "@/components/Spinner";
 import { RowMenu, RowMenuItem } from "@/components/RowMenu";
+import { SortTh } from "@/components/vyapar/SortTh";
+import { useTableSort } from "@/lib/useTableSort";
 import { inr } from "@/lib/format";
 import { exportRowsToCsv, downloadPdf } from "@/lib/vyaparExport";
 import * as vyapar from "@/lib/vyaparApi";
@@ -50,6 +52,19 @@ export default function ChequesPage() {
       return [c.chequeNo, c.partyName, c.invoiceNo].some((f) => f?.toLowerCase().includes(q));
     });
   }, [cheques, search, tab]);
+
+  const { sorted, sortKey, sortDir, toggle } = useTableSort<Cheque>(
+    rows,
+    {
+      chequeNo: (c) => c.chequeNo,
+      party: (c) => c.partyName,
+      ref: (c) => c.invoiceNo,
+      date: (c) => c.chequeDate,
+      amount: (c) => c.amount,
+      status: (c) => c.status,
+    },
+    { key: "date", dir: "desc" },
+  );
 
   const totals = useMemo(
     () => ({
@@ -134,17 +149,17 @@ export default function ChequesPage() {
             <table className="w-full min-w-[760px] border-collapse text-sm">
               <thead>
                 <tr className="border-b border-gray-100 bg-gray-50 text-left text-gray-500">
-                  <th className="px-4 py-2 font-medium">Cheque No</th>
-                  <th className="px-4 py-2 font-medium">Party</th>
-                  <th className="px-4 py-2 font-medium">Ref</th>
-                  <th className="px-4 py-2 font-medium">Date</th>
-                  <th className="px-4 py-2 text-right font-medium">Amount</th>
-                  <th className="px-4 py-2 font-medium">Status</th>
+                  <SortTh label="Cheque No" sortKey="chequeNo" activeKey={sortKey} dir={sortDir} onSort={toggle} />
+                  <SortTh label="Party" sortKey="party" activeKey={sortKey} dir={sortDir} onSort={toggle} />
+                  <SortTh label="Ref" sortKey="ref" activeKey={sortKey} dir={sortDir} onSort={toggle} />
+                  <SortTh label="Date" sortKey="date" activeKey={sortKey} dir={sortDir} onSort={toggle} />
+                  <SortTh label="Amount" sortKey="amount" activeKey={sortKey} dir={sortDir} onSort={toggle} align="right" />
+                  <SortTh label="Status" sortKey="status" activeKey={sortKey} dir={sortDir} onSort={toggle} />
                   <th className="w-10 px-4 py-2" />
                 </tr>
               </thead>
               <tbody>
-                {rows.map((c) => (
+                {sorted.map((c) => (
                   <tr key={c.id} className="border-b border-gray-50 transition-colors duration-150 last:border-b-0 even:bg-gray-50/40 hover:bg-cyan-50/40">
                     <td className="px-4 py-2.5 font-mono text-xs text-gray-700">{c.chequeNo}</td>
                     <td className="px-4 py-2.5 text-gray-700">{c.partyName ?? "—"}</td>

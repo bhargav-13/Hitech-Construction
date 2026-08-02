@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { VyaparEmpty } from "@/components/vyapar/VyaparShell";
 import { Drawer, DrawerField } from "@/components/Drawer";
@@ -8,6 +8,8 @@ import { Select } from "@/components/Select";
 import { Spinner } from "@/components/Spinner";
 import { DatePicker } from "@/components/DatePicker";
 import { RowMenu, RowMenuDivider, RowMenuItem } from "@/components/RowMenu";
+import { SortTh } from "@/components/vyapar/SortTh";
+import { useTableSort } from "@/lib/useTableSort";
 import { inr } from "@/lib/format";
 import { useVyaparBankId, usePaymentTypeOptions } from "@/lib/bankScope";
 import { downloadPdf } from "@/lib/vyaparExport";
@@ -63,6 +65,11 @@ export function PaymentWorkspace({
     if (params?.get("new") === "1") setCreating(true);
   }, [params]);
 
+  // ?open=<id> — payments have no editor, so we highlight and scroll to the row instead. This is
+  // how a party ledger's Payment-In/Out row links back here.
+  const openId = params?.get("open");
+  const highlightRef = useRef<HTMLTableRowElement>(null);
+
   const rows = useMemo(() => {
     const q = search.trim().toLowerCase();
     return payments.filter((p) => {
@@ -70,6 +77,23 @@ export function PaymentWorkspace({
       return [p.partyName, p.reference, p.paymentDate, p.mode].some((f) => f?.toLowerCase().includes(q));
     });
   }, [payments, search]);
+
+  const { sorted, sortKey, sortDir, toggle } = useTableSort(
+    rows,
+    {
+      date: (p) => p.paymentDate,
+      party: (p) => p.partyName,
+      mode: (p) => p.mode,
+      reference: (p) => p.reference,
+      amount: (p) => p.amount,
+    },
+    { key: "date", dir: "desc" },
+  );
+
+  // Once the highlighted payment is on screen, bring it into view.
+  useEffect(() => {
+    if (openId) highlightRef.current?.scrollIntoView({ block: "center", behavior: "smooth" });
+  }, [openId, sorted]);
 
   const total = useMemo(() => rows.reduce((s, p) => s + p.amount, 0), [rows]);
 
@@ -183,17 +207,26 @@ export function PaymentWorkspace({
           <table className="w-full min-w-[720px] border-collapse text-sm">
             <thead>
               <tr className="border-b border-gray-100 bg-gray-50 text-left text-gray-500">
-                <th className="px-4 py-2 font-medium">Date</th>
-                <th className="px-4 py-2 font-medium">Party Name</th>
-                <th className="px-4 py-2 font-medium">Payment Type</th>
-                <th className="px-4 py-2 font-medium">Reference</th>
-                <th className="px-4 py-2 text-right font-medium">Amount</th>
+                <SortTh label="Date" sortKey="date" activeKey={sortKey} dir={sortDir} onSort={toggle} />
+                <SortTh label="Party Name" sortKey="party" activeKey={sortKey} dir={sortDir} onSort={toggle} />
+                <SortTh label="Payment Type" sortKey="mode" activeKey={sortKey} dir={sortDir} onSort={toggle} />
+                <SortTh label="Reference" sortKey="reference" activeKey={sortKey} dir={sortDir} onSort={toggle} />
+                <SortTh label="Amount" sortKey="amount" activeKey={sortKey} dir={sortDir} onSort={toggle} align="right" />
                 <th className="w-10 px-4 py-2" />
               </tr>
             </thead>
             <tbody>
-              {rows.map((p) => (
-                <tr key={p.id} className="border-b border-gray-50 transition-colors duration-150 last:border-b-0 even:bg-gray-50/40 hover:bg-cyan-50/40">
+              {sorted.map((p) => {
+                const highlighted = openId != null && String(p.id) === openId;
+                return (
+                <tr
+                  key={p.id}
+                  ref={highlighted ? highlightRef : undefined}
+                  className={`border-b border-gray-50 transition-colors duration-150 last:border-b-0 even:bg-gray-50/40 hover:bg-cyan-50/40 ${
+                    highlighted ? "bg-amber-50 ring-2 ring-inset ring-amber-300" : ""
+                  }`}
+                >
+
                   <td className="px-4 py-2.5 whitespace-nowrap text-gray-600">{formatDate(p.paymentDate)}</td>
                   <td className="px-4 py-2.5 font-medium text-gray-800">{p.partyName ?? "—"}</td>
                   <td className="px-4 py-2.5 text-gray-600">{p.mode}</td>
@@ -214,7 +247,8 @@ export function PaymentWorkspace({
                     </div>
                   </td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         </div>

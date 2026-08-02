@@ -1,13 +1,17 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { VyaparShell, VyaparEmpty } from "@/components/vyapar/VyaparShell";
 import { PartyDialog } from "@/components/vyapar/PartyDialog";
 import { PartyImportDialog } from "@/components/vyapar/PartyImportDialog";
+import { SortTh } from "@/components/vyapar/SortTh";
 import { RowMenu, RowMenuDivider, RowMenuItem } from "@/components/RowMenu";
 import { Spinner } from "@/components/Spinner";
 import { Select } from "@/components/Select";
 import { inr } from "@/lib/format";
+import { useTableSort } from "@/lib/useTableSort";
+import { partyLedgerHref } from "@/lib/vyaparLinks";
 import { exportRowsToCsv, printRows, downloadPdf } from "@/lib/vyaparExport";
 import * as vyapar from "@/lib/vyaparApi";
 import type { Party, PartyLedgerRow } from "@/lib/vyaparApi";
@@ -15,8 +19,10 @@ import { usePartySettings } from "@/lib/usePartySettings";
 import { useVyaparBankId } from "@/lib/bankScope";
 import {
   ArrowUpDown,
+  ChevronRight,
   FileSpreadsheet,
   FileText,
+  Layers,
   Mail,
   MapPin,
   Pencil,
@@ -24,17 +30,22 @@ import {
   Plus,
   Printer,
   Search,
+  Settings,
   Trash2,
   Upload,
   Users,
 } from "lucide-react";
 
+type Tab = "details" | "groups";
+
 /**
- * Party Details — Vyapar's master–detail layout: a searchable party list on the left, and the
- * selected party's profile plus their full transaction ledger on the right.
+ * Parties — a single page with two tabs. "Details" is Vyapar's master–detail layout (party list +
+ * selected party's profile and ledger); "Groups" rolls the same parties up by their group. Party
+ * Settings lives under the main Settings hub, so Parties is a flat nav link with no sub-menu.
  */
 export default function PartiesPage() {
   const { settings } = usePartySettings();
+  const [tab, setTab] = useState<Tab>("details");
   const [parties, setParties] = useState<Party[]>([]);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [ledger, setLedger] = useState<PartyLedgerRow[]>([]);
@@ -43,6 +54,7 @@ export default function PartiesPage() {
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState<"All" | vyapar.PartyType>("All");
+  const [groupFilter, setGroupFilter] = useState<string>("All");
   const [sortDesc, setSortDesc] = useState(false);
   const [editing, setEditing] = useState<Party | null>(null);
   const [creating, setCreating] = useState(false);
@@ -68,6 +80,13 @@ export default function PartiesPage() {
     load();
   }, [load]);
 
+  // Open the Groups tab when arrived at via ?tab=groups (e.g. the old /parties/groups redirect).
+  // Read once on mount from window rather than useSearchParams, to keep this page statically
+  // renderable (useSearchParams at page level would opt the whole route out).
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get("tab") === "groups") setTab("groups");
+  }, []);
+
   // Pull the selected party's ledger. Falls back to empty if the endpoint isn't live yet.
   useEffect(() => {
     if (selectedId == null) return;
@@ -87,11 +106,12 @@ export default function PartiesPage() {
     const q = search.trim().toLowerCase();
     const list = parties.filter((p) => {
       if (typeFilter !== "All" && p.partyType !== typeFilter) return false;
+      if (groupFilter !== "All" && (p.partyGroup?.trim() || "Ungrouped") !== groupFilter) return false;
       if (!q) return true;
       return [p.name, p.phone, p.gstin, p.partyGroup].some((f) => f?.toLowerCase().includes(q));
     });
     return [...list].sort((a, b) => (sortDesc ? b.name.localeCompare(a.name) : a.name.localeCompare(b.name)));
-  }, [parties, search, typeFilter, sortDesc]);
+  }, [parties, search, typeFilter, groupFilter, sortDesc]);
 
   const selected = parties.find((p) => p.id === selectedId) ?? null;
 
@@ -101,10 +121,39 @@ export default function PartiesPage() {
     return ledger.filter((r) => [r.type, r.number, r.date].some((f) => f?.toLowerCase().includes(q)));
   }, [ledger, ledgerSearch]);
 
+  // Sortable ledger. Type/Number/Date sort as text; Total/Balance numerically.
+  const { sorted: sortedLedger, sortKey, sortDir, toggle } = useTableSort<PartyLedgerRow>(
+    ledgerRows,
+    {
+      type: (r) => r.type,
+      number: (r) => r.number,
+      date: (r) => r.date,
+      total: (r) => r.total,
+      balance: (r) => r.balance,
+    },
+  );
+
   const totals = useMemo(() => {
     const receivable = parties.filter((p) => p.balance > 0).reduce((s, p) => s + p.balance, 0);
     const payable = parties.filter((p) => p.balance < 0).reduce((s, p) => s + Math.abs(p.balance), 0);
     return { receivable, payable };
+  }, [parties]);
+
+  // Groups rollup — the "Groups" tab.
+  const groups = useMemo(() => {
+    const map = new Map<string, Party[]>();
+    for (const p of parties) {
+      const key = p.partyGroup?.trim() || "Ungrouped";
+      map.set(key, [...(map.get(key) ?? []), p]);
+    }
+    return [...map.entries()]
+      .map(([name, members]) => ({
+        name,
+        members,
+        receivable: members.filter((m) => m.balance > 0).reduce((s, m) => s + m.balance, 0),
+        payable: members.filter((m) => m.balance < 0).reduce((s, m) => s + Math.abs(m.balance), 0),
+      }))
+      .sort((a, b) => b.members.length - a.members.length);
   }, [parties]);
 
   async function remove(p: Party) {
@@ -118,8 +167,14 @@ export default function PartiesPage() {
     }
   }
 
+  /** Jump from a group card into the Details tab, pre-filtered to that group. */
+  function openGroup(name: string) {
+    setGroupFilter(name);
+    setTab("details");
+  }
+
   const ledgerHead = ["Type", "Number", "Date", "Total", "Balance"];
-  const ledgerData = ledgerRows.map((r) => [r.type, r.number ?? "", r.date ?? "", r.total, r.balance]);
+  const ledgerData = sortedLedger.map((r) => [r.type, r.number ?? "", r.date ?? "", r.total, r.balance]);
 
   return (
     <VyaparShell>
@@ -183,6 +238,8 @@ export default function PartiesPage() {
                   <RowMenuDivider />
                   <RowMenuItem icon={FileText} label="Party Statement (Report)" onClick={() => { close(); window.location.href = "/vyapar/reports?r=party"; }} />
                   <RowMenuItem icon={Users} label="All Parties (Report)" onClick={() => { close(); window.location.href = "/vyapar/reports?r=all-parties"; }} />
+                  <RowMenuDivider />
+                  <RowMenuItem icon={Settings} label="Party Settings" onClick={() => { close(); window.location.href = "/vyapar/parties/settings"; }} />
                 </>
               )}
             </RowMenu>
@@ -193,6 +250,26 @@ export default function PartiesPage() {
               <Plus size={15} /> Add Party
             </button>
           </div>
+        </div>
+
+        {/* Tabs — Details and Groups on one page. */}
+        <div className="flex items-center gap-1 border-b border-gray-200">
+          {([["details", "Party Details", Users], ["groups", "Groups", Layers]] as const).map(([key, label, Icon]) => (
+            <button
+              key={key}
+              onClick={() => setTab(key)}
+              className={`-mb-px flex items-center gap-1.5 border-b-2 px-3 py-2 text-sm font-medium transition-colors duration-150 ${
+                tab === key
+                  ? "border-brand-accent text-brand-accent"
+                  : "border-transparent text-gray-500 hover:text-gray-700"
+              }`}
+            >
+              <Icon size={14} /> {label}
+              {key === "groups" && (
+                <span className="rounded-full bg-gray-100 px-1.5 text-[10px] font-semibold text-gray-500">{groups.length}</span>
+              )}
+            </button>
+          ))}
         </div>
 
         {error && <div className="rounded-lg bg-rose-50 px-4 py-2 text-sm text-rose-600">{error}</div>}
@@ -215,7 +292,54 @@ export default function PartiesPage() {
               </button>
             }
           />
+        ) : tab === "groups" ? (
+          /* ---- Groups tab ---- */
+          <div className="space-y-4">
+            {!settings.partyGrouping && (
+              <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm text-amber-800">
+                <span>Party Grouping is off, so every party shows as “Ungrouped”.</span>
+                <Link
+                  href="/vyapar/parties/settings"
+                  className="flex items-center gap-1 font-medium text-amber-900 underline-offset-2 hover:underline"
+                >
+                  <Settings size={13} /> Turn it on
+                </Link>
+              </div>
+            )}
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {groups.map((g) => (
+                <button
+                  key={g.name}
+                  onClick={() => openGroup(g.name)}
+                  className="group rounded-xl border border-gray-200 bg-white p-4 text-left transition-all duration-150 hover:-translate-y-0.5 hover:border-brand-accent hover:shadow-md active:scale-[0.99]"
+                >
+                  <div className="flex items-center justify-between">
+                    <h3 className="truncate text-sm font-semibold text-gray-800">{g.name}</h3>
+                    <span className="flex items-center gap-1 text-[11px] font-medium text-gray-500">
+                      <span className="rounded-full bg-gray-100 px-2 py-0.5">{g.members.length}</span>
+                      <ChevronRight size={13} className="text-gray-300 transition-transform duration-150 group-hover:translate-x-0.5 group-hover:text-brand-accent" />
+                    </span>
+                  </div>
+                  <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
+                    <div>
+                      <div className="text-[11px] tracking-wide text-gray-400 uppercase">To Collect</div>
+                      <div className="font-medium text-emerald-600">{inr(g.receivable)}</div>
+                    </div>
+                    <div>
+                      <div className="text-[11px] tracking-wide text-gray-400 uppercase">To Pay</div>
+                      <div className="font-medium text-rose-600">{inr(g.payable)}</div>
+                    </div>
+                  </div>
+                  <div className="mt-3 border-t border-gray-100 pt-2 text-xs text-gray-500">
+                    {g.members.slice(0, 3).map((m) => m.name).join(", ")}
+                    {g.members.length > 3 && ` +${g.members.length - 3} more`}
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
         ) : (
+          /* ---- Details tab ---- */
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-[320px_minmax(0,1fr)]">
             {/* ---- Master list ---- */}
             <div className="overflow-hidden rounded-xl border border-gray-200 bg-white">
@@ -249,6 +373,15 @@ export default function PartiesPage() {
                     <ArrowUpDown size={14} />
                   </button>
                 </div>
+                {settings.partyGrouping && groups.length > 1 && (
+                  <Select
+                    value={groupFilter}
+                    onChange={setGroupFilter}
+                    size="sm"
+                    className="w-full"
+                    options={[{ value: "All", label: "All groups" }, ...groups.map((g) => ({ value: g.name, label: `${g.name} (${g.members.length})` }))]}
+                  />
+                )}
               </div>
 
               <div className="flex items-center justify-between border-b border-gray-100 bg-gray-50 px-3 py-1.5 text-[11px] font-medium tracking-wide text-gray-500 uppercase">
@@ -284,7 +417,7 @@ export default function PartiesPage() {
                   );
                 })}
                 {filtered.length === 0 && (
-                  <div className="px-3 py-10 text-center text-sm text-gray-400">No parties match “{search}”.</div>
+                  <div className="px-3 py-10 text-center text-sm text-gray-400">No parties match your filters.</div>
                 )}
               </div>
             </div>
@@ -364,7 +497,7 @@ export default function PartiesPage() {
                                 printRows(
                                   `${selected.name} — Statement`,
                                   ledgerHead,
-                                  ledgerRows.map((r) => [r.type, r.number ?? "", r.date ?? "", inr(r.total), inr(r.balance)]),
+                                  sortedLedger.map((r) => [r.type, r.number ?? "", r.date ?? "", inr(r.total), inr(r.balance)]),
                                   selected.gstin ? `GSTIN ${selected.gstin}` : undefined
                                 );
                               }}
@@ -407,7 +540,7 @@ export default function PartiesPage() {
                           printRows(
                             `${selected.name} — Statement`,
                             ledgerHead,
-                            ledgerRows.map((r) => [r.type, r.number ?? "", r.date ?? "", inr(r.total), inr(r.balance)])
+                            sortedLedger.map((r) => [r.type, r.number ?? "", r.date ?? "", inr(r.total), inr(r.balance)])
                           )
                         }
                         title="Print"
@@ -420,7 +553,7 @@ export default function PartiesPage() {
                           downloadPdf(
                             `${selected.name} — Statement`,
                             ledgerHead,
-                            ledgerRows.map((r) => [r.type, r.number ?? "", r.date ?? "", inr(r.total), inr(r.balance)]),
+                            sortedLedger.map((r) => [r.type, r.number ?? "", r.date ?? "", inr(r.total), inr(r.balance)]),
                             { subtitle: `Balance ${inr(selected.balance)}`, rightAlignFrom: 3 }
                           )
                         }
@@ -443,7 +576,7 @@ export default function PartiesPage() {
                     <div className="flex min-h-[160px] items-center justify-center gap-2 text-sm text-gray-400">
                       <Spinner size={14} className="text-brand-accent" /> Loading ledger…
                     </div>
-                  ) : ledgerRows.length === 0 ? (
+                  ) : sortedLedger.length === 0 ? (
                     <div className="px-4 py-12 text-center text-sm text-gray-400">
                       No transactions for this party yet.
                     </div>
@@ -452,28 +585,47 @@ export default function PartiesPage() {
                       <table className="w-full min-w-[600px] border-collapse text-sm">
                         <thead>
                           <tr className="border-b border-gray-100 bg-gray-50 text-left text-gray-500">
-                            <th className="px-4 py-2 font-medium">Type</th>
-                            <th className="px-4 py-2 font-medium">Number</th>
-                            <th className="px-4 py-2 font-medium">Date</th>
-                            <th className="px-4 py-2 text-right font-medium">Total</th>
-                            <th className="px-4 py-2 text-right font-medium">Balance</th>
+                            <SortTh label="Type" sortKey="type" activeKey={sortKey} dir={sortDir} onSort={toggle} />
+                            <SortTh label="Number" sortKey="number" activeKey={sortKey} dir={sortDir} onSort={toggle} />
+                            <SortTh label="Date" sortKey="date" activeKey={sortKey} dir={sortDir} onSort={toggle} />
+                            <SortTh label="Total" sortKey="total" activeKey={sortKey} dir={sortDir} onSort={toggle} align="right" />
+                            <SortTh label="Balance" sortKey="balance" activeKey={sortKey} dir={sortDir} onSort={toggle} align="right" />
                           </tr>
                         </thead>
                         <tbody>
-                          {ledgerRows.map((r) => (
-                            <tr
-                              key={`${r.kind}-${r.id}`}
-                              className="border-b border-gray-50 transition-colors duration-150 last:border-b-0 even:bg-gray-50/40 hover:bg-cyan-50/40"
-                            >
-                              <td className="px-4 py-2.5 text-gray-700">{r.type}</td>
-                              <td className="px-4 py-2.5 font-mono text-xs text-gray-500">{r.number ?? "—"}</td>
-                              <td className="px-4 py-2.5 text-gray-600">{r.date ?? "—"}</td>
-                              <td className="px-4 py-2.5 text-right text-gray-800">{inr(r.total)}</td>
-                              <td className={`px-4 py-2.5 text-right ${r.balance > 0 ? "text-rose-600" : "text-gray-400"}`}>
-                                {r.balance ? inr(r.balance) : "—"}
-                              </td>
-                            </tr>
-                          ))}
+                          {sortedLedger.map((r) => {
+                            const href = partyLedgerHref(r);
+                            return (
+                              <tr
+                                key={`${r.kind}-${r.id}`}
+                                className="border-b border-gray-50 transition-colors duration-150 last:border-b-0 even:bg-gray-50/40 hover:bg-cyan-50/40"
+                              >
+                                <td className="px-4 py-2.5">
+                                  {href ? (
+                                    <Link href={href} className="font-medium text-brand-accent underline-offset-2 hover:underline">
+                                      {r.type}
+                                    </Link>
+                                  ) : (
+                                    <span className="text-gray-700">{r.type}</span>
+                                  )}
+                                </td>
+                                <td className="px-4 py-2.5 font-mono text-xs text-gray-500">
+                                  {href ? (
+                                    <Link href={href} className="hover:text-brand-accent">
+                                      {r.number ?? "—"}
+                                    </Link>
+                                  ) : (
+                                    (r.number ?? "—")
+                                  )}
+                                </td>
+                                <td className="px-4 py-2.5 text-gray-600">{r.date ?? "—"}</td>
+                                <td className="px-4 py-2.5 text-right text-gray-800">{inr(r.total)}</td>
+                                <td className={`px-4 py-2.5 text-right ${r.balance > 0 ? "text-rose-600" : "text-gray-400"}`}>
+                                  {r.balance ? inr(r.balance) : "—"}
+                                </td>
+                              </tr>
+                            );
+                          })}
                         </tbody>
                       </table>
                     </div>

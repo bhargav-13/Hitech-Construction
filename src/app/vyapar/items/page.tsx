@@ -1,14 +1,18 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { VyaparShell, VyaparEmpty } from "@/components/vyapar/VyaparShell";
 import { ItemDialog } from "@/components/vyapar/ItemDialog";
 import { AdjustStockDialog } from "@/components/vyapar/AdjustStockDialog";
 import { ItemImportDialog } from "@/components/vyapar/ItemImportDialog";
 import { ItemMasterDialog } from "@/components/vyapar/ItemMasterDialog";
 import { RowMenu, RowMenuDivider, RowMenuItem } from "@/components/RowMenu";
+import { SortTh } from "@/components/vyapar/SortTh";
 import { Spinner } from "@/components/Spinner";
 import { Select } from "@/components/Select";
+import { useTableSort } from "@/lib/useTableSort";
+import { itemLedgerHref } from "@/lib/vyaparLinks";
 import { inr } from "@/lib/format";
 import { exportRowsToCsv, printRows, downloadPdf } from "@/lib/vyaparExport";
 import { useItemSettings } from "@/lib/useItemSettings";
@@ -117,6 +121,20 @@ export default function ItemsPage() {
   }, [scoped, search, stockFilter, sortDesc]);
 
   const selected = items.find((i) => i.id === selectedId) ?? null;
+
+  // Sortable stock ledger (defaults to the backend's newest-first order until a header is clicked).
+  const { sorted: sortedLedger, sortKey: lSortKey, sortDir: lSortDir, toggle: lToggle } = useTableSort<ItemLedgerRow>(
+    ledger,
+    {
+      type: (r) => r.type,
+      ref: (r) => r.ref,
+      name: (r) => r.name,
+      date: (r) => r.date,
+      quantity: (r) => r.quantity,
+      price: (r) => r.pricePerUnit,
+      status: (r) => r.status,
+    },
+  );
 
   const totals = useMemo(
     () => ({
@@ -585,23 +603,36 @@ export default function ItemsPage() {
                       <table className="w-full min-w-[720px] border-collapse text-sm">
                         <thead>
                           <tr className="border-b border-gray-100 bg-gray-50 text-left text-gray-500">
-                            {ledgerHead.map((h, i) => (
-                              <th key={h} className={`px-4 py-2 font-medium ${i >= 4 ? "text-right" : ""}`}>{h}</th>
-                            ))}
+                            <SortTh label="Type" sortKey="type" activeKey={lSortKey} dir={lSortDir} onSort={lToggle} />
+                            <SortTh label="Invoice/Ref" sortKey="ref" activeKey={lSortKey} dir={lSortDir} onSort={lToggle} />
+                            <SortTh label="Name" sortKey="name" activeKey={lSortKey} dir={lSortDir} onSort={lToggle} />
+                            <SortTh label="Date" sortKey="date" activeKey={lSortKey} dir={lSortDir} onSort={lToggle} />
+                            <SortTh label="Quantity" sortKey="quantity" activeKey={lSortKey} dir={lSortDir} onSort={lToggle} align="right" />
+                            <SortTh label="Price/Unit" sortKey="price" activeKey={lSortKey} dir={lSortDir} onSort={lToggle} align="right" />
+                            <SortTh label="Status" sortKey="status" activeKey={lSortKey} dir={lSortDir} onSort={lToggle} align="right" />
                           </tr>
                         </thead>
                         <tbody>
-                          {ledger.map((r) => (
+                          {sortedLedger.map((r) => {
+                            const href = itemLedgerHref(r);
+                            return (
                             <tr key={r.id} className="border-b border-gray-50 transition-colors duration-150 last:border-b-0 even:bg-gray-50/40 hover:bg-cyan-50/40">
                               <td className="px-4 py-2.5 text-gray-700">{r.type}</td>
-                              <td className="px-4 py-2.5 font-mono text-xs text-gray-500">{r.ref ?? "—"}</td>
+                              <td className="px-4 py-2.5 font-mono text-xs">
+                                {href ? (
+                                  <Link href={href} className="text-brand-accent underline-offset-2 hover:underline">{r.ref ?? "—"}</Link>
+                                ) : (
+                                  <span className="text-gray-500">{r.ref ?? "—"}</span>
+                                )}
+                              </td>
                               <td className="px-4 py-2.5 text-gray-600">{r.name ?? "—"}</td>
                               <td className="px-4 py-2.5 text-gray-600">{r.date ?? "—"}</td>
                               <td className="px-4 py-2.5 text-right text-gray-800">{r.quantity}</td>
                               <td className="px-4 py-2.5 text-right text-gray-600">{inr(r.pricePerUnit)}</td>
                               <td className="px-4 py-2.5 text-right text-gray-500">{r.status ?? "—"}</td>
                             </tr>
-                          ))}
+                            );
+                          })}
                         </tbody>
                       </table>
                     </div>

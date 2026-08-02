@@ -10,6 +10,8 @@ import { DatePicker } from "@/components/DatePicker";
 import { RowMenu, RowMenuDivider, RowMenuItem } from "@/components/RowMenu";
 import { InvoiceBuilder } from "@/components/vyapar/InvoiceBuilder";
 import { UploadBillDialog } from "@/components/vyapar/UploadBillDialog";
+import { SortTh } from "@/components/vyapar/SortTh";
+import { useTableSort } from "@/lib/useTableSort";
 import { inr } from "@/lib/format";
 import { useVyaparBankId } from "@/lib/bankScope";
 import { downloadInvoicePdf, downloadPdf } from "@/lib/vyaparExport";
@@ -96,6 +98,14 @@ export function InvoiceWorkspace({
     if (params?.get("new") === "1") setCreating(true);
   }, [params]);
 
+  // ?open=<id> opens a specific document — how party/item ledgers deep-link back to their source.
+  useEffect(() => {
+    const openId = params?.get("open");
+    if (!openId) return;
+    const found = invoices.find((i) => String(i.id) === openId);
+    if (found) setEditing(found);
+  }, [params, invoices]);
+
   const rows = useMemo(() => {
     const q = search.trim().toLowerCase();
     return invoices.filter((i) => {
@@ -104,6 +114,21 @@ export function InvoiceWorkspace({
       return [i.invoiceNo, i.partyName, i.invoiceDate].some((f) => f?.toLowerCase().includes(q));
     });
   }, [invoices, search, statusFilter]);
+
+  // Sortable columns — defaults to newest first, like Vyapar's own lists.
+  const { sorted, sortKey, sortDir, toggle } = useTableSort<Invoice>(
+    rows,
+    {
+      date: (i) => i.invoiceDate,
+      number: (i) => i.invoiceNo,
+      party: (i) => i.partyName,
+      paymentType: (i) => i.paymentType,
+      amount: (i) => i.total,
+      balance: (i) => i.balance,
+      status: (i) => i.status,
+    },
+    { key: "date", dir: "desc" },
+  );
 
   const totals = useMemo(() => {
     const total = rows.reduce((s, i) => s + i.total, 0);
@@ -267,18 +292,18 @@ export function InvoiceWorkspace({
           <table className="w-full min-w-[900px] border-collapse text-sm">
             <thead>
               <tr className="border-b border-gray-100 bg-gray-50 text-left text-gray-500">
-                <th className="px-4 py-2 font-medium">Date</th>
-                <th className="px-4 py-2 font-medium">{numberColLabel}</th>
-                <th className="px-4 py-2 font-medium">Party Name</th>
-                {!NON_PAYMENT && <th className="px-4 py-2 font-medium">Payment Type</th>}
-                <th className="px-4 py-2 text-right font-medium">Amount</th>
-                {!NON_PAYMENT && <th className="px-4 py-2 text-right font-medium">Balance</th>}
-                {!NON_PAYMENT && <th className="px-4 py-2 font-medium">Status</th>}
+                <SortTh label="Date" sortKey="date" activeKey={sortKey} dir={sortDir} onSort={toggle} />
+                <SortTh label={numberColLabel} sortKey="number" activeKey={sortKey} dir={sortDir} onSort={toggle} />
+                <SortTh label="Party Name" sortKey="party" activeKey={sortKey} dir={sortDir} onSort={toggle} />
+                {!NON_PAYMENT && <SortTh label="Payment Type" sortKey="paymentType" activeKey={sortKey} dir={sortDir} onSort={toggle} />}
+                <SortTh label="Amount" sortKey="amount" activeKey={sortKey} dir={sortDir} onSort={toggle} align="right" />
+                {!NON_PAYMENT && <SortTh label="Balance" sortKey="balance" activeKey={sortKey} dir={sortDir} onSort={toggle} align="right" />}
+                {!NON_PAYMENT && <SortTh label="Status" sortKey="status" activeKey={sortKey} dir={sortDir} onSort={toggle} />}
                 <th className="w-10 px-4 py-2" />
               </tr>
             </thead>
             <tbody>
-              {rows.map((i) => (
+              {sorted.map((i) => (
                 <tr
                   key={i.id}
                   onClick={() => setEditing(i)}
