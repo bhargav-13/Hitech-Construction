@@ -45,3 +45,4 @@ next-env.d.ts
 
 # local reference screenshots, not part of the app
 /screenshot_onsite/
+/docs

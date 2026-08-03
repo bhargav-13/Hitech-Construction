@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   CalendarDays,
   Columns3,
@@ -18,7 +18,7 @@ import {
   Upload,
   X,
 } from "lucide-react";
-import { useSearchParams } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Select } from "@/components/Select";
 import { DatePicker, recurrenceLabel } from "@/components/DatePicker";
 import type { RecurrenceRule } from "@/components/DatePicker";
@@ -136,6 +136,8 @@ export function TaskWorkspace({ projectId }: { projectId?: string }) {
   const { projects } = useProjects();
   const scope = useProjectScope((s) => s.projectId);
   const searchParams = useSearchParams();
+  const router = useRouter();
+  const pathname = usePathname();
 
   useEffect(() => {
     load();
@@ -182,12 +184,35 @@ export function TaskWorkspace({ projectId }: { projectId?: string }) {
   }, [searchParams]);
 
   // Deep-link: open a specific task's drawer when arriving via ?task=<id> (e.g. from a notification).
+  // Guard against re-opening: the task list refetches in the background (notifications polling),
+  // and without this the effect would re-fire on every `allTasks` change and pop the drawer back
+  // open after the user closed it. We open once per distinct ?task= value.
+  const openedTaskParam = useRef<string | null>(null);
   useEffect(() => {
     const taskId = searchParams?.get("task");
-    if (!taskId) return;
+    if (!taskId) {
+      openedTaskParam.current = null;
+      return;
+    }
+    if (openedTaskParam.current === taskId) return; // already handled this deep-link
     const match = allTasks.find((t) => t.id === taskId);
-    if (match) setEditing(match);
+    if (match) {
+      setEditing(match);
+      openedTaskParam.current = taskId;
+    }
   }, [searchParams, allTasks]);
+
+  // Close the drawer and strip ?task= from the URL so a background refetch can't reopen it and a
+  // later back-navigation doesn't land on a stale open state.
+  function closeDrawer() {
+    setEditing(null);
+    if (searchParams?.get("task")) {
+      const params = new URLSearchParams(searchParams.toString());
+      params.delete("task");
+      const qs = params.toString();
+      router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+    }
+  }
 
   useEffect(() => {
     try {
@@ -702,7 +727,7 @@ export function TaskWorkspace({ projectId }: { projectId?: string }) {
       )}
 
       {creating && <TaskDrawer defaultProjectId={effectiveProjectId ?? null} onClose={() => setCreating(false)} />}
-      {editing && <TaskDrawer existing={editing} onClose={() => setEditing(null)} />}
+      {editing && <TaskDrawer existing={editing} onClose={closeDrawer} />}
     </div>
   );
 }

@@ -244,10 +244,12 @@ export default function TaskopadDashboardPage() {
             <UpcomingList tasks={live} userName={userName} />
           </div>
 
-          {/* Team incomplete */}
-          <div className="rounded-xl border border-gray-200 bg-white p-4 transition-shadow duration-150 hover:shadow-md">
+          {/* Team incomplete — self-start so it sizes to its content instead of stretching to
+              match the taller card beside it (which left an empty gap under the list). */}
+          <div className="self-start rounded-xl border border-gray-200 bg-white p-4 transition-shadow duration-150 hover:shadow-md">
             <h3 className="mb-3 text-sm font-semibold text-gray-800">Team Incomplete Task</h3>
-            <div className="space-y-2.5">
+            {/* Cap the height so a large team scrolls instead of pushing the page down. */}
+            <div className="max-h-[280px] space-y-2.5 overflow-y-auto pr-1">
               {teamIncomplete.map((u) => (
                 <div key={u.id} className="flex items-center gap-2.5">
                   <UserAvatar id={u.id} name={u.name} size={30} />

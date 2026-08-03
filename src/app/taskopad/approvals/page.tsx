@@ -3,11 +3,13 @@
 import { useEffect, useMemo, useState } from "react";
 import { CheckCircle2, ClipboardCheck, Loader2, X } from "lucide-react";
 import { TaskopadShell } from "@/components/task/TaskopadShell";
+import { TaskDrawer } from "@/components/task/TaskDrawer";
 import { useTaskStore } from "@/lib/taskStore";
 import { useUsers } from "@/lib/useUsers";
 import { useProjects } from "@/lib/useProjects";
 import { UserAvatar, StatusChip, PriorityChip } from "@/components/task/TaskBits";
 import { formatTaskDate } from "@/lib/taskTypes";
+import type { Task } from "@/lib/taskTypes";
 
 /**
  * Completion approvals — tasks a manager must sign off before they're marked Completed. A person who
@@ -37,6 +39,8 @@ function ApprovalsList() {
   const [rejectingId, setRejectingId] = useState<string | null>(null);
   const [note, setNote] = useState("");
   const [error, setError] = useState("");
+  // Click a row to open the full task details (read the description, subtasks, comments, etc.).
+  const [viewing, setViewing] = useState<Task | null>(null);
 
   useEffect(() => {
     loadApprovals();
@@ -101,7 +105,12 @@ function ApprovalsList() {
             const rejecting = rejectingId === t.id;
             const busy = busyId === t.id;
             return (
-              <div key={t.id} className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
+              <div
+                key={t.id}
+                onClick={() => setViewing(t)}
+                className="cursor-pointer rounded-xl border border-gray-200 bg-white p-4 shadow-sm transition-all duration-150 hover:border-brand-accent hover:shadow-md"
+                title="View task details"
+              >
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
@@ -122,7 +131,7 @@ function ApprovalsList() {
                   </div>
 
                   {!rejecting && (
-                    <div className="flex shrink-0 items-center gap-2">
+                    <div className="flex shrink-0 items-center gap-2" onClick={(e) => e.stopPropagation()}>
                       <button
                         onClick={() => doApprove(t.id)}
                         disabled={busy}
@@ -142,7 +151,7 @@ function ApprovalsList() {
                 </div>
 
                 {rejecting && (
-                  <div className="mt-3 rounded-lg border border-rose-100 bg-rose-50/40 p-3">
+                  <div className="mt-3 rounded-lg border border-rose-100 bg-rose-50/40 p-3" onClick={(e) => e.stopPropagation()}>
                     <textarea
                       value={note}
                       onChange={(e) => setNote(e.target.value)}
@@ -174,6 +183,8 @@ function ApprovalsList() {
           })}
         </div>
       )}
+
+      {viewing && <TaskDrawer existing={viewing} onClose={() => setViewing(null)} />}
     </div>
   );
 }
