@@ -8,7 +8,6 @@ import * as vyapar from "@/lib/vyaparApi";
 import { GST_TYPES, STATES_OF_SUPPLY } from "@/lib/vyaparApi";
 import type { Party } from "@/lib/vyaparApi";
 import { usePartySettings } from "@/lib/usePartySettings";
-import { useVyaparBankId } from "@/lib/bankScope";
 import { Info, Plus, X } from "lucide-react";
 
 const TABS = ["GST & Address", "Credit & Balance", "Additional Fields"] as const;
@@ -30,7 +29,6 @@ export function PartyDialog({
   onSaved: (saved: Party, again: boolean) => void;
 }) {
   const { settings } = usePartySettings();
-  const bankAccountId = useVyaparBankId();
   const [tab, setTab] = useState<Tab>("GST & Address");
 
   const [name, setName] = useState(existing?.name ?? "");
@@ -69,7 +67,7 @@ export function PartyDialog({
     setError("");
     const body: Partial<Party> = {
       name: name.trim(),
-      bankAccountId: existing ? existing.bankAccountId : bankAccountId ?? null,
+      bankAccountId: existing ? existing.bankAccountId : null,
       partyType,
       gstin: gstin.trim() || null,
       gstType,

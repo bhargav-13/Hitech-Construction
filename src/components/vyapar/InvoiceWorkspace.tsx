@@ -10,10 +10,12 @@ import { DatePicker } from "@/components/DatePicker";
 import { RowMenu, RowMenuDivider, RowMenuItem } from "@/components/RowMenu";
 import { InvoiceBuilder } from "@/components/vyapar/InvoiceBuilder";
 import { UploadBillDialog } from "@/components/vyapar/UploadBillDialog";
+import { ImportDialog } from "@/components/vyapar/ImportDialog";
+import { documentImportConfig } from "@/lib/vyaparImportConfigs";
 import { SortTh } from "@/components/vyapar/SortTh";
 import { useTableSort } from "@/lib/useTableSort";
 import { inr } from "@/lib/format";
-import { useVyaparBankId } from "@/lib/bankScope";
+import { useVyaparProjectId } from "@/lib/projectScope";
 import { downloadInvoicePdf, downloadPdf } from "@/lib/vyaparExport";
 import * as vyapar from "@/lib/vyaparApi";
 import type { DocType, Invoice, Item, Party } from "@/lib/vyaparApi";
@@ -36,7 +38,7 @@ export function InvoiceWorkspace({
   accent?: "brand" | "rose";
 }) {
   const params = useSearchParams();
-  const bankAccountId = useVyaparBankId();
+  const projectId = useVyaparProjectId();
   // Estimates, proformas and sale orders are non-payment/planning docs — no payment status, a
   // Ref/Order No. instead of an invoice number, and a quotation/order summary, not received/balance.
   const isOrder = docType === "SALE_ORDER" || docType === "PURCHASE_ORDER";
@@ -67,6 +69,7 @@ export function InvoiceWorkspace({
   const [statusFilter, setStatusFilter] = useState<"All" | "Paid" | "Partial" | "Unpaid">("All");
   const [editing, setEditing] = useState<Invoice | null>(null);
   const [creating, setCreating] = useState(false);
+  const [importing, setImporting] = useState(false);
   const [paying, setPaying] = useState<Invoice | null>(null);
   const [uploading, setUploading] = useState(false);
 
@@ -75,9 +78,9 @@ export function InvoiceWorkspace({
     setError("");
     try {
       const [inv, pty, itm] = await Promise.all([
-        vyapar.getInvoices(docType, bankAccountId),
-        vyapar.getParties(undefined, bankAccountId),
-        vyapar.getItems(bankAccountId),
+        vyapar.getInvoices(docType, projectId),
+        vyapar.getParties(undefined, projectId),
+        vyapar.getItems(projectId),
       ]);
       setInvoices(inv);
       setParties(pty);
@@ -87,7 +90,7 @@ export function InvoiceWorkspace({
     } finally {
       setLoading(false);
     }
-  }, [docType, bankAccountId]);
+  }, [docType, projectId]);
 
   useEffect(() => {
     load();
@@ -187,7 +190,7 @@ export function InvoiceWorkspace({
             disabled={rows.length === 0}
             className="flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-600 transition-all duration-150 hover:bg-gray-50 active:scale-95 disabled:opacity-50"
           >
-            <FileText size={14} /> PDF
+            <FileText size={14} className="text-rose-600" /> PDF
           </button>
           {docType === "PURCHASE" && (
             <button
@@ -197,6 +200,12 @@ export function InvoiceWorkspace({
               <Upload size={14} /> Upload Bill
             </button>
           )}
+          <button
+            onClick={() => setImporting(true)}
+            className="flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-600 transition-all duration-150 hover:bg-gray-50 active:scale-95"
+          >
+            <Upload size={14} /> Import
+          </button>
           <button
             onClick={() => setCreating(true)}
             className={`flex items-center gap-1.5 rounded-lg px-3.5 py-2 text-sm font-semibold text-white transition-all duration-150 active:scale-95 ${addBtn}`}
@@ -363,6 +372,14 @@ export function InvoiceWorkspace({
         <UploadBillDialog
           onClose={() => setUploading(false)}
           onContinue={() => { setUploading(false); setCreating(true); }}
+        />
+      )}
+
+      {importing && (
+        <ImportDialog
+          config={documentImportConfig(docType)}
+          onClose={() => setImporting(false)}
+          onImported={() => { setImporting(false); load(); }}
         />
       )}
 

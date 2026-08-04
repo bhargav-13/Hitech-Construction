@@ -5,7 +5,7 @@ import { VyaparShell } from "@/components/vyapar/VyaparShell";
 import { Spinner } from "@/components/Spinner";
 import { Select } from "@/components/Select";
 import { TAX_RATES, DEFAULT_UNITS } from "@/lib/useItemSettings";
-import { useVyaparBankId } from "@/lib/bankScope";
+import { useVyaparProjectId } from "@/lib/projectScope";
 import * as vyapar from "@/lib/vyaparApi";
 import type { Item } from "@/lib/vyaparApi";
 import { Save, Search } from "lucide-react";
@@ -26,17 +26,17 @@ export default function BulkUpdateItemsPage() {
   const [search, setSearch] = useState("");
   const [error, setError] = useState("");
   const [saved, setSaved] = useState(0);
-  const bankAccountId = useVyaparBankId();
+  const projectId = useVyaparProjectId();
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      setItems(await vyapar.getItems(bankAccountId));
+      setItems(await vyapar.getItems(projectId));
       setDraft({});
     } finally {
       setLoading(false);
     }
-  }, [bankAccountId]);
+  }, [projectId]);
 
   useEffect(() => {
     load();

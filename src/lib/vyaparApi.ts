@@ -162,8 +162,10 @@ export interface Invoice {
   roundOff: number;
   status: "Paid" | "Partial" | "Unpaid";
   notes: string | null;
-  /** The bank/cash account this document belongs to (null = all accounts). */
+  /** The bank/cash account used to settle this document (a payment method, not the scope). */
   bankAccountId: number | null;
+  /** The construction project this document belongs to (null = unassigned / All Projects). */
+  projectId: number | null;
   lines: InvoiceLine[];
 }
 
@@ -178,8 +180,10 @@ export interface Payment {
   mode: string;
   reference: string | null;
   notes: string | null;
-  /** The bank/cash account this payment belongs to (null = all accounts). */
+  /** The bank/cash account this payment moved through (a payment method, not the scope). */
   bankAccountId: number | null;
+  /** The construction project this payment belongs to (null = unassigned / All Projects). */
+  projectId: number | null;
 }
 
 export interface DashboardSummary {
@@ -205,12 +209,12 @@ function qs(params: Record<string, string | number | null | undefined>): string 
 }
 
 // ---- Dashboard ----
-export const getDashboard = (bankAccountId?: number) =>
-  apiRequest<DashboardSummary>(`${BASE}/dashboard${qs({ bankAccountId })}`);
+export const getDashboard = (projectId?: number) =>
+  apiRequest<DashboardSummary>(`${BASE}/dashboard${qs({ projectId })}`);
 
 // ---- Parties ----
-export const getParties = (type?: PartyType, bankAccountId?: number) =>
-  apiRequest<Party[]>(`${BASE}/parties${qs({ type, bankAccountId })}`);
+export const getParties = (type?: PartyType, projectId?: number) =>
+  apiRequest<Party[]>(`${BASE}/parties${qs({ type, projectId })}`);
 export const createParty = (body: Partial<Party>) =>
   apiRequest<Party>(`${BASE}/parties`, { method: "POST", body });
 export const updateParty = (id: number, body: Partial<Party>) =>
@@ -225,7 +229,7 @@ export const importParties = (rows: Partial<Party>[]) =>
   apiRequest<Party[]>(`${BASE}/parties/import`, { method: "POST", body: { rows } });
 
 // ---- Items ----
-export const getItems = (bankAccountId?: number) => apiRequest<Item[]>(`${BASE}/items${qs({ bankAccountId })}`);
+export const getItems = (projectId?: number) => apiRequest<Item[]>(`${BASE}/items${qs({ projectId })}`);
 export const createItem = (body: Partial<Item>) =>
   apiRequest<Item>(`${BASE}/items`, { method: "POST", body });
 export const updateItem = (id: number, body: Partial<Item>) =>
@@ -259,8 +263,10 @@ export interface InvoiceInput {
   terms?: string | null;
   roundOff?: number;
   notes?: string | null;
-  /** The bank/cash account this document belongs to (undefined = all accounts). */
+  /** The bank/cash account used to settle this document (a payment method, not the scope). */
   bankAccountId?: number | null;
+  /** The construction project this document belongs to (undefined/null = All Projects). */
+  projectId?: number | null;
   lines: {
     itemId: number | null;
     itemName: string;
@@ -274,8 +280,8 @@ export interface InvoiceInput {
   }[];
 }
 
-export const getInvoices = (docType?: DocType, bankAccountId?: number) =>
-  apiRequest<Invoice[]>(`${BASE}/invoices${qs({ docType, bankAccountId })}`);
+export const getInvoices = (docType?: DocType, projectId?: number) =>
+  apiRequest<Invoice[]>(`${BASE}/invoices${qs({ docType, projectId })}`);
 export const getInvoice = (id: number) => apiRequest<Invoice>(`${BASE}/invoices/${id}`);
 export const createInvoice = (body: InvoiceInput) =>
   apiRequest<Invoice>(`${BASE}/invoices`, { method: "POST", body });
@@ -285,9 +291,9 @@ export const deleteInvoice = (id: number) =>
   apiRequest<void>(`${BASE}/invoices/${id}`, { method: "DELETE" });
 
 // ---- Payments ----
-export const getPayments = (direction?: "IN" | "OUT", bankAccountId?: number) =>
-  apiRequest<Payment[]>(`${BASE}/payments${qs({ direction, bankAccountId })}`);
-export const createPayment = (body: Partial<Payment> & { bankAccountId?: number | null }) =>
+export const getPayments = (direction?: "IN" | "OUT", projectId?: number) =>
+  apiRequest<Payment[]>(`${BASE}/payments${qs({ direction, projectId })}`);
+export const createPayment = (body: Partial<Payment> & { bankAccountId?: number | null; projectId?: number | null }) =>
   apiRequest<Payment>(`${BASE}/payments`, { method: "POST", body });
 export const deletePayment = (id: number) =>
   apiRequest<void>(`${BASE}/payments/${id}`, { method: "DELETE" });

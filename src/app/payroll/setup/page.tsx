@@ -4,7 +4,7 @@ import Link from "next/link";
 import { PayrollShell } from "@/components/payroll/PayrollShell";
 import { usePayrollStore } from "@/lib/payrollApi";
 import { useShifts, useHolidayPolicies, useLeavePolicies } from "@/lib/usePayrollSetup";
-import { CalendarDays, Clock, MapPin, Landmark, Palmtree, ChevronRight } from "lucide-react";
+import { CalendarDays, Clock, Coins, MapPin, Landmark, Palmtree, ChevronRight } from "lucide-react";
 
 /**
  * Payroll Setup — the pre-setup hub. Reusable policies are configured here once, then assigned to
@@ -42,6 +42,14 @@ export default function PayrollSetupPage() {
       desc: "Leave types with annual counts and how they accrue.",
       count: `${leavePolicies.length} ${leavePolicies.length === 1 ? "policy" : "policies"}`,
       ready: leavePolicies.length > 0,
+    },
+    {
+      href: "/payroll/setup/salary",
+      icon: Coins,
+      title: "Salary Components",
+      desc: "Default earnings & deductions (Basic, HRA, PF, ESIC, PT…) new employees inherit.",
+      count: "Default template",
+      ready: true,
     },
   ];
 

@@ -37,8 +37,6 @@ export const PAYROLL_NAV: PayrollNavNode[] = [
   // Payments (payout tracking) and Tax Profiles are not wired to the backend yet — hidden from
   // nav so no mock data reaches users. Re-add once Phase 6 (payroll_payments) ships.
   { label: "Reports", href: "/payroll/reports", icon: "chart" },
-  // Tasks are handled by the dedicated Taskopad module — link out to it rather than duplicating.
-  { label: "Tasks", href: "/taskopad", icon: "check" },
   { label: "Others", href: "/payroll/others", icon: "grid" },
 ];
 

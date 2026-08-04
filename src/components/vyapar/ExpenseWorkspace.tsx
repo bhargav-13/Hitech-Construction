@@ -12,11 +12,15 @@ import { SortTh } from "@/components/vyapar/SortTh";
 import { useTableSort } from "@/lib/useTableSort";
 import { TAX_RATES } from "@/lib/useItemSettings";
 import { inr } from "@/lib/format";
-import { useVyaparBankId, usePaymentTypeOptions } from "@/lib/bankScope";
+import { usePaymentTypeOptions } from "@/lib/bankScope";
+import { useVyaparProjectId } from "@/lib/projectScope";
+import { useProjects } from "@/lib/useProjects";
 import { downloadPdf } from "@/lib/vyaparExport";
+import { ImportDialog } from "@/components/vyapar/ImportDialog";
+import { documentImportConfig } from "@/lib/vyaparImportConfigs";
 import * as vyapar from "@/lib/vyaparApi";
 import type { Invoice, Party } from "@/lib/vyaparApi";
-import { FileText, Plus, Receipt, Search, Trash2, X } from "lucide-react";
+import { FileText, Plus, Receipt, Search, Trash2, Upload, X } from "lucide-react";
 const UNCATEGORISED = "Uncategorised";
 
 /**
@@ -26,7 +30,7 @@ const UNCATEGORISED = "Uncategorised";
  */
 export function ExpenseWorkspace() {
   const params = useSearchParams();
-  const bankAccountId = useVyaparBankId();
+  const projectId = useVyaparProjectId();
   const [expenses, setExpenses] = useState<Invoice[]>([]);
   const [parties, setParties] = useState<Party[]>([]);
   const [loading, setLoading] = useState(true);
@@ -34,14 +38,15 @@ export function ExpenseWorkspace() {
   const [search, setSearch] = useState("");
   const [selectedCat, setSelectedCat] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  const [importing, setImporting] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
     setError("");
     try {
       const [inv, pty] = await Promise.all([
-        vyapar.getInvoices("EXPENSE", bankAccountId),
-        vyapar.getParties(undefined, bankAccountId),
+        vyapar.getInvoices("EXPENSE", projectId),
+        vyapar.getParties(undefined, projectId),
       ]);
       setExpenses(inv);
       setParties(pty);
@@ -50,7 +55,7 @@ export function ExpenseWorkspace() {
     } finally {
       setLoading(false);
     }
-  }, [bankAccountId]);
+  }, [projectId]);
 
   useEffect(() => {
     load();
@@ -154,7 +159,13 @@ export function ExpenseWorkspace() {
             disabled={expenses.length === 0}
             className="flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-600 transition-all duration-150 hover:bg-gray-50 active:scale-95 disabled:opacity-50"
           >
-            <FileText size={14} /> PDF
+            <FileText size={14} className="text-rose-600" /> PDF
+          </button>
+          <button
+            onClick={() => setImporting(true)}
+            className="flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-600 transition-all duration-150 hover:bg-gray-50 active:scale-95"
+          >
+            <Upload size={14} /> Import
           </button>
           <button
             onClick={() => setCreating(true)}
@@ -302,6 +313,14 @@ export function ExpenseWorkspace() {
           onSaved={() => { setCreating(false); load(); }}
         />
       )}
+
+      {importing && (
+        <ImportDialog
+          config={documentImportConfig("EXPENSE")}
+          onClose={() => setImporting(false)}
+          onImported={() => { setImporting(false); load(); }}
+        />
+      )}
     </div>
   );
 }
@@ -334,7 +353,9 @@ function ExpenseForm({
   const [paid, setPaid] = useState(0);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
-  const bankAccountId = useVyaparBankId();
+  const projectId = useVyaparProjectId();
+  const { projects } = useProjects();
+  const [selectedProjectId, setSelectedProjectId] = useState(projectId != null ? String(projectId) : "");
   const paymentTypeOptions = usePaymentTypeOptions();
 
   const calc = useMemo(() => {
@@ -364,12 +385,16 @@ function ExpenseForm({
       setError("Add at least one expense line.");
       return;
     }
+    if (!selectedProjectId) {
+      setError("Select a project.");
+      return;
+    }
     setSaving(true);
     setError("");
     try {
       await vyapar.createInvoice({
         docType: "EXPENSE",
-        bankAccountId: bankAccountId ?? null,
+        projectId: selectedProjectId ? Number(selectedProjectId) : null,
         invoiceNo: expenseNo || undefined,
         partyId: gst && partyId ? Number(partyId) : null,
         invoiceDate: date,
@@ -420,6 +445,14 @@ function ExpenseForm({
 
         <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
           <div className="space-y-3">
+            <DrawerField label="Project" required>
+              <Select
+                value={selectedProjectId}
+                onChange={setSelectedProjectId}
+                placeholder="Select project"
+                options={[{ value: "", label: "Select project" }, ...projects.map((p) => ({ value: p.id, label: p.name }))]}
+              />
+            </DrawerField>
             <DrawerField label="Expense Category" required>
               <input
                 value={category}

@@ -9,21 +9,28 @@ import { Select } from "@/components/Select";
 import { DatePicker } from "@/components/DatePicker";
 import { profileProgress } from "@/lib/payrollApi";
 import { useShifts, useHolidayPolicies, useLeavePolicies, usePayrollProfiles } from "@/lib/usePayrollSetup";
-import { getUsers, ApiError } from "@/lib/api";
+import { getUsers, getSalaryTemplate, ApiError } from "@/lib/api";
 import type { UserResponse, PayrollProfileResponse } from "@/lib/api";
+import {
+  DEFAULT_COMPONENTS, decodeComponents, encodeComponents, basicAmount, componentAmount, CALC_LABEL,
+  type SalaryComponent, type ComponentCalc,
+} from "@/lib/salaryComponents";
 import { STAFF_CATEGORIES, DESIGNATIONS } from "@/lib/payrollConfig";
 import type { StaffCategory } from "@/lib/payrollConfig";
 import { inr } from "@/lib/format";
 import {
-  ArrowLeft, ArrowRight, Building2, Check, Clock, CalendarDays, Landmark,
-  Mail, Phone, Plus, Palmtree, Wallet,
+  ArrowLeft, ArrowRight, Building2, Check, Clock, CalendarDays, FileText, Landmark,
+  Mail, Phone, Plus, Palmtree, Upload, Wallet, X,
 } from "lucide-react";
+
+/** One uploaded identity document: a label plus the file (kept as a data URL, like punch selfies). */
+type DocRow = { type: string; fileName: string; dataUrl: string };
 
 const STEPS = [
   { key: "employment", label: "Employment", icon: Building2 },
   { key: "policies", label: "Shift & Policies", icon: Clock },
   { key: "salary", label: "Salary", icon: Wallet },
-  { key: "bank", label: "Bank & Identity", icon: Landmark },
+  { key: "bank", label: "Bank & Docs", icon: Landmark },
 ] as const;
 
 /**
@@ -130,17 +137,94 @@ function WizardForm({
   const [monthlyCtc, setMonthlyCtc] = useState(existing?.salary.monthlyCtc ?? 0);
   const [workType, setWorkType] = useState<"DAILY" | "HOURLY" | "PIECE">(existing?.salary.workType ?? "DAILY");
   const [workRate, setWorkRate] = useState(existing?.salary.workRate ?? 0);
-  const [pf, setPf] = useState(existing?.salary.pf ?? true);
-  const [esic, setEsic] = useState(existing?.salary.esic ?? false);
-  const [pt, setPt] = useState(existing?.salary.pt ?? true);
-  const [pan, setPan] = useState(existing?.pan ?? "");
+  // Dynamic salary components (earnings + deductions). Seeded from the saved profile, else the
+  // org-wide default template (fetched below), else the built-in defaults.
+  const [components, setComponents] = useState<SalaryComponent[]>(() => {
+    const decoded = decodeComponents(existing?.components);
+    return decoded.length ? decoded : DEFAULT_COMPONENTS;
+  });
+  useEffect(() => {
+    if (existing?.components) return; // keep what's saved on the member
+    getSalaryTemplate()
+      .then((t) => {
+        const tpl = decodeComponents(t.components);
+        if (tpl.length) setComponents(tpl);
+      })
+      .catch(() => {});
+  }, [existing?.components]);
+  const setComp = (i: number, patch: Partial<SalaryComponent>) =>
+    setComponents((cs) => cs.map((c, j) => (j === i ? { ...c, ...patch } : c)));
+  const addComp = (kind: SalaryComponent["kind"]) =>
+    setComponents((cs) => [...cs, { name: "", kind, calc: kind === "EARNING" ? "CTC" : "FLAT", value: 0, cap: null, threshold: null }]);
+  const removeComp = (i: number) => setComponents((cs) => cs.filter((_, j) => j !== i));
   const [bankAccount, setBankAccount] = useState(existing?.bankAccount ?? "");
   const [ifsc, setIfsc] = useState(existing?.ifsc ?? "");
   const [bankName, setBankName] = useState(existing?.bankName ?? "");
+  // Identity documents — the member uploads a file per row. Defaults to Aadhaar + PAN slots; the
+  // member can add more (Driving Licence, Voter ID…). All optional. Files are kept as data URLs,
+  // exactly like punch selfies, so no separate file store is needed.
+  const [documents, setDocuments] = useState<DocRow[]>(() => {
+    try {
+      const parsed = existing?.documents ? JSON.parse(existing.documents) : null;
+      if (Array.isArray(parsed) && parsed.length)
+        return parsed.map((d) => ({
+          type: String(d?.type ?? ""),
+          fileName: String(d?.fileName ?? ""),
+          dataUrl: String(d?.dataUrl ?? ""),
+        }));
+    } catch {
+      // fall through to the defaults
+    }
+    return [
+      { type: "Aadhaar Card", fileName: "", dataUrl: "" },
+      { type: "PAN Card", fileName: "", dataUrl: "" },
+    ];
+  });
+  const setDoc = (i: number, patch: Partial<DocRow>) =>
+    setDocuments((ds) => ds.map((d, j) => (j === i ? { ...d, ...patch } : d)));
+  const addDoc = () => setDocuments((ds) => [...ds, { type: "", fileName: "", dataUrl: "" }]);
+  const removeDoc = (i: number) => setDocuments((ds) => ds.filter((_, j) => j !== i));
+
+  async function uploadDoc(i: number, file: File) {
+    if (file.size > 4 * 1024 * 1024) {
+      setSaveError("That file is over 4 MB — please upload a smaller scan or photo.");
+      return;
+    }
+    try {
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result));
+        reader.onerror = () => reject(new Error("read failed"));
+        reader.readAsDataURL(file);
+      });
+      setDoc(i, { fileName: file.name, dataUrl });
+    } catch {
+      setSaveError("Couldn't read that file — try another one.");
+    }
+  }
 
   const isWork = category === "WORK_BASIS";
-  const basic = Math.round(monthlyCtc * 0.5);
-  const hra = Math.round(monthlyCtc * 0.2);
+  const ctcN = Number(monthlyCtc) || 0;
+  // Derive the payslip breakdown from the components (Basic/HRA drive PF and display).
+  const basic = basicAmount(components, ctcN);
+  const earnAmount = (re: RegExp) =>
+    Math.round(
+      components
+        .filter((c) => c.kind === "EARNING" && re.test(c.name))
+        .reduce((s, c) => s + componentAmount(c, { ctc: ctcN, basic, gross: ctcN }), 0)
+    );
+  const hra = earnAmount(/hra|rent/i);
+  const deductionTotal = Math.round(
+    components
+      .filter((c) => c.kind === "DEDUCTION")
+      .reduce((s, c) => s + componentAmount(c, { ctc: ctcN, basic, gross: ctcN }), 0)
+  );
+  const hasDeduction = (re: RegExp) => components.some((c) => c.kind === "DEDUCTION" && re.test(c.name));
+
+  // Keep any row that has a label or an uploaded file (preserves the Aadhaar/PAN slots).
+  const cleanDocuments = documents
+    .filter((d) => d.type.trim() || d.dataUrl)
+    .map((d) => ({ type: d.type.trim(), fileName: d.fileName, dataUrl: d.dataUrl }));
 
   const buildProfile = (): PayrollProfileResponse => ({
     userId: member.id,
@@ -154,12 +238,17 @@ function WizardForm({
       otherAllowances: isWork ? 0 : (Number(monthlyCtc) || 0) - basic - hra,
       workType: isWork ? workType : null,
       workRate: isWork ? Number(workRate) || 0 : 0,
-      pf, esic, pt,
+      // Legacy booleans kept in sync from the components (other code still reads them).
+      pf: hasDeduction(/pf|provident/i),
+      esic: hasDeduction(/esi/i),
+      pt: hasDeduction(/professional|^pt$/i),
     },
     bankAccount: bankAccount.trim() || null,
     ifsc: ifsc.trim() || null,
     bankName: bankName.trim() || null,
-    pan: pan.trim() || null,
+    pan: existing?.pan ?? null,
+    documents: cleanDocuments.length ? JSON.stringify(cleanDocuments) : null,
+    components: isWork ? null : encodeComponents(components) || null,
     shiftId: shiftId ? Number(shiftId) : null,
     holidayPolicyId: holidayPolicyId ? Number(holidayPolicyId) : null,
     leavePolicyId: leavePolicyId ? Number(leavePolicyId) : null,
@@ -169,7 +258,7 @@ function WizardForm({
   const progress = useMemo(
     () => profileProgress(buildProfile()),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [category, designation, joiningDate, shiftId, holidayPolicyId, leavePolicyId, monthlyCtc, workRate, workType, pf, esic, pt, pan, bankAccount, ifsc, bankName]
+    [category, designation, joiningDate, shiftId, holidayPolicyId, leavePolicyId, monthlyCtc, workRate, workType, components, documents, bankAccount, ifsc, bankName]
   );
 
   async function persist(): Promise<boolean> {
@@ -318,29 +407,100 @@ function WizardForm({
                       <input type="number" value={monthlyCtc} onChange={(e) => setMonthlyCtc(Number(e.target.value))} className="input" autoFocus />
                     </Field>
                   </div>
+
+                  <ComponentGroup title="Earnings" kind="EARNING" components={components} ctc={ctcN} basic={basic} setComp={setComp} removeComp={removeComp} onAdd={() => addComp("EARNING")} />
+                  <ComponentGroup title="Deductions" kind="DEDUCTION" components={components} ctc={ctcN} basic={basic} setComp={setComp} removeComp={removeComp} onAdd={() => addComp("DEDUCTION")} />
+
                   {monthlyCtc > 0 && (
                     <div className="grid grid-cols-3 gap-3 rounded-lg bg-gray-50/70 p-3 text-sm">
-                      <Comp label="Basic (50%)" value={inr(basic)} />
-                      <Comp label="HRA (20%)" value={inr(hra)} />
-                      <Comp label="Other Allowances" value={inr(monthlyCtc - basic - hra)} />
+                      <Comp label="Basic" value={inr(basic)} />
+                      <Comp label="Total Deductions" value={inr(deductionTotal)} />
+                      <Comp label="Est. Net / month" value={inr(Math.max(0, ctcN - deductionTotal))} />
                     </div>
                   )}
-                  <div className="flex flex-wrap gap-4">
-                    <Toggle label="PF" checked={pf} onChange={setPf} />
-                    <Toggle label="ESIC" checked={esic} onChange={setEsic} />
-                    <Toggle label="Professional Tax" checked={pt} onChange={setPt} />
-                  </div>
                 </>
               )}
             </div>
           )}
 
           {step === 3 && (
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <Field label="PAN"><input value={pan} onChange={(e) => setPan(e.target.value.toUpperCase())} className="input font-mono" placeholder="optional" /></Field>
-              <Field label="Bank Account No."><input value={bankAccount} onChange={(e) => setBankAccount(e.target.value)} className="input font-mono" placeholder="optional" /></Field>
-              <Field label="IFSC"><input value={ifsc} onChange={(e) => setIfsc(e.target.value.toUpperCase())} className="input font-mono" placeholder="optional" /></Field>
-              <Field label="Bank Name"><input value={bankName} onChange={(e) => setBankName(e.target.value)} className="input" placeholder="optional" /></Field>
+            <div className="space-y-6">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <Field label="Bank Account No."><input value={bankAccount} onChange={(e) => setBankAccount(e.target.value)} className="input font-mono" placeholder="optional" /></Field>
+                <Field label="IFSC"><input value={ifsc} onChange={(e) => setIfsc(e.target.value.toUpperCase())} className="input font-mono" placeholder="optional" /></Field>
+                <Field label="Bank Name"><input value={bankName} onChange={(e) => setBankName(e.target.value)} className="input" placeholder="optional" /></Field>
+              </div>
+
+              <div>
+                <div className="mb-2 flex items-center justify-between">
+                  <div>
+                    <span className="text-sm font-medium text-gray-700">Documents</span>
+                    <p className="text-xs text-gray-400">Aadhaar and PAN by default — all optional. Add any other IDs you keep on file.</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={addDoc}
+                    className="flex shrink-0 items-center gap-1 rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs font-medium text-brand-accent transition-colors hover:bg-cyan-50/50"
+                  >
+                    <Plus size={13} /> Add document
+                  </button>
+                </div>
+                <div className="space-y-2">
+                  {documents.map((d, i) => (
+                    <div key={i} className="flex items-center gap-2">
+                      <input
+                        value={d.type}
+                        onChange={(e) => setDoc(i, { type: e.target.value })}
+                        className="input w-44 shrink-0"
+                        placeholder="Document type"
+                      />
+                      {d.dataUrl ? (
+                        <div className="flex flex-1 items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
+                          <FileText size={14} className="shrink-0 text-emerald-600" />
+                          <a
+                            href={d.dataUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="flex-1 truncate text-sm text-brand-accent hover:underline"
+                            title={d.fileName || "View document"}
+                          >
+                            {d.fileName || "View document"}
+                          </a>
+                          <label className="shrink-0 cursor-pointer text-xs font-medium text-gray-500 hover:text-brand-accent">
+                            Replace
+                            <input
+                              type="file"
+                              accept="image/*,.pdf"
+                              hidden
+                              onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) uploadDoc(i, f); }}
+                            />
+                          </label>
+                        </div>
+                      ) : (
+                        <label className="flex flex-1 cursor-pointer items-center gap-1.5 rounded-lg border border-dashed border-gray-300 px-3 py-2 text-sm font-medium text-brand-accent transition-colors hover:border-brand-accent hover:bg-cyan-50/40">
+                          <Upload size={14} /> Upload file
+                          <span className="text-xs font-normal text-gray-400">(image or PDF)</span>
+                          <input
+                            type="file"
+                            accept="image/*,.pdf"
+                            hidden
+                            onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) uploadDoc(i, f); }}
+                          />
+                        </label>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => removeDoc(i)}
+                        aria-label="Remove document"
+                        className="shrink-0 rounded-md p-1.5 text-gray-400 transition-colors hover:bg-rose-50 hover:text-rose-600"
+                      >
+                        <X size={15} />
+                      </button>
+                    </div>
+                  ))}
+                  {documents.length === 0 && <p className="text-xs text-gray-400">No documents added yet.</p>}
+                </div>
+              </div>
             </div>
           )}
         </div>
@@ -423,19 +583,81 @@ function Comp({ label, value }: { label: string; value: string }) {
   );
 }
 
-function Toggle({ label, checked, onChange }: { label: string; checked: boolean; onChange: (v: boolean) => void }) {
+/** Editable list of salary components of one kind (earnings or deductions), with a live amount. */
+function ComponentGroup({
+  title,
+  kind,
+  components,
+  ctc,
+  basic,
+  setComp,
+  removeComp,
+  onAdd,
+}: {
+  title: string;
+  kind: SalaryComponent["kind"];
+  components: SalaryComponent[];
+  ctc: number;
+  basic: number;
+  setComp: (i: number, patch: Partial<SalaryComponent>) => void;
+  removeComp: (i: number) => void;
+  onAdd: () => void;
+}) {
+  const CALCS: ComponentCalc[] = ["CTC", "BASIC", "GROSS", "FLAT"];
   return (
-    <span className="flex items-center gap-2 text-sm text-gray-600">
-      <button
-        type="button"
-        role="switch"
-        aria-checked={checked}
-        onClick={() => onChange(!checked)}
-        className={`relative h-5 w-9 shrink-0 rounded-full transition-colors duration-200 ${checked ? "bg-brand-accent" : "bg-gray-300"}`}
-      >
-        <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all duration-200 ${checked ? "left-[18px]" : "left-0.5"}`} />
-      </button>
-      {label && <span className="cursor-pointer" onClick={() => onChange(!checked)}>{label}</span>}
-    </span>
+    <div>
+      <div className="mb-2 flex items-center justify-between">
+        <span className="text-sm font-medium text-gray-700">{title}</span>
+        <button
+          type="button"
+          onClick={onAdd}
+          className="flex items-center gap-1 rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs font-medium text-brand-accent transition-colors hover:bg-cyan-50/50"
+        >
+          <Plus size={13} /> Add {kind === "EARNING" ? "earning" : "deduction"}
+        </button>
+      </div>
+      <div className="space-y-2">
+        {components.map((c, i) =>
+          c.kind !== kind ? null : (
+            <div key={i} className="flex flex-wrap items-center gap-2 rounded-lg border border-gray-200 p-2">
+              <input value={c.name} onChange={(e) => setComp(i, { name: e.target.value })} className="input min-w-[120px] flex-1" placeholder="Component name" />
+              <Select
+                value={c.calc}
+                onChange={(v) => setComp(i, { calc: v as ComponentCalc })}
+                size="sm"
+                className="w-32"
+                options={CALCS.map((k) => ({ value: k, label: CALC_LABEL[k] }))}
+              />
+              <input type="number" value={c.value} onChange={(e) => setComp(i, { value: Number(e.target.value) })} className="input w-20" placeholder={c.calc === "FLAT" ? "₹" : "%"} />
+              {c.calc !== "FLAT" && (
+                <input
+                  type="number"
+                  value={c.cap ?? ""}
+                  onChange={(e) => setComp(i, { cap: e.target.value === "" ? null : Number(e.target.value) })}
+                  className="input w-24"
+                  placeholder="cap ₹"
+                  title="Cap the base amount before the % is applied (e.g. PF cap 15000)"
+                />
+              )}
+              <input
+                type="number"
+                value={c.threshold ?? ""}
+                onChange={(e) => setComp(i, { threshold: e.target.value === "" ? null : Number(e.target.value) })}
+                className="input w-28"
+                placeholder="min gross"
+                title="Only apply when monthly gross exceeds this (e.g. PT above 15000)"
+              />
+              <span className="ml-auto w-20 text-right text-sm font-medium text-gray-700">
+                {inr(Math.round(componentAmount(c, { ctc, basic, gross: ctc })))}
+              </span>
+              <button type="button" onClick={() => removeComp(i)} aria-label="Remove component" className="rounded-md p-1.5 text-gray-400 transition-colors hover:bg-rose-50 hover:text-rose-600">
+                <X size={15} />
+              </button>
+            </div>
+          )
+        )}
+        {components.filter((c) => c.kind === kind).length === 0 && <p className="text-xs text-gray-400">None yet.</p>}
+      </div>
+    </div>
   );
 }

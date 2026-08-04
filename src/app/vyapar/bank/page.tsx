@@ -9,6 +9,8 @@ import { Spinner } from "@/components/Spinner";
 import { useTableSort } from "@/lib/useTableSort";
 import { inr } from "@/lib/format";
 import { exportRowsToCsv, printRows, downloadPdf } from "@/lib/vyaparExport";
+import { ImportDialog } from "@/components/vyapar/ImportDialog";
+import { bankAccountImportConfig } from "@/lib/vyaparImportConfigs";
 import * as vyapar from "@/lib/vyaparApi";
 import type { BankAccount, CashBankTxn } from "@/lib/vyaparApi";
 import {
@@ -22,6 +24,7 @@ import {
   Printer,
   Search,
   Trash2,
+  Upload,
 } from "lucide-react";
 
 type EntryKind = "BANK_TO_CASH" | "CASH_TO_BANK" | "BANK_TO_BANK" | "ADJUST_BANK";
@@ -44,6 +47,7 @@ export default function BankAccountsPage() {
   const [search, setSearch] = useState("");
   const [txnSearch, setTxnSearch] = useState("");
   const [creating, setCreating] = useState(false);
+  const [importing, setImporting] = useState(false);
   const [editing, setEditing] = useState<BankAccount | null>(null);
   const [entry, setEntry] = useState<EntryKind | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -133,6 +137,7 @@ export default function BankAccountsPage() {
                   />
                   <RowMenuItem
                     icon={FileText}
+                    iconClassName="text-rose-600"
                     label="Download PDF"
                     onClick={() => {
                       close();
@@ -150,6 +155,12 @@ export default function BankAccountsPage() {
                 </>
               )}
             </RowMenu>
+            <button
+              onClick={() => setImporting(true)}
+              className="flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-600 transition-all duration-150 hover:bg-gray-50 active:scale-95"
+            >
+              <Upload size={14} /> Import
+            </button>
             <button
               onClick={() => setCreating(true)}
               className="flex items-center gap-1.5 rounded-lg bg-rose-600 px-3.5 py-2 text-sm font-semibold text-white transition-all duration-150 hover:bg-rose-700 active:scale-95"
@@ -273,6 +284,7 @@ export default function BankAccountsPage() {
                           <RowMenuItem icon={FileSpreadsheet} label="Export statement" onClick={() => { close(); exportRowsToCsv(`${selected.name}-statement`, head, data); }} />
                           <RowMenuItem
                             icon={FileText}
+                            iconClassName="text-rose-600"
                             label="Download PDF"
                             onClick={() => { close(); downloadPdf(`${selected.name} — Statement`, head, rows.map((r) => [r.type, r.name ?? "", r.date ?? "", inr(r.amount)]), { rightAlignFrom: 3 }); }}
                           />
@@ -315,6 +327,13 @@ export default function BankAccountsPage() {
           currentBalance={selected?.balance}
           onClose={() => setEntry(null)}
           onDone={() => { setEntry(null); load(); if (selectedId) vyapar.getAccountTxns(selectedId).then(setTxns).catch(() => {}); }}
+        />
+      )}
+      {importing && (
+        <ImportDialog
+          config={bankAccountImportConfig}
+          onClose={() => setImporting(false)}
+          onImported={() => { setImporting(false); load(); }}
         />
       )}
     </VyaparShell>

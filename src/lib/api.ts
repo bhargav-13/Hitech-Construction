@@ -457,11 +457,26 @@ export interface PayrollProfileResponse {
   ifsc: string | null;
   bankName: string | null;
   pan: string | null;
+  /** Identity documents as a JSON string: an array of { type, number }. */
+  documents: string | null;
+  /** Salary components (earnings + deductions) as delimited text — see salaryComponents.ts. */
+  components: string | null;
   shiftId: number | null;
   holidayPolicyId: number | null;
   leavePolicyId: number | null;
 }
 export type PayrollProfileRequest = PayrollProfileResponse;
+
+/** Org-wide default salary components (delimited text; null when never set up). */
+export interface SalaryTemplateApi {
+  components: string | null;
+}
+export function getSalaryTemplate() {
+  return request<SalaryTemplateApi>("/api/v1/payroll/salary-template");
+}
+export function saveSalaryTemplate(components: string | null) {
+  return request<SalaryTemplateApi>("/api/v1/payroll/salary-template", { method: "PUT", body: { components } });
+}
 
 export function getShifts() {
   return request<ShiftResponse[]>("/api/v1/payroll/shifts");
@@ -758,6 +773,9 @@ export interface PayslipApi {
   pf: number;
   esic: number;
   pt: number;
+  otherDeductions: number;
+  /** Delimited "name|amount;…" breakdown of every deduction component, for the payslip. */
+  deductionsDetail: string | null;
   loanEmi: number;
   reimbursements: number;
   net: number;
@@ -799,6 +817,9 @@ export function getPayrollRun(month: string) {
 }
 export function generatePayrollRun(month: string) {
   return request<PayrollRunApi>(`/api/v1/payroll/runs/${month}/generate`, { method: "POST" });
+}
+export function editPayslip(month: string, userId: number, body: { gross: number; otherDeductions: number }) {
+  return request<PayslipApi>(`/api/v1/payroll/runs/${month}/payslips/${userId}`, { method: "PUT", body });
 }
 export function lockPayrollRun(month: string) {
   return request<PayrollRunApi>(`/api/v1/payroll/runs/${month}/lock`, { method: "POST" });

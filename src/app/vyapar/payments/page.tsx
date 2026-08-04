@@ -8,7 +8,8 @@ import { Spinner } from "@/components/Spinner";
 import { DatePicker } from "@/components/DatePicker";
 import { RowMenu, RowMenuItem } from "@/components/RowMenu";
 import { inr } from "@/lib/format";
-import { useVyaparBankId, usePaymentTypeOptions } from "@/lib/bankScope";
+import { usePaymentTypeOptions } from "@/lib/bankScope";
+import { useVyaparProjectId } from "@/lib/projectScope";
 import * as vyapar from "@/lib/vyaparApi";
 import type { Party, Payment } from "@/lib/vyaparApi";
 import { ArrowDownLeft, ArrowUpRight, Plus, Search, Trash2, Wallet } from "lucide-react";
@@ -21,15 +22,15 @@ export default function VyaparPaymentsPage() {
   const [search, setSearch] = useState("");
   const [dir, setDir] = useState<"All" | "IN" | "OUT">("All");
   const [creating, setCreating] = useState<"IN" | "OUT" | null>(null);
-  const bankAccountId = useVyaparBankId();
+  const projectId = useVyaparProjectId();
 
   const load = useCallback(async () => {
     setLoading(true);
     setError("");
     try {
       const [pays, pts] = await Promise.all([
-        vyapar.getPayments(undefined, bankAccountId),
-        vyapar.getParties(undefined, bankAccountId),
+        vyapar.getPayments(undefined, projectId),
+        vyapar.getParties(undefined, projectId),
       ]);
       setPayments(pays);
       setParties(pts);
@@ -38,7 +39,7 @@ export default function VyaparPaymentsPage() {
     } finally {
       setLoading(false);
     }
-  }, [bankAccountId]);
+  }, [projectId]);
 
   useEffect(() => {
     load();
@@ -218,7 +219,7 @@ function StandalonePaymentDrawer({
   const [paymentDate, setPaymentDate] = useState(new Date().toISOString().slice(0, 10));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
-  const bankAccountId = useVyaparBankId();
+  const projectId = useVyaparProjectId();
   const paymentTypeOptions = usePaymentTypeOptions();
 
   async function save() {
@@ -237,7 +238,7 @@ function StandalonePaymentDrawer({
         reference: reference || null,
         notes: notes || null,
         paymentDate,
-        bankAccountId: bankAccountId ?? null,
+        projectId: projectId ?? null,
       });
       onSaved();
     } catch (err) {

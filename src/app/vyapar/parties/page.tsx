@@ -16,7 +16,7 @@ import { exportRowsToCsv, printRows, downloadPdf } from "@/lib/vyaparExport";
 import * as vyapar from "@/lib/vyaparApi";
 import type { Party, PartyLedgerRow } from "@/lib/vyaparApi";
 import { usePartySettings } from "@/lib/usePartySettings";
-import { useVyaparBankId } from "@/lib/bankScope";
+import { useVyaparProjectId } from "@/lib/projectScope";
 import {
   ArrowUpDown,
   ChevronRight,
@@ -60,13 +60,13 @@ export default function PartiesPage() {
   const [creating, setCreating] = useState(false);
   const [importing, setImporting] = useState(false);
   const [ledgerSearch, setLedgerSearch] = useState("");
-  const bankAccountId = useVyaparBankId();
+  const projectId = useVyaparProjectId();
 
   const load = useCallback(async () => {
     setLoading(true);
     setError("");
     try {
-      const list = await vyapar.getParties(undefined, bankAccountId);
+      const list = await vyapar.getParties(undefined, projectId);
       setParties(list);
       setSelectedId((cur) => cur ?? list[0]?.id ?? null);
     } catch (err) {
@@ -74,7 +74,7 @@ export default function PartiesPage() {
     } finally {
       setLoading(false);
     }
-  }, [bankAccountId]);
+  }, [projectId]);
 
   useEffect(() => {
     load();
@@ -212,6 +212,7 @@ export default function PartiesPage() {
                   />
                   <RowMenuItem
                     icon={FileText}
+                    iconClassName="text-rose-600"
                     label="Download PDF"
                     onClick={() => {
                       close();
@@ -558,7 +559,7 @@ export default function PartiesPage() {
                           )
                         }
                         title="Download PDF"
-                        className="rounded-lg p-1.5 text-brand-accent transition-colors duration-150 hover:bg-cyan-50"
+                        className="rounded-lg p-1.5 text-rose-600 transition-colors duration-150 hover:bg-rose-50"
                       >
                         <FileText size={15} />
                       </button>

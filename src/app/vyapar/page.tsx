@@ -15,7 +15,7 @@ import { VyaparShell } from "@/components/vyapar/VyaparShell";
 import { Spinner } from "@/components/Spinner";
 import { inr, inrAxis } from "@/lib/format";
 import { useAuthStore } from "@/lib/authStore";
-import { useVyaparBankId } from "@/lib/bankScope";
+import { useVyaparProjectId } from "@/lib/projectScope";
 import * as vyapar from "@/lib/vyaparApi";
 import type { DashboardSummary } from "@/lib/vyaparApi";
 import {
@@ -50,14 +50,14 @@ export default function VyaparHomePage() {
   const [cashInHand, setCashInHand] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const bankAccountId = useVyaparBankId();
+  const projectId = useVyaparProjectId();
 
   const load = useCallback(async () => {
     setLoading(true);
     setError("");
     try {
       const [summary, cashTxns] = await Promise.all([
-        vyapar.getDashboard(bankAccountId),
+        vyapar.getDashboard(projectId),
         vyapar.getCashTxns().catch(() => []),
       ]);
       setData(summary);
@@ -67,7 +67,7 @@ export default function VyaparHomePage() {
     } finally {
       setLoading(false);
     }
-  }, [bankAccountId]);
+  }, [projectId]);
 
   useEffect(() => {
     if (canView) load();

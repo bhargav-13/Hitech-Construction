@@ -107,17 +107,22 @@ export function RowMenu({
   );
 }
 
-/** Standard item inside a RowMenu. `tone` colours destructive/warning actions. */
+/**
+ * Standard item inside a RowMenu. `tone` colours destructive/warning actions. `iconClassName`
+ * overrides just the icon's colour (e.g. a red PDF icon) while the label stays neutral.
+ */
 export function RowMenuItem({
   icon: Icon,
   label,
   onClick,
   tone = "default",
+  iconClassName,
 }: {
   icon?: React.ComponentType<{ size?: number; className?: string }>;
   label: string;
   onClick: () => void;
   tone?: "default" | "warning" | "danger";
+  iconClassName?: string;
 }) {
   const toneCls =
     tone === "danger"
@@ -130,7 +135,7 @@ export function RowMenuItem({
       onClick={onClick}
       className={`flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm transition-colors duration-150 ${toneCls}`}
     >
-      {Icon && <Icon size={14} className={tone === "default" ? "text-gray-400" : ""} />}
+      {Icon && <Icon size={14} className={iconClassName ?? (tone === "default" ? "text-gray-400" : "")} />}
       {label}
     </button>
   );

@@ -17,7 +17,7 @@ import { VYAPAR_REPORTS, REPORT_GROUPS } from "@/lib/vyaparConfig";
 import { Spinner } from "@/components/Spinner";
 import { DatePicker } from "@/components/DatePicker";
 import { inr } from "@/lib/format";
-import { useVyaparBankId } from "@/lib/bankScope";
+import { useVyaparProjectId } from "@/lib/projectScope";
 import * as vyapar from "@/lib/vyaparApi";
 import type { CashBankTxn, Invoice, InvoiceLine, Item, Party, Payment } from "@/lib/vyaparApi";
 import { ChevronRight, Download, FileText } from "lucide-react";
@@ -109,16 +109,16 @@ function ReportDetail({ id, onBack }: { id: ReportId; onBack: () => void }) {
   const [loading, setLoading] = useState(true);
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
-  const bankAccountId = useVyaparBankId();
+  const projectId = useVyaparProjectId();
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
       const [inv, pty, itm, pay] = await Promise.all([
-        vyapar.getInvoices(undefined, bankAccountId),
-        vyapar.getParties(undefined, bankAccountId),
-        vyapar.getItems(bankAccountId),
-        vyapar.getPayments(undefined, bankAccountId),
+        vyapar.getInvoices(undefined, projectId),
+        vyapar.getParties(undefined, projectId),
+        vyapar.getItems(projectId),
+        vyapar.getPayments(undefined, projectId),
       ]);
       setInvoices(inv);
       setParties(pty);
@@ -145,7 +145,7 @@ function ReportDetail({ id, onBack }: { id: ReportId; onBack: () => void }) {
     } finally {
       setLoading(false);
     }
-  }, [bankAccountId, id]);
+  }, [projectId, id]);
 
   useEffect(() => {
     load();

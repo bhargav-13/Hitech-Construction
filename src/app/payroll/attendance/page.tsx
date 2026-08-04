@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { PayrollShell, PayrollEmpty, StatCard } from "@/components/payroll/PayrollShell";
 import { Spinner } from "@/components/Spinner";
 import { DatePicker } from "@/components/DatePicker";
@@ -41,6 +42,9 @@ export default function AttendancePage() {
   const [members, setMembers] = useState<UserResponse[]>([]);
   const [membersLoading, setMembersLoading] = useState(true);
   const [actionError, setActionError] = useState("");
+  const router = useRouter();
+  // Clicking a member opens their dedicated attendance calendar page.
+  const openCalendar = (m: UserResponse) => router.push(`/payroll/attendance/${m.id}`);
 
   const range = useMemo(() => {
     if (view === "DAY") return { from: date, to: date, totalDays: 1 };
@@ -134,9 +138,16 @@ export default function AttendancePage() {
             rows={rows}
             refresh={refresh}
             setActionError={setActionError}
+            onOpenCalendar={openCalendar}
           />
         ) : (
-          <MonthView members={filtered} rows={rows} totalDays={range.totalDays} monthKey={`${year}-${pad(monthIdx + 1)}`} />
+          <MonthView
+            members={filtered}
+            rows={rows}
+            totalDays={range.totalDays}
+            monthKey={`${year}-${pad(monthIdx + 1)}`}
+            onOpenCalendar={openCalendar}
+          />
         )}
       </div>
     </PayrollShell>
@@ -150,12 +161,14 @@ function DayView({
   rows,
   refresh,
   setActionError,
+  onOpenCalendar,
 }: {
   date: string;
   members: UserResponse[];
   rows: AttendanceApiResponse[];
   refresh: () => Promise<void>;
   setActionError: (msg: string) => void;
+  onOpenCalendar: (m: UserResponse) => void;
 }) {
   const byUser = useMemo(() => {
     const m = new Map<number, AttendanceApiResponse>();
@@ -276,9 +289,21 @@ function DayView({
                         </div>
                       )}
                       <div>
-                        <div className="font-medium text-gray-800">{m.fullName}</div>
+                        <button
+                          onClick={() => onOpenCalendar(m)}
+                          className="text-left font-medium text-gray-800 transition-colors hover:text-brand-accent hover:underline"
+                        >
+                          {m.fullName}
+                        </button>
                         <div className="text-xs text-gray-400">{m.departmentName ?? "—"}</div>
                       </div>
+                      <button
+                        onClick={() => onOpenCalendar(m)}
+                        title="View attendance calendar"
+                        className="ml-auto shrink-0 rounded-md p-1.5 text-gray-400 transition-colors hover:bg-cyan-50 hover:text-brand-accent"
+                      >
+                        <CalendarDays size={15} />
+                      </button>
                     </div>
                   </td>
                   <td className="px-4 py-2.5">
@@ -348,11 +373,13 @@ function MonthView({
   rows,
   totalDays,
   monthKey,
+  onOpenCalendar,
 }: {
   members: UserResponse[];
   rows: AttendanceApiResponse[];
   totalDays: number;
   monthKey: string;
+  onOpenCalendar: (m: UserResponse) => void;
 }) {
   const byMember = useMemo(() => {
     const map = new Map<number, AttendanceApiResponse[]>();
@@ -391,7 +418,12 @@ function MonthView({
           </thead>
           <tbody>
             {byMember.map(({ member, s }) => (
-              <tr key={member.id} className="border-b border-gray-50 last:border-b-0 even:bg-gray-50/40">
+              <tr
+                key={member.id}
+                onClick={() => onOpenCalendar(member)}
+                title="View attendance calendar"
+                className="cursor-pointer border-b border-gray-50 last:border-b-0 even:bg-gray-50/40 hover:bg-cyan-50/40"
+              >
                 <td className="px-4 py-2.5">
                   <div className="flex items-center gap-2.5">
                     <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-cyan-50 text-xs font-semibold text-brand-accent">
@@ -401,6 +433,7 @@ function MonthView({
                       <div className="font-medium text-gray-800">{member.fullName}</div>
                       <div className="text-[11px] text-gray-400">{member.departmentName ?? "—"}</div>
                     </div>
+                    <CalendarDays size={14} className="ml-auto shrink-0 text-gray-300" />
                   </div>
                 </td>
                 <MusterCell code="P" value={s.present} />

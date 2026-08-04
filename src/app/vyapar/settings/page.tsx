@@ -4,29 +4,13 @@ import Link from "next/link";
 import { VyaparShell } from "@/components/vyapar/VyaparShell";
 import { usePartySettings } from "@/lib/usePartySettings";
 import { useItemSettings } from "@/lib/useItemSettings";
-import {
-  Boxes,
-  ChevronRight,
-  FileText,
-  Landmark,
-  Percent,
-  Printer,
-  Settings as SettingsIcon,
-  Users,
-} from "lucide-react";
+import { Boxes, ChevronRight, Printer, Users } from "lucide-react";
 
-/**
- * Vyapar Settings hub, mirroring the sections Vyapar groups its preferences under. Party and Item
- * are live; the rest are listed so the full surface is visible rather than hidden.
- */
+/** Vyapar Settings hub — the preference sections that are live in this ERP. */
 const SECTIONS = [
-  { key: "party", title: "Party", desc: "Grouping, shipping address, reminders and custom fields", href: "/vyapar/parties/settings", icon: Users, built: true },
-  { key: "item", title: "Item", desc: "Categories, wholesale price, barcode and stock tracking", href: "/vyapar/items/settings", icon: Boxes, built: true },
-  { key: "general", title: "General", desc: "Company profile, financial year and number format", href: null, icon: SettingsIcon, built: false },
-  { key: "transaction", title: "Transaction", desc: "Invoice numbering, due dates and payment terms", href: null, icon: FileText, built: false },
-  { key: "print", title: "Firm Profile", desc: "Business name, logo, GSTIN and address for every PDF", href: "/vyapar/settings/firm-profile", icon: Printer, built: true },
-  { key: "taxes", title: "Taxes & GST", desc: "GST slabs, HSN and place of supply defaults", href: null, icon: Percent, built: false },
-  { key: "accounting", title: "Accounting", desc: "Opening balances and closing-book rules", href: null, icon: Landmark, built: false },
+  { key: "party", title: "Party", desc: "Grouping, shipping address, reminders and custom fields", href: "/vyapar/parties/settings", icon: Users },
+  { key: "item", title: "Item", desc: "Categories, wholesale price, barcode and stock tracking", href: "/vyapar/items/settings", icon: Boxes },
+  { key: "print", title: "Firm Profile", desc: "Business name, logo, GSTIN and address for every PDF", href: "/vyapar/settings/firm-profile", icon: Printer },
 ];
 
 export default function VyaparSettingsPage() {
@@ -42,33 +26,22 @@ export default function VyaparSettingsPage() {
         </div>
 
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {SECTIONS.map((s) => {
-            const body = (
-              <>
-                <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${s.built ? "bg-cyan-50 text-brand-accent" : "bg-gray-100 text-gray-400"}`}>
-                  <s.icon size={18} />
-                </div>
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    <span className={`text-sm font-semibold ${s.built ? "text-gray-800" : "text-gray-500"}`}>{s.title}</span>
-                    {!s.built && <span className="rounded-full bg-gray-100 px-1.5 py-0.5 text-[9px] font-medium text-gray-400">soon</span>}
-                  </div>
-                  <p className="mt-0.5 text-xs text-gray-400">{s.desc}</p>
-                </div>
-                {s.built && <ChevronRight size={16} className="shrink-0 text-gray-300" />}
-              </>
-            );
-            const base = "flex items-start gap-3 rounded-xl border bg-white p-4 text-left transition-all duration-150";
-            return s.href ? (
-              <Link key={s.key} href={s.href} className={`${base} border-gray-200 hover:-translate-y-0.5 hover:border-brand-accent hover:shadow-sm active:scale-[0.99]`}>
-                {body}
-              </Link>
-            ) : (
-              <div key={s.key} className={`${base} cursor-not-allowed border-dashed border-gray-200`}>
-                {body}
+          {SECTIONS.map((s) => (
+            <Link
+              key={s.key}
+              href={s.href}
+              className="flex items-start gap-3 rounded-xl border border-gray-200 bg-white p-4 text-left transition-all duration-150 hover:-translate-y-0.5 hover:border-brand-accent hover:shadow-sm active:scale-[0.99]"
+            >
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-cyan-50 text-brand-accent">
+                <s.icon size={18} />
               </div>
-            );
-          })}
+              <div className="min-w-0 flex-1">
+                <span className="text-sm font-semibold text-gray-800">{s.title}</span>
+                <p className="mt-0.5 text-xs text-gray-400">{s.desc}</p>
+              </div>
+              <ChevronRight size={16} className="shrink-0 text-gray-300" />
+            </Link>
+          ))}
         </div>
 
         {/* Quick read-out of what's currently on, so Settings isn't just links. */}

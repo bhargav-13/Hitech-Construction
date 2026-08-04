@@ -11,11 +11,15 @@ import { RowMenu, RowMenuDivider, RowMenuItem } from "@/components/RowMenu";
 import { SortTh } from "@/components/vyapar/SortTh";
 import { useTableSort } from "@/lib/useTableSort";
 import { inr } from "@/lib/format";
-import { useVyaparBankId, usePaymentTypeOptions } from "@/lib/bankScope";
+import { usePaymentTypeOptions } from "@/lib/bankScope";
+import { useVyaparProjectId } from "@/lib/projectScope";
+import { useProjects } from "@/lib/useProjects";
 import { downloadPdf } from "@/lib/vyaparExport";
+import { ImportDialog } from "@/components/vyapar/ImportDialog";
+import { paymentInImportConfig, paymentOutImportConfig } from "@/lib/vyaparImportConfigs";
 import * as vyapar from "@/lib/vyaparApi";
 import type { Party, Payment } from "@/lib/vyaparApi";
-import { Download, FileText, Plus, Search, Trash2, Wallet } from "lucide-react";
+import { Download, FileText, Plus, Search, Trash2, Upload, Wallet } from "lucide-react";
 
 /**
  * Payment-In / Payment-Out workspace. Unlike an invoice, a payment moves money directly: a
@@ -31,7 +35,7 @@ export function PaymentWorkspace({
   title: string;
 }) {
   const params = useSearchParams();
-  const bankAccountId = useVyaparBankId();
+  const projectId = useVyaparProjectId();
   const isIn = direction === "IN";
   const [payments, setPayments] = useState<Payment[]>([]);
   const [parties, setParties] = useState<Party[]>([]);
@@ -39,14 +43,15 @@ export function PaymentWorkspace({
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
   const [creating, setCreating] = useState(false);
+  const [importing, setImporting] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
     setError("");
     try {
       const [pays, pty] = await Promise.all([
-        vyapar.getPayments(direction, bankAccountId),
-        vyapar.getParties(undefined, bankAccountId),
+        vyapar.getPayments(direction, projectId),
+        vyapar.getParties(undefined, projectId),
       ]);
       setPayments(pays);
       setParties(pty);
@@ -55,7 +60,7 @@ export function PaymentWorkspace({
     } finally {
       setLoading(false);
     }
-  }, [direction, bankAccountId]);
+  }, [direction, projectId]);
 
   useEffect(() => {
     load();
@@ -143,7 +148,13 @@ export function PaymentWorkspace({
             disabled={rows.length === 0}
             className="flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-600 transition-all duration-150 hover:bg-gray-50 active:scale-95 disabled:opacity-50"
           >
-            <FileText size={14} /> PDF
+            <FileText size={14} className="text-rose-600" /> PDF
+          </button>
+          <button
+            onClick={() => setImporting(true)}
+            className="flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-600 transition-all duration-150 hover:bg-gray-50 active:scale-95"
+          >
+            <Upload size={14} /> Import
           </button>
           <button
             onClick={() => setCreating(true)}
@@ -263,6 +274,14 @@ export function PaymentWorkspace({
           onSaved={() => { setCreating(false); load(); }}
         />
       )}
+
+      {importing && (
+        <ImportDialog
+          config={isIn ? paymentInImportConfig : paymentOutImportConfig}
+          onClose={() => setImporting(false)}
+          onImported={() => { setImporting(false); load(); }}
+        />
+      )}
     </div>
   );
 }
@@ -288,7 +307,9 @@ function PaymentForm({
   const [paymentDate, setPaymentDate] = useState(new Date().toISOString().slice(0, 10));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
-  const bankAccountId = useVyaparBankId();
+  const projectId = useVyaparProjectId();
+  const { projects } = useProjects();
+  const [selectedProjectId, setSelectedProjectId] = useState(projectId != null ? String(projectId) : "");
   const paymentTypeOptions = usePaymentTypeOptions();
 
   const selectedParty = parties.find((p) => String(p.id) === partyId) ?? null;
@@ -302,6 +323,10 @@ function PaymentForm({
       setError("Enter an amount greater than zero.");
       return;
     }
+    if (!selectedProjectId) {
+      setError("Select a project.");
+      return;
+    }
     setSaving(true);
     setError("");
     try {
@@ -313,7 +338,7 @@ function PaymentForm({
         mode,
         reference: reference || null,
         paymentDate,
-        bankAccountId: bankAccountId ?? null,
+        projectId: selectedProjectId ? Number(selectedProjectId) : null,
       });
       onSaved();
     } catch (err) {
@@ -328,6 +353,15 @@ function PaymentForm({
     <Drawer title={title} onClose={onClose} onSave={save} saveLabel={saving ? "Saving…" : "Save"}>
       <div className="space-y-4">
         {error && <div className="rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-600">{error}</div>}
+
+        <DrawerField label="Project" required>
+          <Select
+            value={selectedProjectId}
+            onChange={setSelectedProjectId}
+            placeholder="Select project"
+            options={[{ value: "", label: "Select project" }, ...projects.map((p) => ({ value: p.id, label: p.name }))]}
+          />
+        </DrawerField>
 
         <div>
           <DrawerField label="Party" required>

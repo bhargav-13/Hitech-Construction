@@ -7,9 +7,11 @@ import { DatePicker } from "@/components/DatePicker";
 import { Spinner } from "@/components/Spinner";
 import { inr } from "@/lib/format";
 import { exportRowsToCsv, downloadPdf } from "@/lib/vyaparExport";
+import { ImportDialog } from "@/components/vyapar/ImportDialog";
+import { loanAccountImportConfig } from "@/lib/vyaparImportConfigs";
 import * as vyapar from "@/lib/vyaparApi";
 import type { LoanAccount } from "@/lib/vyaparApi";
-import { FileSpreadsheet, FileText, Landmark, Plus } from "lucide-react";
+import { FileSpreadsheet, FileText, Landmark, Plus, Upload } from "lucide-react";
 
 /** Loan Accounts — outstanding principal, EMI and interest per lender. */
 export default function LoanAccountsPage() {
@@ -17,6 +19,7 @@ export default function LoanAccountsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [creating, setCreating] = useState(false);
+  const [importing, setImporting] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -65,7 +68,13 @@ export default function LoanAccountsPage() {
               disabled={loans.length === 0}
               className="flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-600 transition-all duration-150 hover:bg-gray-50 active:scale-95 disabled:opacity-50"
             >
-              <FileText size={14} /> PDF
+              <FileText size={14} className="text-rose-600" /> PDF
+            </button>
+            <button
+              onClick={() => setImporting(true)}
+              className="flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-600 transition-all duration-150 hover:bg-gray-50 active:scale-95"
+            >
+              <Upload size={14} /> Import
             </button>
             <button
               onClick={() => setCreating(true)}
@@ -133,6 +142,13 @@ export default function LoanAccountsPage() {
       </div>
 
       {creating && <LoanDialog onClose={() => setCreating(false)} onSaved={() => { setCreating(false); load(); }} />}
+      {importing && (
+        <ImportDialog
+          config={loanAccountImportConfig}
+          onClose={() => setImporting(false)}
+          onImported={() => { setImporting(false); load(); }}
+        />
+      )}
     </VyaparShell>
   );
 }

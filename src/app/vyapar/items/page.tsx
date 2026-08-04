@@ -17,7 +17,7 @@ import { inr } from "@/lib/format";
 import { exportRowsToCsv, printRows, downloadPdf } from "@/lib/vyaparExport";
 import { useItemSettings } from "@/lib/useItemSettings";
 import { useItemMasters, type ManagedUnit } from "@/lib/useItemMasters";
-import { useVyaparBankId } from "@/lib/bankScope";
+import { useVyaparProjectId } from "@/lib/projectScope";
 import * as vyapar from "@/lib/vyaparApi";
 import type { Item, ItemLedgerRow } from "@/lib/vyaparApi";
 import {
@@ -46,7 +46,7 @@ type Tab = (typeof TABS)[number];
 export default function ItemsPage() {
   const { settings } = useItemSettings();
   const { masters, addCategory, renameCategory, removeCategory, addUnit, updateUnit, removeUnit } = useItemMasters();
-  const bankAccountId = useVyaparBankId();
+  const projectId = useVyaparProjectId();
   const [tab, setTab] = useState<Tab>("PRODUCTS");
   const [items, setItems] = useState<Item[]>([]);
   const [selectedId, setSelectedId] = useState<number | null>(null);
@@ -70,13 +70,13 @@ export default function ItemsPage() {
     setLoading(true);
     setError("");
     try {
-      setItems(await vyapar.getItems(bankAccountId));
+      setItems(await vyapar.getItems(projectId));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Couldn't load items.");
     } finally {
       setLoading(false);
     }
-  }, [bankAccountId]);
+  }, [projectId]);
 
   useEffect(() => {
     load();
@@ -305,6 +305,7 @@ export default function ItemsPage() {
                   />
                   <RowMenuItem
                     icon={FileText}
+                    iconClassName="text-rose-600"
                     label="Download PDF"
                     onClick={() => {
                       close();
@@ -534,6 +535,7 @@ export default function ItemsPage() {
                             />
                             <RowMenuItem
                               icon={FileText}
+                              iconClassName="text-rose-600"
                               label="Download PDF"
                               onClick={() => {
                                 close();

@@ -103,6 +103,7 @@ export default function ChequesPage() {
                 <RowMenuItem icon={FileSpreadsheet} label="Export cheques" onClick={() => { close(); exportRowsToCsv("cheques", head, data); }} />
                 <RowMenuItem
                   icon={FileText}
+                  iconClassName="text-rose-600"
                   label="Download PDF"
                   onClick={() => {
                     close();

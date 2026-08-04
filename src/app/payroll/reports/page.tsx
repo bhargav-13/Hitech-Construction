@@ -1,8 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { PayrollShell } from "@/components/payroll/PayrollShell";
 import { PAYROLL_REPORT_GROUPS } from "@/lib/payrollConfig";
+import { loadReportContext, buildReport, type ReportContext } from "@/lib/payrollReports";
+import { exportRowsToCsv, downloadPdf } from "@/lib/vyaparExport";
 import {
   BarChart3,
   CalendarDays,
@@ -20,9 +22,35 @@ const GROUP_ICON: Record<string, React.ComponentType<{ size?: number; className?
 };
 
 /** Reports — the five report groups, searchable, with a generate/download action per report. */
+const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
+
 export default function ReportsPage() {
   const [q, setQ] = useState("");
   const query = q.trim().toLowerCase();
+
+  const [ctx, setCtx] = useState<ReportContext | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState("");
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    loadReportContext()
+      .then(setCtx)
+      .catch(() => setError("Couldn't load report data — check your connection."))
+      .finally(() => setLoading(false));
+  }, []);
+
+  const run = async (name: string, mode: "print" | "csv") => {
+    if (!ctx) return;
+    setBusy(name + mode);
+    try {
+      const r = buildReport(name, ctx);
+      if (mode === "csv") exportRowsToCsv(slug(name), r.head, r.rows);
+      else await downloadPdf(r.title, r.head, r.rows, { rightAlignFrom: r.rightAlignFrom });
+    } finally {
+      setBusy("");
+    }
+  };
 
   const groups = PAYROLL_REPORT_GROUPS.map((g) => ({
     ...g,
@@ -43,6 +71,9 @@ export default function ReportsPage() {
           </div>
         </div>
 
+        {error && <div className="rounded-lg bg-rose-50 px-4 py-2 text-sm text-rose-600">{error}</div>}
+        {loading && <div className="rounded-lg bg-cyan-50/60 px-4 py-2 text-sm text-brand-accent">Loading live data…</div>}
+
         {groups.map((g) => {
           const Icon = GROUP_ICON[g.icon] ?? BarChart3;
           return (
@@ -62,11 +93,19 @@ export default function ReportsPage() {
                       </div>
                     </div>
                     <div className="mt-3 flex items-center gap-2">
-                      <button className="flex items-center gap-1 rounded-lg bg-cyan-50 px-2.5 py-1 text-xs font-medium text-brand-accent transition-colors hover:bg-cyan-100">
-                        <BarChart3 size={12} /> Generate
+                      <button
+                        onClick={() => run(r.name, "print")}
+                        disabled={!ctx || busy !== ""}
+                        className="flex items-center gap-1 rounded-lg bg-cyan-50 px-2.5 py-1 text-xs font-medium text-brand-accent transition-colors hover:bg-cyan-100 disabled:opacity-50"
+                      >
+                        <BarChart3 size={12} /> {busy === r.name + "print" ? "Generating…" : "Generate PDF"}
                       </button>
-                      <button className="flex items-center gap-1 rounded-lg border border-gray-200 px-2.5 py-1 text-xs text-gray-500 transition-colors hover:bg-gray-50">
-                        <Download size={12} /> Export
+                      <button
+                        onClick={() => run(r.name, "csv")}
+                        disabled={!ctx || busy !== ""}
+                        className="flex items-center gap-1 rounded-lg border border-gray-200 px-2.5 py-1 text-xs text-gray-500 transition-colors hover:bg-gray-50 disabled:opacity-50"
+                      >
+                        <Download size={12} /> Export CSV
                       </button>
                     </div>
                   </div>

@@ -6,7 +6,6 @@ import { Select } from "@/components/Select";
 import { DatePicker } from "@/components/DatePicker";
 import { useItemSettings, DEFAULT_UNITS, TAX_RATES } from "@/lib/useItemSettings";
 import type { ManagedUnit } from "@/lib/useItemMasters";
-import { useVyaparBankId } from "@/lib/bankScope";
 import * as vyapar from "@/lib/vyaparApi";
 import type { Item } from "@/lib/vyaparApi";
 import { Barcode, ImagePlus, Plus, Search, X } from "lucide-react";
@@ -32,7 +31,6 @@ export function ItemDialog({
   onSaved: (saved: Item, again: boolean) => void;
 }) {
   const { settings } = useItemSettings();
-  const bankAccountId = useVyaparBankId();
   const [tab, setTab] = useState<Tab>("Pricing");
 
   const [isService, setIsService] = useState(existing?.isService ?? false);
@@ -75,7 +73,7 @@ export function ItemDialog({
     setError("");
     const body: Partial<Item> = {
       name: name.trim(),
-      bankAccountId: existing ? existing.bankAccountId : bankAccountId ?? null,
+      bankAccountId: existing ? existing.bankAccountId : null,
       hsn: hsn.trim() || null,
       itemCode: itemCode.trim() || null,
       unit: unit || "NONE",

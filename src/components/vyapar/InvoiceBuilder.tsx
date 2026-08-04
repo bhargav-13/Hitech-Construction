@@ -5,7 +5,9 @@ import { Drawer } from "@/components/Drawer";
 import { Select } from "@/components/Select";
 import { DatePicker } from "@/components/DatePicker";
 import { inr } from "@/lib/format";
-import { useVyaparBankId, usePaymentTypeOptions } from "@/lib/bankScope";
+import { usePaymentTypeOptions } from "@/lib/bankScope";
+import { useVyaparProjectId } from "@/lib/projectScope";
+import { useProjects } from "@/lib/useProjects";
 import * as vyapar from "@/lib/vyaparApi";
 import { STATES_OF_SUPPLY } from "@/lib/vyaparApi";
 import type { DocType, Invoice, Item, Party } from "@/lib/vyaparApi";
@@ -55,7 +57,8 @@ export function InvoiceBuilder({
   onClose: () => void;
   onSaved: () => void;
 }) {
-  const bankAccountId = useVyaparBankId();
+  const projectId = useVyaparProjectId();
+  const { projects } = useProjects();
   const paymentTypeOptions = usePaymentTypeOptions();
   const isPurchase = docType === "PURCHASE";
   // Estimates, proformas, sale orders and delivery challans are planning docs: they don't move stock
@@ -108,6 +111,10 @@ export function InvoiceBuilder({
   // Sales default to cash (fully received); purchases default to unpaid until a Paid amount is entered.
   const [isCash, setIsCash] = useState(existing?.isCash ?? docType !== "PURCHASE");
   const [partyId, setPartyId] = useState(existing?.partyId ? String(existing.partyId) : "");
+  // Which construction project this document belongs to — defaults to the header scope, editable.
+  const [selectedProjectId, setSelectedProjectId] = useState(
+    existing?.projectId != null ? String(existing.projectId) : projectId != null ? String(projectId) : ""
+  );
   const [phone, setPhone] = useState("");
   const [invoicePrefix, setInvoicePrefix] = useState(existing?.invoicePrefix ?? "");
   const [invoiceNo, setInvoiceNo] = useState(existing?.invoiceNo ?? "");
@@ -223,12 +230,17 @@ export function InvoiceBuilder({
       setError("Select a party.");
       return;
     }
+    // Every document must be booked against a project.
+    if (!selectedProjectId) {
+      setError("Select a project.");
+      return;
+    }
     setSaving(true);
     setError("");
     try {
       const body: vyapar.InvoiceInput = {
         docType,
-        bankAccountId: existing ? existing.bankAccountId : bankAccountId ?? null,
+        projectId: selectedProjectId ? Number(selectedProjectId) : null,
         invoiceNo: invoiceNo || undefined,
         invoicePrefix: invoicePrefix || null,
         partyId: partyId ? Number(partyId) : null,
@@ -306,6 +318,14 @@ export function InvoiceBuilder({
         {/* Party on the left, document meta on the right */}
         <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
           <div className="space-y-3">
+            <Field label="Project *">
+              <Select
+                value={selectedProjectId}
+                onChange={setSelectedProjectId}
+                placeholder="Select project"
+                options={[{ value: "", label: "Select project" }, ...projects.map((p) => ({ value: p.id, label: p.name }))]}
+              />
+            </Field>
             <div>
               <Field label={partyRequired ? "Party *" : isPurchase ? (isCash ? "Supplier" : "Supplier *") : isCash ? "Customer" : "Customer *"}>
                 <Select

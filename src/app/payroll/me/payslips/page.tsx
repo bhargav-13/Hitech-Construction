@@ -5,7 +5,7 @@ import { Spinner } from "@/components/Spinner";
 import { useMyPayslips } from "@/lib/usePayrollLive";
 import type { PayslipApi } from "@/lib/api";
 import { inr } from "@/lib/format";
-import { downloadPdf } from "@/lib/vyaparExport";
+import { downloadPayslip } from "@/lib/payslipExport";
 import { Download, Wallet } from "lucide-react";
 
 /**
@@ -23,23 +23,7 @@ export default function MyPayslipsPage() {
   const { slips, loading, error } = useMyPayslips();
 
   function slipPdf(p: PayslipApi) {
-    downloadPdf(
-      `Payslip — ${p.memberName}`,
-      ["Component", "Amount"],
-      [
-        ["Member", p.memberName],
-        ["Month", fmtMonth(p.month)],
-        ["Payable Days", `${p.payableDays} / ${p.totalDays}`],
-        ["Gross Earnings", inr(p.gross)],
-        ["PF", `- ${inr(p.pf)}`],
-        ["ESIC", `- ${inr(p.esic)}`],
-        ["Professional Tax", `- ${inr(p.pt)}`],
-        ["Loan EMI", `- ${inr(p.loanEmi)}`],
-        ["Reimbursements", `+ ${inr(p.reimbursements)}`],
-        ["Net Pay", inr(p.net)],
-      ],
-      { rightAlignFrom: 1 }
-    );
+    downloadPayslip(p, p.memberName);
   }
 
   return (

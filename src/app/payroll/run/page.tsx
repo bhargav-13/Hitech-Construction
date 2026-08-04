@@ -4,11 +4,13 @@ import { useMemo, useState } from "react";
 import { PayrollShell, PayrollEmpty, StatCard } from "@/components/payroll/PayrollShell";
 import { Spinner } from "@/components/Spinner";
 import { usePayrollRuns, usePayrollRun } from "@/lib/usePayrollLive";
-import { ApiError } from "@/lib/api";
+import { ApiError, editPayslip } from "@/lib/api";
+import type { PayslipApi } from "@/lib/api";
 import { inr } from "@/lib/format";
 import { exportRowsToCsv } from "@/lib/vyaparExport";
+import { downloadPayslip } from "@/lib/payslipExport";
 import {
-  ChevronLeft, ChevronRight, CircleCheck, FileSpreadsheet, Lock, Play, RefreshCw, ShieldCheck, Unlock, Users, Wallet,
+  ChevronLeft, ChevronRight, CircleCheck, Download, FileSpreadsheet, Lock, Pencil, Play, RefreshCw, ShieldCheck, Unlock, Users, Wallet, X,
 } from "lucide-react";
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -28,6 +30,7 @@ export default function PayrollRunPage() {
   const { run, loading, error, refresh: refreshRun } = usePayrollRun(monthKey);
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState("");
+  const [editing, setEditing] = useState<PayslipApi | null>(null);
 
   const step = (dir: 1 | -1) => {
     let m = monthIdx + dir, y = year;
@@ -193,6 +196,7 @@ export default function PayrollRunPage() {
                   <th className="px-4 py-2 text-right font-medium">Loan EMI</th>
                   <th className="px-4 py-2 text-right font-medium">Reimb.</th>
                   <th className="px-4 py-2 text-right font-medium">Net Pay</th>
+                  <th className="px-4 py-2 text-right font-medium"></th>
                 </tr>
               </thead>
               <tbody>
@@ -214,6 +218,18 @@ export default function PayrollRunPage() {
                     <td className="px-4 py-2.5 text-right text-gray-500">{Number(p.loanEmi) > 0 ? `−${inr(p.loanEmi)}` : "—"}</td>
                     <td className="px-4 py-2.5 text-right text-emerald-600">{Number(p.reimbursements) > 0 ? `+${inr(p.reimbursements)}` : "—"}</td>
                     <td className="px-4 py-2.5 text-right font-semibold text-gray-900">{inr(p.net)}</td>
+                    <td className="px-2 py-2.5">
+                      <div className="flex items-center justify-end gap-1">
+                        {run.status === "DRAFT" && (
+                          <button onClick={() => setEditing(p)} title="Edit payslip" className="rounded-md p-1.5 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-700">
+                            <Pencil size={14} />
+                          </button>
+                        )}
+                        <button onClick={() => downloadPayslip(p, p.memberName)} title="Download payslip" className="rounded-md p-1.5 text-gray-400 transition-colors hover:bg-cyan-50 hover:text-brand-accent">
+                          <Download size={14} />
+                        </button>
+                      </div>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -247,7 +263,77 @@ export default function PayrollRunPage() {
           </div>
         )}
       </div>
+
+      {editing && (
+        <EditPayslipModal
+          slip={editing}
+          month={monthKey}
+          onClose={() => setEditing(null)}
+          onSaved={() => { setEditing(null); refreshRun(); refreshList(); }}
+        />
+      )}
     </PayrollShell>
+  );
+}
+
+/** Adjust a DRAFT payslip's gross and custom deductions; net recomputes on the backend. */
+function EditPayslipModal({
+  slip, month, onClose, onSaved,
+}: {
+  slip: PayslipApi;
+  month: string;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [gross, setGross] = useState(slip.gross);
+  const [otherDeductions, setOtherDeductions] = useState(slip.otherDeductions);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const net = Math.max(0, Number(gross) - Number(slip.pf) - Number(slip.esic) - Number(slip.pt) - Number(otherDeductions) - Number(slip.loanEmi) + Number(slip.reimbursements));
+
+  async function save() {
+    setSaving(true);
+    setError("");
+    try {
+      await editPayslip(month, slip.userId, { gross: Number(gross) || 0, otherDeductions: Number(otherDeductions) || 0 });
+      onSaved();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Couldn't save this payslip.");
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+      <div className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
+        <div className="mb-4 flex items-center justify-between">
+          <h3 className="text-base font-semibold text-gray-800">Edit payslip — {slip.memberName}</h3>
+          <button onClick={onClose} aria-label="Close" className="rounded-md p-1.5 text-gray-400 hover:bg-gray-100"><X size={18} /></button>
+        </div>
+        {error && <div className="mb-3 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-600">{error}</div>}
+        <div className="space-y-3">
+          <label className="block">
+            <span className="mb-1 block text-xs font-medium text-gray-500">Gross Salary</span>
+            <input type="number" value={gross} onChange={(e) => setGross(Number(e.target.value))} className="input w-full" />
+          </label>
+          <label className="block">
+            <span className="mb-1 block text-xs font-medium text-gray-500">Other Deductions</span>
+            <input type="number" value={otherDeductions} onChange={(e) => setOtherDeductions(Number(e.target.value))} className="input w-full" />
+          </label>
+          <div className="flex items-center justify-between rounded-lg bg-gray-50 px-3 py-2 text-sm">
+            <span className="text-gray-500">Net Pay (auto)</span>
+            <span className="font-semibold text-gray-900">{inr(net)}</span>
+          </div>
+          <p className="text-[11px] text-gray-400">PF, ESIC, PT, loan EMI and reimbursements are computed by the run; edit those via the member&apos;s salary components.</p>
+        </div>
+        <div className="mt-4 flex justify-end gap-2">
+          <button onClick={onClose} className="rounded-lg px-4 py-2 text-sm font-medium text-gray-500 hover:text-gray-800">Cancel</button>
+          <button onClick={save} disabled={saving} className="rounded-lg bg-brand-accent px-4 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50">
+            {saving ? "Saving…" : "Save"}
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 

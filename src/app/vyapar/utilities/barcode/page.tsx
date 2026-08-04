@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { VyaparShell } from "@/components/vyapar/VyaparShell";
 import { Spinner } from "@/components/Spinner";
 import { Select } from "@/components/Select";
-import { useVyaparBankId } from "@/lib/bankScope";
+import { useVyaparProjectId } from "@/lib/projectScope";
 import * as vyapar from "@/lib/vyaparApi";
 import type { Item } from "@/lib/vyaparApi";
 import { inr } from "@/lib/format";
@@ -15,7 +15,7 @@ import { Barcode, Printer, Search } from "lucide-react";
  * Barcodes are drawn as Code-128-style bars from the item code so labels scan on a real reader.
  */
 export default function BarcodeGeneratorPage() {
-  const bankAccountId = useVyaparBankId();
+  const projectId = useVyaparProjectId();
   const [items, setItems] = useState<Item[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -26,11 +26,11 @@ export default function BarcodeGeneratorPage() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      setItems((await vyapar.getItems(bankAccountId)).filter((i) => !i.isService));
+      setItems((await vyapar.getItems(projectId)).filter((i) => !i.isService));
     } finally {
       setLoading(false);
     }
-  }, [bankAccountId]);
+  }, [projectId]);
 
   useEffect(() => {
     load();
