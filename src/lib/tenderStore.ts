@@ -18,6 +18,45 @@ import type {
 import { MILESTONE_STEPS, DOCUMENT_STEPS } from "./tenderTypes";
 import { taddMonths, tiso } from "./tenderHelpers";
 import { TENDER_SEED, MATERIAL_SEED, MILESTONE_SEED, DOCUMENT_SEED, HARDCOPY_SEED } from "./tenderSeed";
+import {
+  listTenders,
+  createTenderApi,
+  updateTenderApi,
+  deleteTenderApi,
+  listMilestonesApi,
+  createMilestoneApi,
+  updateMilestoneApi,
+  deleteMilestoneApi,
+  listDocumentsApi,
+  createDocumentApi,
+  updateDocumentApi,
+  deleteDocumentApi,
+  listHardcopyApi,
+  createHardcopyApi,
+  updateHardcopyApi,
+  deleteHardcopyApi,
+  listMaterialsApi,
+} from "./tenderApi";
+
+/** Log-and-swallow: backend persistence is best-effort so the UI never blocks on it. */
+const warn = (msg: string) => (e: unknown) => console.warn(msg, e);
+
+/** Push the current state of a record to the backend (best-effort). No-op in local/offline mode. */
+const persistTender = (get: () => TenderState, id: string) => {
+  if (!get().backend) return;
+  const t = get().tenders.find((x) => x.id === id);
+  if (t) updateTenderApi(id, t).catch(warn("Tender update failed to sync"));
+};
+const persistMilestone = (get: () => TenderState, id: string) => {
+  if (!get().backend) return;
+  const m = get().milestones.find((x) => x.id === id);
+  if (m) updateMilestoneApi(id, m).catch(warn("Milestone update failed to sync"));
+};
+const persistDocument = (get: () => TenderState, id: string) => {
+  if (!get().backend) return;
+  const d = get().documents.find((x) => x.id === id);
+  if (d) updateDocumentApi(id, d).catch(warn("Document update failed to sync"));
+};
 
 /**
  * UI-first store for the Tender module (backend comes later, same as Payroll). Seeded from the
@@ -64,6 +103,10 @@ interface TenderState {
   handoffs: TenderHandoff[];
   /** Last reversible mutation. Cleared once consumed or superseded. */
   lastUndo: UndoEntry | null;
+  /** True once data has been loaded from the backend — mutations then write through to the API. */
+  backend: boolean;
+  /** Load tenders + trackers from the backend, replacing seed/local data. No-op (stays local) if it fails. */
+  hydrateFromBackend: () => Promise<void>;
 
   /** Move a tender to a new stage (e.g. shortlist from research, or mark applied). */
   setStage: (id: string, stage: TenderStage, status?: TenderStatus | null, patch?: Partial<Tender>) => void;
@@ -146,24 +189,45 @@ export const useTenderStore = create<TenderState>()(
       customLossReasons: [],
       handoffs: [],
       lastUndo: null,
+      backend: false,
 
-      setStage: (id, stage, status, patch) =>
+      hydrateFromBackend: async () => {
+        try {
+          const [tenders, milestones, documents, hardcopy, materials] = await Promise.all([
+            listTenders(),
+            listMilestonesApi(),
+            listDocumentsApi(),
+            listHardcopyApi(),
+            listMaterialsApi(),
+          ]);
+          set({ tenders, milestones, documents, hardcopy, materials, backend: true, lastUndo: null });
+        } catch (e) {
+          // Backend unreachable / not logged in — keep the seeded local data (offline-friendly).
+          warn("Tender backend unavailable — using local data")(e);
+        }
+      },
+
+      setStage: (id, stage, status, patch) => {
         set((s) => ({
           lastUndo: snapshot(s.tenders, new Set([id]), "Stage change"),
           tenders: s.tenders.map((t) =>
             t.id === id ? { ...t, ...patch, stage, status: status ?? t.status } : t,
           ),
-        })),
+        }));
+        persistTender(get, id);
+      },
 
-      setStatus: (id, status, patch) =>
+      setStatus: (id, status, patch) => {
         set((s) => ({
           lastUndo: snapshot(s.tenders, new Set([id]), "Status change"),
           tenders: s.tenders.map((t) =>
             t.id === id ? { ...t, ...patch, status, stage: STATUS_TO_STAGE[status] } : t,
           ),
-        })),
+        }));
+        persistTender(get, id);
+      },
 
-      setStageBulk: (ids, stage, status, patch) =>
+      setStageBulk: (ids, stage, status, patch) => {
         set((s) => {
           const idSet = new Set(ids);
           return {
@@ -172,7 +236,9 @@ export const useTenderStore = create<TenderState>()(
               idSet.has(t.id) ? { ...t, ...patch, stage, status: status ?? t.status } : t,
             ),
           };
-        }),
+        });
+        if (get().backend) ids.forEach((id) => persistTender(get, id));
+      },
 
       handoffPayloadFor: (id) => {
         const t = get().tenders.find((x) => x.id === id);
@@ -209,19 +275,31 @@ export const useTenderStore = create<TenderState>()(
           };
         }),
 
-      addTender: (t) => set((s) => ({ tenders: [t, ...s.tenders] })),
+      addTender: (t) => {
+        set((s) => ({ tenders: [t, ...s.tenders] }));
+        if (get().backend) {
+          createTenderApi(t)
+            // Swap the temp local id for the backend-assigned one so later edits address the right row.
+            .then((saved) => set((s) => ({ tenders: s.tenders.map((x) => (x.id === t.id ? saved : x)) })))
+            .catch(warn("Tender create failed to sync"));
+        }
+      },
 
-      updateTender: (id, patch) =>
+      updateTender: (id, patch) => {
         set((s) => ({
           lastUndo: snapshot(s.tenders, new Set([id]), "Edit"),
           tenders: s.tenders.map((t) => (t.id === id ? { ...t, ...patch } : t)),
-        })),
+        }));
+        persistTender(get, id);
+      },
 
-      removeTender: (id) =>
+      removeTender: (id) => {
         set((s) => ({
           lastUndo: snapshot(s.tenders, new Set([id]), "Delete"),
           tenders: s.tenders.filter((t) => t.id !== id),
-        })),
+        }));
+        if (get().backend) deleteTenderApi(id).catch(warn("Tender delete failed to sync"));
+      },
 
       importTenders: (rows, mode) => {
         const result: ImportResult = { added: 0, updated: 0, skipped: 0 };
@@ -253,13 +331,15 @@ export const useTenderStore = create<TenderState>()(
         return result;
       },
 
-      toggleMilestone: (id, key) =>
+      toggleMilestone: (id, key) => {
         set((s) => ({
           // Custom steps start undefined on existing rows, so treat anything but `true` as "off".
           milestones: s.milestones.map((m) => (m.id === id ? { ...m, [key]: m[key] !== true } : m)),
-        })),
+        }));
+        persistMilestone(get, id);
+      },
 
-      toggleDocument: (id, key, copy, raIndex) =>
+      toggleDocument: (id, key, copy, raIndex) => {
         set((s) => ({
           documents: s.documents.map((d) => {
             if (d.id !== id) return d;
@@ -271,7 +351,9 @@ export const useTenderStore = create<TenderState>()(
             const pair = (d[key] as DocPair | undefined) ?? { soft: false, hard: false };
             return { ...d, [key]: { ...pair, [copy]: !pair[copy] } };
           }),
-        })),
+        }));
+        persistDocument(get, id);
+      },
 
       addMilestoneStep: (label, atIndex) =>
         set((s) => ({
@@ -291,27 +373,68 @@ export const useTenderStore = create<TenderState>()(
       renameDocumentStep: (key, label) =>
         set((s) => ({ documentSteps: s.documentSteps.map((st) => (st.key === key ? { ...st, label } : st)) })),
 
-      addRaBill: (id) =>
+      addRaBill: (id) => {
         set((s) => ({
           documents: s.documents.map((d) =>
             d.id === id ? { ...d, raBills: [...d.raBills, { soft: false, hard: false }] } : d,
           ),
-        })),
+        }));
+        persistDocument(get, id);
+      },
 
-      addMilestone: (m) => set((s) => ({ milestones: [{ ...m }, ...s.milestones] })),
-      updateMilestone: (id, patch) =>
-        set((s) => ({ milestones: s.milestones.map((m) => (m.id === id ? { ...m, ...patch } : m)) })),
-      removeMilestone: (id) => set((s) => ({ milestones: s.milestones.filter((m) => m.id !== id) })),
+      addMilestone: (m) => {
+        set((s) => ({ milestones: [{ ...m }, ...s.milestones] }));
+        if (get().backend) {
+          createMilestoneApi(m)
+            .then((saved) => set((s) => ({ milestones: s.milestones.map((x) => (x.id === m.id ? saved : x)) })))
+            .catch(warn("Milestone create failed to sync"));
+        }
+      },
+      updateMilestone: (id, patch) => {
+        set((s) => ({ milestones: s.milestones.map((m) => (m.id === id ? { ...m, ...patch } : m)) }));
+        persistMilestone(get, id);
+      },
+      removeMilestone: (id) => {
+        set((s) => ({ milestones: s.milestones.filter((m) => m.id !== id) }));
+        if (get().backend) deleteMilestoneApi(id).catch(warn("Milestone delete failed to sync"));
+      },
 
-      addDocument: (d) => set((s) => ({ documents: [{ ...d }, ...s.documents] })),
-      updateDocument: (id, patch) =>
-        set((s) => ({ documents: s.documents.map((d) => (d.id === id ? { ...d, ...patch } : d)) })),
-      removeDocument: (id) => set((s) => ({ documents: s.documents.filter((d) => d.id !== id) })),
+      addDocument: (d) => {
+        set((s) => ({ documents: [{ ...d }, ...s.documents] }));
+        if (get().backend) {
+          createDocumentApi(d)
+            .then((saved) => set((s) => ({ documents: s.documents.map((x) => (x.id === d.id ? saved : x)) })))
+            .catch(warn("Document create failed to sync"));
+        }
+      },
+      updateDocument: (id, patch) => {
+        set((s) => ({ documents: s.documents.map((d) => (d.id === id ? { ...d, ...patch } : d)) }));
+        persistDocument(get, id);
+      },
+      removeDocument: (id) => {
+        set((s) => ({ documents: s.documents.filter((d) => d.id !== id) }));
+        if (get().backend) deleteDocumentApi(id).catch(warn("Document delete failed to sync"));
+      },
 
-      addHardcopy: (h) => set((s) => ({ hardcopy: [{ ...h }, ...s.hardcopy] })),
-      updateHardcopy: (id, patch) =>
-        set((s) => ({ hardcopy: s.hardcopy.map((h) => (h.id === id ? { ...h, ...patch } : h)) })),
-      removeHardcopy: (id) => set((s) => ({ hardcopy: s.hardcopy.filter((h) => h.id !== id) })),
+      addHardcopy: (h) => {
+        set((s) => ({ hardcopy: [{ ...h }, ...s.hardcopy] }));
+        if (get().backend) {
+          createHardcopyApi(h)
+            .then((saved) => set((s) => ({ hardcopy: s.hardcopy.map((x) => (x.id === h.id ? saved : x)) })))
+            .catch(warn("Hardcopy create failed to sync"));
+        }
+      },
+      updateHardcopy: (id, patch) => {
+        set((s) => ({ hardcopy: s.hardcopy.map((h) => (h.id === id ? { ...h, ...patch } : h)) }));
+        if (get().backend) {
+          const h = get().hardcopy.find((x) => x.id === id);
+          if (h) updateHardcopyApi(id, h).catch(warn("Hardcopy update failed to sync"));
+        }
+      },
+      removeHardcopy: (id) => {
+        set((s) => ({ hardcopy: s.hardcopy.filter((h) => h.id !== id) }));
+        if (get().backend) deleteHardcopyApi(id).catch(warn("Hardcopy delete failed to sync"));
+      },
 
       addLossReason: (label) =>
         set((s) => {

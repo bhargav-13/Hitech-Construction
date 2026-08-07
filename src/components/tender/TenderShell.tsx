@@ -1,11 +1,12 @@
 "use client";
 
-import { Suspense, useMemo } from "react";
+import { Suspense, useEffect, useMemo } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { AppShell } from "@/components/AppShell";
 import { useUiStore } from "@/lib/uiStore";
 import { useTenderStore } from "@/lib/tenderStore";
+import { getAccessToken } from "@/lib/api";
 import { dueSoonCount, exposure } from "@/lib/tenderMetrics";
 import { TENDER_NAV } from "@/lib/tenderConfig";
 import type { TenderNavNode } from "@/lib/tenderConfig";
@@ -50,6 +51,14 @@ export function TenderShell({ children }: { children: React.ReactNode }) {
   const railCollapsed = useUiStore((s) => s.tenderRailCollapsed);
   const toggleRail = useUiStore((s) => s.toggleTenderRail);
   const tenders = useTenderStore((s) => s.tenders);
+  const backend = useTenderStore((s) => s.backend);
+  const hydrateFromBackend = useTenderStore((s) => s.hydrateFromBackend);
+
+  // Load real tender data from the backend once per session. Falls back to the seeded local data if
+  // the backend is unreachable or the user isn't authenticated (hydrate swallows the error).
+  useEffect(() => {
+    if (!backend && getAccessToken()) void hydrateFromBackend();
+  }, [backend, hydrateFromBackend]);
 
   const badges = useMemo(() => {
     const recoverable = exposure(tenders).emdRecoverable;

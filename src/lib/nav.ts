@@ -32,8 +32,7 @@ export const NAV_BREAK_AFTER = new Set(["Report", "Team Schedule", "Payroll", "A
 // user's role carries "<MODULE>:VIEW" — so e.g. a user without DASHBOARD:VIEW never sees Dashboard.
 export const NAV_MODULE: Record<string, string> = {
   "/": "DASHBOARD",
-  // "/tender": "TENDER",  // TODO: gate once the backend defines the TENDER:VIEW permission.
-  //                       // Left unmapped for now so the UI-first module is visible to everyone.
+  "/tender": "TENDER", // Backend defines TENDER:* (V36); nav now gated on TENDER:VIEW.
   "/report": "REPORT",
   "/project": "PROJECT",
   "/taskopad": "TASKOPAD",
