@@ -52,7 +52,10 @@ export default function AttendancePage() {
     return { from: `${year}-${pad(monthIdx + 1)}-01`, to: `${year}-${pad(monthIdx + 1)}-${pad(last)}`, totalDays: last };
   }, [view, date, year, monthIdx]);
 
-  const { rows, loading, error, refresh } = useMuster(range.from, range.to);
+  // `ready` stays true through post-edit revalidations, so marking attendance keeps the table on
+  // screen instead of flashing the full-page loader — that flicker is what made "Mark all present"
+  // feel laggy. A genuine date/month switch flips it false and shows the loader again.
+  const { rows, loading, ready: musterReady, error, refresh } = useMuster(range.from, range.to);
 
   useEffect(() => {
     getUsers(0, 200).then((r) => { setMembers(r.content.filter((u) => u.onPayroll)); setMembersLoading(false); }).catch(() => setMembersLoading(false));
@@ -125,7 +128,7 @@ export default function AttendancePage() {
           <div className="w-44"><Select value={dept} onChange={setDept} options={[{ value: "all", label: "All departments" }, ...DEPARTMENTS.map((d) => ({ value: d, label: d }))]} /></div>
         </div>
 
-        {loading || membersLoading ? (
+        {(loading && !musterReady) || membersLoading ? (
           <div className="flex items-center justify-center gap-2 rounded-xl border border-dashed border-gray-300 bg-white py-16 text-sm text-gray-400">
             <Spinner size={16} className="text-brand-accent" /> Loading…
           </div>
@@ -191,17 +194,19 @@ function DayView({
     return s;
   }, [members, byUser]);
 
-  async function mark(userId: number, patch: Partial<AttendanceApiResponse>) {
+  type EditBody = {
+    userId: number;
+    date: string;
+    code?: AttendanceCodeApi;
+    inTime?: string | null;
+    outTime?: string | null;
+    overtimeHours?: number;
+    fineHours?: number;
+  };
+
+  function buildBody(userId: number, patch: Partial<AttendanceApiResponse>): EditBody {
     const existing = byUser.get(userId);
-    const body: {
-      userId: number;
-      date: string;
-      code?: AttendanceCodeApi;
-      inTime?: string | null;
-      outTime?: string | null;
-      overtimeHours?: number;
-      fineHours?: number;
-    } = {
+    const body: EditBody = {
       userId,
       date,
       code: patch.code ?? existing?.code,
@@ -212,16 +217,34 @@ function DayView({
     };
     if (patch.code === "P" && !body.inTime) { body.inTime = "09:00"; body.outTime = "18:00"; }
     if (patch.code === "A") { body.inTime = null; body.outTime = null; body.overtimeHours = 0; }
+    return body;
+  }
+
+  async function mark(userId: number, patch: Partial<AttendanceApiResponse>) {
     try {
-      await editAttendance(body);
+      await editAttendance(buildBody(userId, patch));
       await refresh();
     } catch (err) {
       setActionError(err instanceof ApiError ? err.message : "Unable to save this change.");
     }
   }
 
+  const [bulkBusy, setBulkBusy] = useState(false);
+
+  // Fire every edit, then refresh once at the end — the old version refreshed after each member,
+  // which re-rendered the whole table N times and made the button feel laggy.
   async function bulkMarkPresent() {
-    for (const m of members) await mark(m.id, { code: "P" });
+    if (bulkBusy) return;
+    setBulkBusy(true);
+    setActionError("");
+    try {
+      await Promise.all(members.map((m) => editAttendance(buildBody(m.id, { code: "P" }))));
+      await refresh();
+    } catch (err) {
+      setActionError(err instanceof ApiError ? err.message : "Unable to mark all present.");
+    } finally {
+      setBulkBusy(false);
+    }
   }
 
   const head = ["Name", "Email", "Department", "Status", "In", "Out", "OT", "Fine"];
@@ -247,8 +270,8 @@ function DayView({
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
-        <button onClick={bulkMarkPresent} className="flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-600 transition-all hover:bg-gray-50 active:scale-95">
-          <CheckCheck size={14} /> Mark all present
+        <button onClick={bulkMarkPresent} disabled={bulkBusy} className="flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-600 transition-all hover:bg-gray-50 active:scale-95 disabled:cursor-not-allowed disabled:opacity-60">
+          {bulkBusy ? <Spinner size={14} className="text-brand-accent" /> : <CheckCheck size={14} />} {bulkBusy ? "Marking…" : "Mark all present"}
         </button>
         <button onClick={() => exportRowsToCsv(`attendance-${date}`, head, data)} className="flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-600 hover:bg-gray-50">
           <FileSpreadsheet size={14} /> CSV

@@ -74,6 +74,8 @@ export interface Tender {
   /** Parsed from `duration` ("9 months" → 9) so completion dates can be derived. */
   durationMonths?: number | null;
   deadline?: string | null;
+  /** Next chase date on this tender — colour-coded by how far off it is (see followUpTone). */
+  nextFollowUp?: string | null;
   dueDate?: string | null;
   submissionDate?: string | null;
   hardcopyDue?: string | null;

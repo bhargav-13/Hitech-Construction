@@ -105,6 +105,43 @@ export function deadlineLabel(value?: string | null): string {
   return `${n}d left`;
 }
 
+/* ---------- follow-up ---------- */
+
+export type FollowUpTone = "overdue" | "urgent" | "soon" | "later" | "none";
+
+/**
+ * How pressing the next follow-up is, for a colour-coded badge:
+ *   overdue (past)     → red
+ *   urgent  (< 5 days) → orange
+ *   soon    (5–15 days)→ yellow
+ *   later   (> 15 days)→ green
+ */
+export function followUpTone(value?: string | null): FollowUpTone {
+  const n = tdays(value);
+  if (n == null) return "none";
+  if (n < 0) return "overdue";
+  if (n < 5) return "urgent";
+  if (n <= 15) return "soon";
+  return "later";
+}
+
+export const FOLLOWUP_TONE_CLASS: Record<FollowUpTone, string> = {
+  overdue: "bg-rose-50 text-rose-700 ring-rose-600/20",
+  urgent: "bg-orange-50 text-orange-700 ring-orange-600/20",
+  soon: "bg-amber-50 text-amber-700 ring-amber-600/20",
+  later: "bg-emerald-50 text-emerald-700 ring-emerald-600/20",
+  none: "bg-gray-50 text-gray-400 ring-gray-200",
+};
+
+/** "Overdue 3d" / "Today" / "In 8d" / "—". */
+export function followUpLabel(value?: string | null): string {
+  const n = tdays(value);
+  if (n == null) return "—";
+  if (n < 0) return `Overdue ${Math.abs(n)}d`;
+  if (n === 0) return "Today";
+  return `In ${n}d`;
+}
+
 /* ---------- parsers (shared by the seed generator's TS side, the form and the Excel importer) ---------- */
 
 /** "9 months" | "12 MONTHS" | "1 year" → month count. */

@@ -22,6 +22,9 @@ import {
   DEADLINE_TONE_CLASS,
   deadlineLabel,
   deadlineTone,
+  FOLLOWUP_TONE_CLASS,
+  followUpLabel,
+  followUpTone,
   tdate,
   tiso,
   tmoney,
@@ -236,8 +239,9 @@ export function TenderDetailDrawer({
         </Section>
 
         <Section title="Schedule">
-          <Field label="Deadline">
-            <DateWithBadge value={t.deadline} />
+          <Field label="Deadline">{tdate(t.deadline)}</Field>
+          <Field label="Next Follow Up">
+            <FollowUpBadge value={t.nextFollowUp} />
           </Field>
           <Field label="Duration">
             {tval(t.duration)}
@@ -390,6 +394,21 @@ function DateWithBadge({ value }: { value?: string | null }) {
       {tone !== "none" && tone !== "ok" && (
         <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold ring-1 ring-inset ${DEADLINE_TONE_CLASS[tone]}`}>
           {deadlineLabel(value)}
+        </span>
+      )}
+    </span>
+  );
+}
+
+/** Next follow-up date with a colour-coded, days-away badge (<5 red, 5–15 yellow, >15 green). */
+function FollowUpBadge({ value }: { value?: string | null }) {
+  const tone = followUpTone(value);
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      {tdate(value)}
+      {tone !== "none" && (
+        <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold ring-1 ring-inset ${FOLLOWUP_TONE_CLASS[tone]}`}>
+          {followUpLabel(value)}
         </span>
       )}
     </span>

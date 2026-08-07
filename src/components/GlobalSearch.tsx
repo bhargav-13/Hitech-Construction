@@ -66,8 +66,9 @@ export function GlobalSearch() {
           type: "Task" as const,
           title: t.title,
           subtitle: [t.code, t.clientName].filter(Boolean).join(" · "),
-          href: `/taskopad/tasks`,
-          keywords: `${t.title} ${t.code} ${t.clientName ?? ""}`.toLowerCase(),
+          // Deep-link with ?task=<id> so the Tasks page opens this task's drawer on arrival.
+          href: `/taskopad/tasks?task=${t.id}`,
+          keywords: `${t.title} ${t.code} ${t.id} ${t.clientName ?? ""}`.toLowerCase(),
         })),
         ...usePayrollStore.getState().employees.map((e) => ({
           key: `s-${e.id}`,

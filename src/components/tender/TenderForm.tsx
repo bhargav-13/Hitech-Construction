@@ -221,6 +221,9 @@ export function TenderForm({
           <DrawerField label="Deadline">
             <DatePicker value={f.deadline ?? ""} onChange={(v) => set({ deadline: v })} />
           </DrawerField>
+          <DrawerField label="Next Follow Up">
+            <DatePicker value={f.nextFollowUp ?? ""} onChange={(v) => set({ nextFollowUp: v })} />
+          </DrawerField>
           <DrawerField label="Hardcopy Due">
             <DatePicker value={f.hardcopyDue ?? ""} onChange={(v) => set({ hardcopyDue: v })} />
           </DrawerField>

@@ -56,12 +56,16 @@ export function useMuster(from: string, to: string) {
   const [rows, setRows] = useState<AttendanceApiResponse[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  // Range key of the last *completed* load. Lets callers tell an initial load / range change
+  // (block with a loader) apart from a post-edit revalidation (keep the current rows on screen).
+  const [loadedKey, setLoadedKey] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
       setRows(await api.getMuster(from, to));
       setError("");
+      setLoadedKey(`${from}:${to}`);
     } catch (err) {
       setError(err instanceof api.ApiError ? err.message : "Unable to load muster.");
     } finally {
@@ -79,7 +83,10 @@ export function useMuster(from: string, to: string) {
     return updated;
   };
 
-  return { rows, loading, error, refresh, edit };
+  // True once the current range has loaded at least once; stays true through revalidations.
+  const ready = loadedKey === `${from}:${to}`;
+
+  return { rows, loading, ready, error, refresh, edit };
 }
 
 export function useProjectAttendance(projectId: number | null, from: string, to: string) {

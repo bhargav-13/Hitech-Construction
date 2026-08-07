@@ -6,6 +6,7 @@ import { useSearchParams } from "next/navigation";
 import { SortTh } from "@/components/vyapar/SortTh";
 import { RowMenu, RowMenuItem, RowMenuDivider } from "@/components/RowMenu";
 import { Select } from "@/components/Select";
+import { DatePicker } from "@/components/DatePicker";
 import { useTableSort } from "@/lib/useTableSort";
 import { useTenderStore } from "@/lib/tenderStore";
 import { useTenderPrefs, DENSITY_CLASS } from "@/lib/tenderPrefs";
@@ -22,9 +23,9 @@ import {
   type TenderSource,
 } from "@/lib/tenderTypes";
 import {
-  DEADLINE_TONE_CLASS,
-  deadlineLabel,
-  deadlineTone,
+  FOLLOWUP_TONE_CLASS,
+  followUpLabel,
+  followUpTone,
   tdate,
   tmoney,
   tval,
@@ -76,20 +77,33 @@ const nameCell = (t: Tender) => (
   </span>
 );
 
-/** Deadline with a days-remaining badge — a tender desk works to dates, not to values. */
-const deadlineCell = (value?: string | null) => {
-  const tone = deadlineTone(value);
+/** Plain date cell — the deadline no longer carries an overdue badge; urgency lives on Next Follow Up. */
+const dateCell = (value?: string | null) => <span className="whitespace-nowrap">{tdate(value)}</span>;
+
+/**
+ * Next follow-up — editable inline from the table, so a chase date can be set or changed without
+ * opening the tender. The colour-coded badge (<5 red, 5–15 yellow, >15 green) sits beside it. The
+ * wrapper swallows the click so picking a date doesn't also open the row's detail drawer.
+ */
+function FollowUpCell({ t }: { t: Tender }) {
+  const updateTender = useTenderStore((s) => s.updateTender);
+  const tone = followUpTone(t.nextFollowUp);
   return (
-    <div className="flex items-center gap-1.5 whitespace-nowrap">
-      <span>{tdate(value)}</span>
-      {tone !== "none" && tone !== "ok" && (
-        <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold ring-1 ring-inset ${DEADLINE_TONE_CLASS[tone]}`}>
-          {deadlineLabel(value)}
+    <div className="flex items-center gap-1.5 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
+      <DatePicker
+        value={t.nextFollowUp ?? ""}
+        onChange={(v) => updateTender(t.id, { nextFollowUp: v || null })}
+        placeholder="Set date"
+        className="py-1"
+      />
+      {tone !== "none" && (
+        <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold ring-1 ring-inset ${FOLLOWUP_TONE_CLASS[tone]}`}>
+          {followUpLabel(t.nextFollowUp)}
         </span>
       )}
     </div>
   );
-};
+}
 
 const COLS: Record<PipelineVariant, Col[]> = {
   research: [
@@ -97,8 +111,9 @@ const COLS: Record<PipelineVariant, Col[]> = {
     { key: "tenderId", label: "Tender ID", sort: (t) => t.tenderId, cell: (t) => tval(t.tenderId) },
     { key: "nameOfWork", label: "Name of Work", sort: (t) => t.nameOfWork, cell: nameCell },
     { key: "estimatedCost", label: "Est. Cost", align: "right", sort: (t) => t.estimatedCost, cell: (t) => tmoney(t.estimatedCost) },
-    { key: "deadline", label: "Deadline", sort: (t) => t.deadline, cell: (t) => deadlineCell(t.deadline) },
-    { key: "hardcopyDue", label: "Hardcopy Due", sort: (t) => t.hardcopyDue, cell: (t) => deadlineCell(t.hardcopyDue) },
+    { key: "deadline", label: "Deadline", sort: (t) => t.deadline, cell: (t) => dateCell(t.deadline) },
+    { key: "nextFollowUp", label: "Next Follow Up", sort: (t) => t.nextFollowUp, cell: (t) => <FollowUpCell t={t} /> },
+    { key: "hardcopyDue", label: "Hardcopy Due", sort: (t) => t.hardcopyDue, cell: (t) => dateCell(t.hardcopyDue) },
     { key: "fee", label: "Fee", align: "right", sort: (t) => t.fee, cell: (t) => tmoney(t.fee) },
     { key: "emd", label: "EMD", align: "right", sort: (t) => t.emd, cell: (t) => tmoney(t.emd) },
     { key: "classReq", label: "Class", sort: (t) => t.classReq, cell: (t) => tval(t.classReq) },
@@ -108,7 +123,8 @@ const COLS: Record<PipelineVariant, Col[]> = {
     { key: "tenderId", label: "Tender ID", sort: (t) => t.tenderId, cell: (t) => tval(t.tenderId) },
     { key: "nameOfWork", label: "Name of Work", sort: (t) => t.nameOfWork, cell: nameCell },
     { key: "estimatedCost", label: "Est. Cost", align: "right", sort: (t) => t.estimatedCost, cell: (t) => tmoney(t.estimatedCost) },
-    { key: "deadline", label: "Deadline", sort: (t) => t.deadline, cell: (t) => deadlineCell(t.deadline) },
+    { key: "deadline", label: "Deadline", sort: (t) => t.deadline, cell: (t) => dateCell(t.deadline) },
+    { key: "nextFollowUp", label: "Next Follow Up", sort: (t) => t.nextFollowUp, cell: (t) => <FollowUpCell t={t} /> },
     { key: "emd", label: "EMD", align: "right", sort: (t) => t.emd, cell: (t) => tmoney(t.emd) },
     {
       key: "priority",
@@ -143,6 +159,7 @@ const COLS: Record<PipelineVariant, Col[]> = {
     { key: "contractValue", label: "Contract Value", align: "right", sort: (t) => t.contractValue, cell: (t) => tmoney(t.contractValue) },
     { key: "variancePct", label: "Var %", align: "right", sort: (t) => t.variancePct, cell: (t) => (t.variancePct == null ? "—" : `${t.variancePct}%`) },
     { key: "submissionDate", label: "Submitted", sort: (t) => t.submissionDate, cell: (t) => tdate(t.submissionDate) },
+    { key: "nextFollowUp", label: "Next Follow Up", sort: (t) => t.nextFollowUp, cell: (t) => <FollowUpCell t={t} /> },
     { key: "emdState", label: "EMD", sort: (t) => t.emdState, cell: (t) => <EmdCell t={t} /> },
     {
       key: "status",
@@ -979,7 +996,7 @@ function TenderCard({
   onCheck: (shift: boolean) => void;
   onOpen: () => void;
 }) {
-  const tone = deadlineTone(t.deadline);
+  const tone = followUpTone(t.nextFollowUp);
   return (
     <div className={`rounded-xl border bg-white p-3 ${checked ? "border-cyan-300 bg-cyan-50/40" : "border-gray-200"}`}>
       <div className="flex items-start gap-2">
@@ -996,9 +1013,9 @@ function TenderCard({
                 {STATUS_META[t.status].label}
               </span>
             )}
-            {tone !== "none" && tone !== "ok" && (
-              <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold ring-1 ring-inset ${DEADLINE_TONE_CLASS[tone]}`}>
-                {deadlineLabel(t.deadline)}
+            {tone !== "none" && (
+              <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold ring-1 ring-inset ${FOLLOWUP_TONE_CLASS[tone]}`}>
+                Follow up {followUpLabel(t.nextFollowUp)}
               </span>
             )}
           </div>
