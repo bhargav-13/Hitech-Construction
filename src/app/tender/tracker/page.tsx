@@ -3,13 +3,15 @@
 import { useMemo, useState } from "react";
 import { TenderShell, TenderEmpty } from "@/components/tender/TenderShell";
 import { StepEditor } from "@/components/tender/StepEditor";
+import { TenderDetailDrawer } from "@/components/tender/TenderDetailDrawer";
 import { useTenderStore } from "@/lib/tenderStore";
-import type { TenderMilestones, TrackerStep } from "@/lib/tenderTypes";
+import type { Tender, TenderMilestones, TrackerStep } from "@/lib/tenderTypes";
 import { tdate, tval } from "@/lib/tenderHelpers";
 import { CalendarDays, ListChecks, Search, SlidersHorizontal } from "lucide-react";
 
 export default function TenderTrackerPage() {
   const milestones = useTenderStore((s) => s.milestones);
+  const tenders = useTenderStore((s) => s.tenders);
   const steps = useTenderStore((s) => s.milestoneSteps);
   const toggleMilestone = useTenderStore((s) => s.toggleMilestone);
   const addMilestoneStep = useTenderStore((s) => s.addMilestoneStep);
@@ -17,6 +19,15 @@ export default function TenderTrackerPage() {
   const renameMilestoneStep = useTenderStore((s) => s.renameMilestoneStep);
   const [search, setSearch] = useState("");
   const [editing, setEditing] = useState(false);
+  const [selected, setSelected] = useState<Tender | null>(null);
+
+  // Each milestone row links back to a tender by its portal tender ID, so clicking a card can open
+  // the full tender detail.
+  const tenderByPortalId = useMemo(() => {
+    const map = new Map<string, Tender>();
+    for (const t of tenders) if (t.tenderId) map.set(t.tenderId, t);
+    return map;
+  }, [tenders]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -69,12 +80,23 @@ export default function TenderTrackerPage() {
           <TenderEmpty icon={ListChecks} title="No tenders tracked" hint="Try a different search." />
         ) : (
           <div className="grid gap-4 lg:grid-cols-2">
-            {filtered.map((m) => (
-              <MilestoneCard key={m.id} m={m} steps={steps} onToggle={(key) => toggleMilestone(m.id, key)} />
-            ))}
+            {filtered.map((m) => {
+              const tender = m.tenderId ? tenderByPortalId.get(m.tenderId) : undefined;
+              return (
+                <MilestoneCard
+                  key={m.id}
+                  m={m}
+                  steps={steps}
+                  onToggle={(key) => toggleMilestone(m.id, key)}
+                  onOpen={tender ? () => setSelected(tender) : undefined}
+                />
+              );
+            })}
           </div>
         )}
       </div>
+
+      {selected && <TenderDetailDrawer tender={selected} onClose={() => setSelected(null)} />}
     </TenderShell>
   );
 }
@@ -83,10 +105,12 @@ function MilestoneCard({
   m,
   steps,
   onToggle,
+  onOpen,
 }: {
   m: TenderMilestones;
   steps: TrackerStep[];
   onToggle: (key: string) => void;
+  onOpen?: () => void;
 }) {
   const done = steps.filter((s) => m[s.key] === true).length;
   const total = steps.length;
@@ -94,7 +118,24 @@ function MilestoneCard({
   const complete = total > 0 && done === total;
 
   return (
-    <div className="rounded-xl border border-gray-200 bg-white p-4">
+    <div
+      onClick={onOpen}
+      role={onOpen ? "button" : undefined}
+      tabIndex={onOpen ? 0 : undefined}
+      onKeyDown={
+        onOpen
+          ? (e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                onOpen();
+              }
+            }
+          : undefined
+      }
+      className={`rounded-xl border border-gray-200 bg-white p-4 transition-all duration-150 ${
+        onOpen ? "cursor-pointer hover:border-cyan-300 hover:shadow-sm" : ""
+      }`}
+    >
       <div className="mb-3 flex items-start justify-between gap-3">
         <div className="min-w-0">
           <h3 className="truncate text-sm font-semibold text-gray-800" title={m.nameOfWork ?? ""}>
@@ -111,8 +152,9 @@ function MilestoneCard({
         </span>
       </div>
 
-      {/* Milestone segments — one clickable bar per step. Scrolls sideways when there are many. */}
-      <div className="flex gap-1.5 overflow-x-auto pb-1">
+      {/* Milestone segments — one clickable bar per step. Scrolls sideways when there are many.
+          Stops propagation so toggling a step doesn't also open the card's detail drawer. */}
+      <div className="flex gap-1.5 overflow-x-auto pb-1" onClick={(e) => e.stopPropagation()}>
         {steps.map((s) => {
           const on = m[s.key] === true;
           return (
