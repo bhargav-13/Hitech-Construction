@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { Check, Loader2, Search, ShieldCheck, UserRound } from "lucide-react";
+import { PeopleMultiSelect } from "@/components/task/TaskBits";
 import { useUsers } from "@/lib/useUsers";
 import { useAuthStore } from "@/lib/authStore";
 import { getProjectMembers, setProjectMembers } from "@/lib/tasksApi";
@@ -125,6 +126,22 @@ export function ProjectMembers({ projectId }: { projectId: string }) {
 
       {error && (
         <div className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-2 text-sm text-rose-700">{error}</div>
+      )}
+
+      {/* Quick add — the same searchable chip picker used for task followers. */}
+      {canEdit && (
+        <div>
+          <label className="mb-1 block text-xs font-medium text-gray-500">Add members</label>
+          <PeopleMultiSelect
+            people={users.map((u) => ({ id: u.id, name: u.name, role: u.role }))}
+            values={[...selected]}
+            onChange={(ids) => {
+              setSelected(new Set(ids));
+              setSavedAt(null);
+            }}
+            placeholder="Search and add members…"
+          />
+        </div>
       )}
 
       <div className="overflow-hidden rounded-xl border border-gray-200 bg-white">

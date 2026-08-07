@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Check, ChevronDown, Search, UserRound, X } from "lucide-react";
+import { Check, ChevronDown, Plus, Search, UserRound, X } from "lucide-react";
 import { projectAvatarColor } from "@/lib/projectHelpers";
 import { PRIORITY_STYLE, STATUS_STYLE, TASK_PRIORITIES, TASK_STATUSES } from "@/lib/taskTypes";
 import type { TaskPriority, TaskStatus } from "@/lib/taskTypes";
@@ -390,6 +390,112 @@ export function PeopleMultiSelect({
                   </button>
                 );
               })
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Searchable single-select for the client name, with a "+" to add a new client on the fly (mirrors
+ * the tender closed-lost reason picker). Typing a name that doesn't exist yet offers to add it.
+ */
+export function ClientSelect({
+  clients,
+  value,
+  onChange,
+  onAddClient,
+  placeholder = "No client",
+}: {
+  clients: string[];
+  value: string;
+  onChange: (name: string) => void;
+  onAddClient: (name: string) => void;
+  placeholder?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState("");
+  const ref = useDismiss(open, () => setOpen(false));
+  const query = q.trim();
+  const filtered = useMemo(
+    () => clients.filter((c) => !query || c.toLowerCase().includes(query.toLowerCase())),
+    [clients, query],
+  );
+  const exact = clients.some((c) => c.toLowerCase() === query.toLowerCase());
+
+  function add() {
+    if (!query) return;
+    onAddClient(query);
+    onChange(query);
+    setOpen(false);
+    setQ("");
+  }
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className={`flex w-full items-center justify-between gap-2 rounded-lg border bg-white px-3 py-2 text-left text-sm outline-none transition-colors duration-150 ${
+          open ? "border-cyan-500 ring-2 ring-cyan-500/15" : "border-gray-200 hover:border-gray-300"
+        }`}
+      >
+        <span className={`truncate ${value ? "text-gray-700" : "text-gray-400"}`}>{value || placeholder}</span>
+        <ChevronDown size={15} className={`shrink-0 text-gray-400 transition-transform duration-200 ${open ? "rotate-180" : ""}`} />
+      </button>
+
+      {open && (
+        <div className="animate-fade-in-scale absolute z-50 mt-1 w-full origin-top overflow-hidden rounded-lg border border-gray-200 bg-white shadow-lg">
+          <div className="flex items-center gap-1.5 border-b border-gray-100 px-2.5 py-1.5">
+            <Search size={13} className="text-gray-400" />
+            <input
+              autoFocus
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && query && !exact) {
+                  e.preventDefault();
+                  add();
+                }
+              }}
+              placeholder="Search or add client…"
+              className="w-full bg-transparent text-sm outline-none"
+            />
+          </div>
+          <div className="max-h-56 overflow-auto py-1">
+            <button
+              type="button"
+              onClick={() => { onChange(""); setOpen(false); setQ(""); }}
+              className={`flex w-full items-center px-3 py-1.5 text-left text-sm hover:bg-cyan-50 ${value === "" ? "font-medium text-brand-accent" : "text-gray-500"}`}
+            >
+              {placeholder}
+            </button>
+            {filtered.map((c) => (
+              <button
+                key={c}
+                type="button"
+                onClick={() => { onChange(c); setOpen(false); setQ(""); }}
+                className={`flex w-full items-center justify-between gap-2 px-3 py-1.5 text-left text-sm transition-colors duration-100 hover:bg-cyan-50 ${
+                  c === value ? "font-medium text-brand-accent" : "text-gray-700"
+                }`}
+              >
+                <span className="truncate">{c}</span>
+                {c === value && <Check size={14} className="shrink-0 text-brand-accent" />}
+              </button>
+            ))}
+            {query && !exact && (
+              <button
+                type="button"
+                onClick={add}
+                className="flex w-full items-center gap-1.5 border-t border-gray-100 px-3 py-2 text-left text-sm font-medium text-brand-accent hover:bg-cyan-50"
+              >
+                <Plus size={14} /> Add “{query}”
+              </button>
+            )}
+            {filtered.length === 0 && !query && (
+              <div className="px-3 py-2 text-xs text-gray-400">No clients yet — type to add one.</div>
             )}
           </div>
         </div>

@@ -131,6 +131,8 @@ export interface Tender {
 
   // Outcome intelligence — none of this exists in the workbook; it is why the app beats the sheet.
   lossReason?: LossReason | null;
+  /** Free-text label for a user-added loss reason (lossReason is set to OTHER when this is used). */
+  lossReasonLabel?: string | null;
   lossNote?: string | null;
   /** Who won it, and at what price. Feeds the competitor report. */
   l1Bidder?: string | null;
@@ -150,10 +152,23 @@ export interface Tender {
   viewDocuments?: string | null;
   /** Files attached in-app (data URLs — UI-only until there is a backend to store them). */
   attachments?: TenderAttachment[];
+  /** User-defined extra fields — the sheet has one-off columns per tender that no fixed schema covers. */
+  customFields?: TenderCustomField[];
   remarks?: string | null;
 
   /** Set when a WON tender has been promoted into the Project module. */
   projectId?: number | null;
+}
+
+/**
+ * A user-added ad-hoc field on a tender. The workbook carries one-off columns that vary per tender
+ * (a specific certificate, a note against a department) that no fixed schema should try to model, so
+ * the form lets the user add and remove labelled fields freely.
+ */
+export interface TenderCustomField {
+  id: string;
+  label: string;
+  value: string;
 }
 
 /** A file attached to a tender. `dataUrl` is only viable while the module is UI-only. */

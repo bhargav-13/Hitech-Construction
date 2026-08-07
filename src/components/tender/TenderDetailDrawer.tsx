@@ -289,9 +289,11 @@ export function TenderDetailDrawer({
         </Section>
 
         {/* Outcome intelligence — the part the spreadsheet has no answer for. */}
-        {(t.lossReason || t.l1Bidder || t.ourRank != null) && (
+        {(t.lossReason || t.lossReasonLabel || t.l1Bidder || t.ourRank != null) && (
           <Section title="Outcome">
-            <Field label="Loss Reason">{t.lossReason ? LOSS_REASON_META[t.lossReason].label : "—"}</Field>
+            <Field label="Loss Reason">
+              {t.lossReasonLabel ?? (t.lossReason ? LOSS_REASON_META[t.lossReason].label : "—")}
+            </Field>
             <Field label="Our Rank">{t.ourRank == null ? "—" : `L${t.ourRank}`}</Field>
             <Field label="L1 Bidder">{tval(t.l1Bidder)}</Field>
             <Field label="L1 Value">{tmoney(t.l1Value)}</Field>
@@ -357,6 +359,16 @@ export function TenderDetailDrawer({
             </ul>
           )}
         </div>
+
+        {(t.customFields ?? []).length > 0 && (
+          <Section title="Additional Fields">
+            {(t.customFields ?? []).map((cf) => (
+              <Field key={cf.id} label={cf.label || "—"}>
+                {tval(cf.value)}
+              </Field>
+            ))}
+          </Section>
+        )}
 
         <Section title="Documents & Notes">
           <Field label="Stage Documents" wide>{tval(t.stageDocuments)}</Field>

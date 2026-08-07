@@ -25,7 +25,7 @@ import { useProjects } from "@/lib/useProjects";
 import { useTaskStore } from "@/lib/taskStore";
 import { TASK_PRIORITIES, TASK_STATUSES, formatTaskDate, formatTaskDateTime, toIso } from "@/lib/taskTypes";
 import type { SubTask, Task, TaskAttachment, TaskComment, TaskPriority, TaskStatus } from "@/lib/taskTypes";
-import { UserAvatar, PeopleSelect, PeopleMultiSelect } from "./TaskBits";
+import { UserAvatar, PeopleSelect, PeopleMultiSelect, ClientSelect } from "./TaskBits";
 import type { Person } from "./TaskBits";
 import { Select } from "@/components/Select";
 import { DatePicker } from "@/components/DatePicker";
@@ -230,6 +230,7 @@ export function TaskDrawer({
   const { departments } = useDepartments();
   const authUser = useAuthStore((s) => s.user);
   const parties = useAppStore((s) => s.parties);
+  const addParty = useAppStore((s) => s.addParty);
   const { closing, requestClose } = useDrawerDismiss(onClose);
 
   const createTask = useTaskStore((s) => s.createTask);
@@ -577,14 +578,13 @@ export function TaskDrawer({
               </Field>
 
               <Field label="Client">
-                <Select
+                <ClientSelect
+                  clients={clients.map((c) => c.name)}
                   value={clientName}
                   onChange={setClientName}
-                  placeholder="No client"
-                  options={[
-                    { value: "", label: "No client" },
-                    ...clients.map((c) => ({ value: c.name, label: c.name })),
-                  ]}
+                  onAddClient={(name) =>
+                    addParty({ name, type: "Client", phone: "", gstin: "", rating: 0, toReceive: 0, toPay: 0 })
+                  }
                 />
               </Field>
 

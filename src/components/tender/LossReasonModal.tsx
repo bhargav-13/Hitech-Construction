@@ -5,12 +5,17 @@ import { Modal } from "@/components/Modal";
 import { Select } from "@/components/Select";
 import { LOSS_REASON_META } from "@/lib/tenderTypes";
 import type { LossReason, Tender } from "@/lib/tenderTypes";
-import { XCircle } from "lucide-react";
+import { useTenderStore } from "@/lib/tenderStore";
+import { Plus, XCircle } from "lucide-react";
 
-const REASON_OPTIONS = (Object.keys(LOSS_REASON_META) as LossReason[]).map((r) => ({
+const BUILTIN_OPTIONS = (Object.keys(LOSS_REASON_META) as LossReason[]).map((r) => ({
   value: r,
   label: LOSS_REASON_META[r].label,
 }));
+
+/** A custom reason is stored as `custom:<label>`; built-in reasons use the LossReason enum key. */
+const CUSTOM_PREFIX = "custom:";
+const isBuiltin = (v: string): v is LossReason => v in LOSS_REASON_META;
 
 /**
  * Asked for whenever a tender leaves the pipeline as lost or dropped.
@@ -30,18 +35,40 @@ export function LossReasonModal({
   onCancel: () => void;
   onConfirm: (patch: Partial<Tender>) => void;
 }) {
-  const [reason, setReason] = useState<LossReason>(tender.lossReason ?? "PRICE_TOO_HIGH");
+  const customLossReasons = useTenderStore((s) => s.customLossReasons);
+  const addLossReason = useTenderStore((s) => s.addLossReason);
+
+  const [reason, setReason] = useState<string>(
+    tender.lossReasonLabel ? `${CUSTOM_PREFIX}${tender.lossReasonLabel}` : tender.lossReason ?? "PRICE_TOO_HIGH",
+  );
   const [note, setNote] = useState(tender.lossNote ?? "");
   const [l1Bidder, setL1Bidder] = useState(tender.l1Bidder ?? "");
   const [l1Value, setL1Value] = useState(tender.l1Value != null ? String(tender.l1Value) : "");
   const [ourRank, setOurRank] = useState(tender.ourRank != null ? String(tender.ourRank) : "");
 
-  // Competitor fields only make sense when we actually bid and were beaten on price.
-  const showCompetitor = reason === "PRICE_TOO_HIGH" || reason === "OTHER";
+  const options = [
+    ...BUILTIN_OPTIONS,
+    ...customLossReasons.map((r) => ({ value: `${CUSTOM_PREFIX}${r}`, label: r })),
+  ];
+  const isCustom = reason.startsWith(CUSTOM_PREFIX);
+  const hint = isBuiltin(reason) ? LOSS_REASON_META[reason].hint : "Custom reason.";
+
+  // Competitor fields make sense when we were beaten on price or on any bespoke/other reason.
+  const showCompetitor = reason === "PRICE_TOO_HIGH" || reason === "OTHER" || isCustom;
+
+  function addReason() {
+    const label = window.prompt("New loss reason");
+    const clean = label?.trim();
+    if (!clean) return;
+    addLossReason(clean);
+    setReason(`${CUSTOM_PREFIX}${clean}`);
+  }
 
   function submit() {
     onConfirm({
-      lossReason: reason,
+      // Custom reasons ride under the OTHER enum with the label kept separately for display.
+      lossReason: isBuiltin(reason) ? reason : "OTHER",
+      lossReasonLabel: isCustom ? reason.slice(CUSTOM_PREFIX.length) : null,
       lossNote: note.trim() || null,
       l1Bidder: l1Bidder.trim() || null,
       l1Value: l1Value.trim() === "" ? null : Number(l1Value),
@@ -64,8 +91,20 @@ export function LossReasonModal({
 
         <div className="space-y-3">
           <Field label="Reason" required>
-            <Select value={reason} onChange={(v) => setReason(v as LossReason)} options={REASON_OPTIONS} />
-            <p className="mt-1 text-[11px] text-gray-400">{LOSS_REASON_META[reason].hint}</p>
+            <div className="flex items-center gap-2">
+              <div className="flex-1">
+                <Select value={reason} onChange={(v) => setReason(v)} options={options} />
+              </div>
+              <button
+                type="button"
+                onClick={addReason}
+                title="Add a new reason"
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-gray-200 text-gray-500 transition-colors hover:border-brand-accent hover:text-brand-accent"
+              >
+                <Plus size={15} />
+              </button>
+            </div>
+            <p className="mt-1 text-[11px] text-gray-400">{hint}</p>
           </Field>
 
           {showCompetitor && (

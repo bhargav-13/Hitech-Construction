@@ -3,11 +3,12 @@
 import { useMemo, useState } from "react";
 import { TenderShell, TenderEmpty } from "@/components/tender/TenderShell";
 import { StepEditor } from "@/components/tender/StepEditor";
+import { DocumentForm } from "@/components/tender/DocumentForm";
 import { useTenderStore } from "@/lib/tenderStore";
 import { raLabel } from "@/lib/tenderTypes";
 import type { DocPair, TenderDocuments, TrackerStep } from "@/lib/tenderTypes";
 import { tval } from "@/lib/tenderHelpers";
-import { Check, FileText, FolderOpen, Plus, Search, SlidersHorizontal } from "lucide-react";
+import { Check, FileText, FolderOpen, Pencil, Plus, Search, SlidersHorizontal, Trash2 } from "lucide-react";
 
 export default function TenderDocumentsPage() {
   const documents = useTenderStore((s) => s.documents);
@@ -17,9 +18,12 @@ export default function TenderDocumentsPage() {
   const addDocumentStep = useTenderStore((s) => s.addDocumentStep);
   const removeDocumentStep = useTenderStore((s) => s.removeDocumentStep);
   const renameDocumentStep = useTenderStore((s) => s.renameDocumentStep);
+  const removeDocument = useTenderStore((s) => s.removeDocument);
   const [search, setSearch] = useState("");
   const [editing, setEditing] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [formOpen, setFormOpen] = useState(false);
+  const [editingRecord, setEditingRecord] = useState<TenderDocuments | null>(null);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -52,6 +56,15 @@ export default function TenderDocumentsPage() {
               }`}
             >
               <SlidersHorizontal size={14} /> Edit types
+            </button>
+            <button
+              onClick={() => {
+                setEditingRecord(null);
+                setFormOpen(true);
+              }}
+              className="flex items-center gap-1.5 rounded-lg bg-brand-accent px-3 py-2 text-sm font-medium text-white transition-all duration-150 hover:opacity-90 active:scale-95"
+            >
+              <Plus size={14} /> Add record
             </button>
             <div className="text-sm text-gray-500">{filtered.length} tenders</div>
           </div>
@@ -98,6 +111,16 @@ export default function TenderDocumentsPage() {
                     onToggle={toggleDocument}
                     onAddRaBill={() => addRaBill(selected.id)}
                     onAddType={addType}
+                    onEdit={() => {
+                      setEditingRecord(selected);
+                      setFormOpen(true);
+                    }}
+                    onDelete={() => {
+                      if (window.confirm("Remove this documentation record?")) {
+                        removeDocument(selected.id);
+                        setSelectedId(null);
+                      }
+                    }}
                   />
                 </div>
               ) : (
@@ -107,6 +130,8 @@ export default function TenderDocumentsPage() {
           </div>
         )}
       </div>
+
+      {formOpen && <DocumentForm document={editingRecord ?? undefined} onClose={() => setFormOpen(false)} />}
     </TenderShell>
   );
 }
@@ -161,12 +186,16 @@ function DocumentDetail({
   onToggle,
   onAddRaBill,
   onAddType,
+  onEdit,
+  onDelete,
 }: {
   doc: TenderDocuments;
   steps: TrackerStep[];
   onToggle: (id: string, key: string, copy: keyof DocPair, raIndex?: number) => void;
   onAddRaBill: () => void;
   onAddType: () => void;
+  onEdit: () => void;
+  onDelete: () => void;
 }) {
   const { pct, label } = parseProgress(doc.progress);
   return (
@@ -177,6 +206,14 @@ function DocumentDetail({
             {tval(doc.nameOfWork)}
           </h3>
           <p className="text-[11px] text-gray-400">Tender ID {tval(doc.tenderId)}</p>
+          <div className="mt-1.5 flex items-center gap-2">
+            <button onClick={onEdit} className="inline-flex items-center gap-1 rounded-full border border-gray-200 px-2 py-0.5 text-[11px] text-gray-600 hover:bg-gray-50">
+              <Pencil size={11} /> Edit
+            </button>
+            <button onClick={onDelete} className="inline-flex items-center gap-1 rounded-full border border-rose-200 px-2 py-0.5 text-[11px] text-rose-600 hover:bg-rose-50">
+              <Trash2 size={11} /> Remove
+            </button>
+          </div>
         </div>
         {pct != null && (
           <div className="flex shrink-0 items-center gap-2">

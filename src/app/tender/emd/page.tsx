@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { TenderShell, TenderEmpty } from "@/components/tender/TenderShell";
 import { SortTh } from "@/components/vyapar/SortTh";
+import { TenderForm } from "@/components/tender/TenderForm";
 import { useTableSort } from "@/lib/useTableSort";
 import { useTenderStore } from "@/lib/tenderStore";
 import { EMD_MODE_META, EMD_STATE_META, type Tender } from "@/lib/tenderTypes";
@@ -12,7 +13,7 @@ import { BUCKET_META } from "@/lib/tenderTypes";
 import { tdate, tiso, tmoney, tval } from "@/lib/tenderHelpers";
 import { exportTenders } from "@/lib/tenderExcel";
 import { inr } from "@/lib/format";
-import { Download, Landmark, Search, Undo2 } from "lucide-react";
+import { Download, Landmark, Pencil, Plus, Search, Undo2 } from "lucide-react";
 
 type Filter = "BLOCKED" | "RECOVERABLE" | "RELEASED" | "PENDING" | "ALL";
 
@@ -36,6 +37,8 @@ export default function TenderEmdPage() {
   const updateTender = useTenderStore((s) => s.updateTender);
   const [filter, setFilter] = useState<Filter>("BLOCKED");
   const [search, setSearch] = useState("");
+  const [formOpen, setFormOpen] = useState(false);
+  const [editing, setEditing] = useState<Tender | null>(null);
 
   const money = useMemo(() => exposure(tenders), [tenders]);
 
@@ -88,12 +91,23 @@ export default function TenderEmdPage() {
             <h1 className="text-lg font-semibold text-gray-800">EMD Register</h1>
             <p className="text-sm text-gray-500">Every rupee of earnest money, where it sits and whether it is coming back.</p>
           </div>
-          <button
-            onClick={() => exportTenders(sorted, "emd-register.xlsx", "EMD")}
-            className="flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs font-medium text-gray-600 transition-colors duration-150 hover:bg-gray-50"
-          >
-            <Download size={14} /> Export
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => exportTenders(sorted, "emd-register.xlsx", "EMD")}
+              className="flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs font-medium text-gray-600 transition-colors duration-150 hover:bg-gray-50"
+            >
+              <Download size={14} /> Export
+            </button>
+            <button
+              onClick={() => {
+                setEditing(null);
+                setFormOpen(true);
+              }}
+              className="flex items-center gap-1.5 rounded-lg bg-brand-accent px-3 py-2 text-xs font-medium text-white transition-all duration-150 hover:opacity-90 active:scale-95"
+            >
+              <Plus size={14} /> Add EMD
+            </button>
+          </div>
         </div>
 
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
@@ -192,16 +206,28 @@ export default function TenderEmdPage() {
                       <td className="px-4 py-2.5 whitespace-nowrap text-gray-600">{tdate(t.emdPaidOn)}</td>
                       <td className="px-4 py-2.5 whitespace-nowrap text-gray-600">{tdate(t.emdExpiry)}</td>
                       <td className="px-4 py-2.5">
-                        {isEmdBlocked(t) ? (
+                        <div className="flex items-center gap-1.5">
+                          {isEmdBlocked(t) ? (
+                            <button
+                              onClick={() => release(t)}
+                              className="rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-700 transition-colors duration-150 hover:bg-emerald-100"
+                            >
+                              Mark released
+                            </button>
+                          ) : (
+                            <span className="text-[11px] text-gray-400">{t.emdReleasedOn ? tdate(t.emdReleasedOn) : "—"}</span>
+                          )}
                           <button
-                            onClick={() => release(t)}
-                            className="rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-700 transition-colors duration-150 hover:bg-emerald-100"
+                            onClick={() => {
+                              setEditing(t);
+                              setFormOpen(true);
+                            }}
+                            aria-label="Edit EMD"
+                            className="rounded p-1 text-gray-400 transition-colors hover:bg-cyan-50 hover:text-brand-accent"
                           >
-                            Mark released
+                            <Pencil size={13} />
                           </button>
-                        ) : (
-                          <span className="text-[11px] text-gray-400">{t.emdReleasedOn ? tdate(t.emdReleasedOn) : "—"}</span>
-                        )}
+                        </div>
                       </td>
                     </tr>
                   );
@@ -211,6 +237,8 @@ export default function TenderEmdPage() {
           </div>
         )}
       </div>
+
+      {formOpen && <TenderForm tender={editing ?? undefined} initialStage="APPLIED" onClose={() => setFormOpen(false)} />}
     </TenderShell>
   );
 }

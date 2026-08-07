@@ -21,8 +21,9 @@ import {
   type TenderStage,
   type TenderStatus,
 } from "@/lib/tenderTypes";
+import type { TenderCustomField } from "@/lib/tenderTypes";
 import { parseDurationMonths, parseValidityDays, parseLooseDate } from "@/lib/tenderHelpers";
-import { ChevronDown, ChevronRight } from "lucide-react";
+import { ChevronDown, ChevronRight, Plus, Trash2 } from "lucide-react";
 
 const STAGE_OPTIONS = (["SORTING", "RESEARCH", "APPLIED", "WON", "LOST"] as TenderStage[]).map((s) => ({
   value: s,
@@ -80,6 +81,19 @@ export function TenderForm({
   const set = (patch: Partial<Tender>) => setF((prev) => ({ ...prev, ...patch }));
   const num = (v: string): number | null => (v === "" ? null : Number(v));
 
+  // --- User-defined custom fields (add/remove freely) ---
+  const customFields = f.customFields ?? [];
+  const addCustomField = () =>
+    set({
+      customFields: [
+        ...customFields,
+        { id: `cf-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`, label: "", value: "" },
+      ],
+    });
+  const patchCustomField = (id: string, patch: Partial<TenderCustomField>) =>
+    set({ customFields: customFields.map((c) => (c.id === id ? { ...c, ...patch } : c)) });
+  const removeCustomField = (id: string) => set({ customFields: customFields.filter((c) => c.id !== id) });
+
   const stage = (f.stage ?? "SORTING") as TenderStage;
   const isGem = f.source === "GEM";
   const isApplied = stage === "APPLIED" || stage === "WON" || stage === "LOST";
@@ -97,6 +111,10 @@ export function TenderForm({
       durationMonths: parseDurationMonths(f.duration),
       validityDays: parseValidityDays(f.validity),
       preBidDate: f.preBidDate ?? parseLooseDate(f.preBidInfo),
+      // Drop half-filled custom fields (no label = nothing to show).
+      customFields: (f.customFields ?? [])
+        .filter((c) => c.label.trim() !== "")
+        .map((c) => ({ ...c, label: c.label.trim(), value: c.value.trim() })),
     } as Tender;
 
     if (isEdit) updateTender(clean.id, clean);
@@ -252,6 +270,50 @@ export function TenderForm({
         </Section>
 
         {isGem && <Section title="GeM Details">{gemFields}</Section>}
+
+        {/* User-defined custom fields — for the one-off columns no fixed schema should model. */}
+        <div>
+          <div className="mb-2 flex items-center justify-between">
+            <h4 className="text-[11px] font-semibold tracking-wide text-gray-400 uppercase">Additional Fields</h4>
+            <button
+              type="button"
+              onClick={addCustomField}
+              className="flex items-center gap-1 text-xs font-medium text-brand-accent hover:underline"
+            >
+              <Plus size={13} /> Add field
+            </button>
+          </div>
+          {customFields.length === 0 ? (
+            <p className="text-xs text-gray-400">No extra fields. Add one for anything the form above doesn&apos;t cover.</p>
+          ) : (
+            <div className="space-y-2">
+              {customFields.map((c) => (
+                <div key={c.id} className="flex items-start gap-2">
+                  <input
+                    className="input w-1/3"
+                    value={c.label}
+                    onChange={(e) => patchCustomField(c.id, { label: e.target.value })}
+                    placeholder="Field name"
+                  />
+                  <input
+                    className="input flex-1"
+                    value={c.value}
+                    onChange={(e) => patchCustomField(c.id, { value: e.target.value })}
+                    placeholder="Value"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => removeCustomField(c.id)}
+                    aria-label="Remove field"
+                    className="mt-1 shrink-0 rounded p-1.5 text-gray-300 transition-colors hover:bg-rose-50 hover:text-rose-500"
+                  >
+                    <Trash2 size={15} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
 
         {/* Collapsible: less-common fields */}
         <div>

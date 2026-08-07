@@ -55,6 +55,8 @@ interface TenderState {
   milestoneSteps: TrackerStep[];
   documentSteps: TrackerStep[];
   hardcopy: HardcopyDispatch[];
+  /** User-added closed-lost reasons, on top of the built-in enum. Shown in the loss-reason picker. */
+  customLossReasons: string[];
   /**
    * Conversions into the Project module. Starts empty — Tender keeps no project list of its own;
    * `/project` owns execution. These rows are the audit trail of what was pushed across.
@@ -92,6 +94,20 @@ interface TenderState {
   renameDocumentStep: (key: string, label: string) => void;
   /** Append another running-account bill — the workbook's five columns were never the real limit. */
   addRaBill: (id: string) => void;
+  /** Status-tracker (milestone) records — add / edit identity / remove. */
+  addMilestone: (m: TenderMilestones) => void;
+  updateMilestone: (id: string, patch: Partial<TenderMilestones>) => void;
+  removeMilestone: (id: string) => void;
+  /** Documentation-tracker records — add / edit identity / remove. */
+  addDocument: (d: TenderDocuments) => void;
+  updateDocument: (id: string, patch: Partial<TenderDocuments>) => void;
+  removeDocument: (id: string) => void;
+  /** Hardcopy dispatch records — add / edit / remove. */
+  addHardcopy: (h: HardcopyDispatch) => void;
+  updateHardcopy: (id: string, patch: Partial<HardcopyDispatch>) => void;
+  removeHardcopy: (id: string) => void;
+  /** Register a user-added closed-lost reason (deduped, case-insensitive). */
+  addLossReason: (label: string) => void;
   addAttachment: (id: string, file: TenderAttachment) => void;
   removeAttachment: (id: string, attachmentId: string) => void;
   undo: () => void;
@@ -127,6 +143,7 @@ export const useTenderStore = create<TenderState>()(
       milestoneSteps: MILESTONE_STEPS,
       documentSteps: DOCUMENT_STEPS,
       hardcopy: HARDCOPY_SEED,
+      customLossReasons: [],
       handoffs: [],
       lastUndo: null,
 
@@ -281,6 +298,29 @@ export const useTenderStore = create<TenderState>()(
           ),
         })),
 
+      addMilestone: (m) => set((s) => ({ milestones: [{ ...m }, ...s.milestones] })),
+      updateMilestone: (id, patch) =>
+        set((s) => ({ milestones: s.milestones.map((m) => (m.id === id ? { ...m, ...patch } : m)) })),
+      removeMilestone: (id) => set((s) => ({ milestones: s.milestones.filter((m) => m.id !== id) })),
+
+      addDocument: (d) => set((s) => ({ documents: [{ ...d }, ...s.documents] })),
+      updateDocument: (id, patch) =>
+        set((s) => ({ documents: s.documents.map((d) => (d.id === id ? { ...d, ...patch } : d)) })),
+      removeDocument: (id) => set((s) => ({ documents: s.documents.filter((d) => d.id !== id) })),
+
+      addHardcopy: (h) => set((s) => ({ hardcopy: [{ ...h }, ...s.hardcopy] })),
+      updateHardcopy: (id, patch) =>
+        set((s) => ({ hardcopy: s.hardcopy.map((h) => (h.id === id ? { ...h, ...patch } : h)) })),
+      removeHardcopy: (id) => set((s) => ({ hardcopy: s.hardcopy.filter((h) => h.id !== id) })),
+
+      addLossReason: (label) =>
+        set((s) => {
+          const clean = label.trim();
+          if (!clean) return {};
+          const exists = s.customLossReasons.some((r) => r.toLowerCase() === clean.toLowerCase());
+          return exists ? {} : { customLossReasons: [...s.customLossReasons, clean] };
+        }),
+
       addAttachment: (id, file) =>
         set((s) => ({
           tenders: s.tenders.map((t) =>
@@ -318,13 +358,14 @@ export const useTenderStore = create<TenderState>()(
           milestoneSteps: MILESTONE_STEPS,
           documentSteps: DOCUMENT_STEPS,
           hardcopy: HARDCOPY_SEED,
+          customLossReasons: [],
           handoffs: [],
           lastUndo: null,
         }),
     }),
     {
       // Bump on every schema change — persisted state otherwise shadows a regenerated seed.
-      name: "hitech.tender.v5",
+      name: "hitech.tender.v6",
       storage: createJSONStorage(() => localStorage),
       partialize: (s) => ({
         tenders: s.tenders,
@@ -334,6 +375,7 @@ export const useTenderStore = create<TenderState>()(
         milestoneSteps: s.milestoneSteps,
         documentSteps: s.documentSteps,
         hardcopy: s.hardcopy,
+        customLossReasons: s.customLossReasons,
         handoffs: s.handoffs,
       }),
     },

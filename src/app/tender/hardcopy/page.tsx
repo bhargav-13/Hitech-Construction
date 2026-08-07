@@ -4,11 +4,12 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { TenderShell, TenderEmpty } from "@/components/tender/TenderShell";
 import { SortTh } from "@/components/vyapar/SortTh";
+import { HardcopyForm } from "@/components/tender/HardcopyForm";
 import { useTableSort } from "@/lib/useTableSort";
 import { useTenderStore } from "@/lib/tenderStore";
 import { tdate, tval } from "@/lib/tenderHelpers";
 import type { HardcopyDispatch } from "@/lib/tenderTypes";
-import { Search, Truck } from "lucide-react";
+import { Pencil, Plus, Search, Trash2, Truck } from "lucide-react";
 
 function arrivedChip(status?: string | null) {
   const s = (status ?? "").toUpperCase();
@@ -20,7 +21,10 @@ function arrivedChip(status?: string | null) {
 export default function TenderHardcopyPage() {
   const hardcopy = useTenderStore((s) => s.hardcopy);
   const tenders = useTenderStore((s) => s.tenders);
+  const removeHardcopy = useTenderStore((s) => s.removeHardcopy);
   const [search, setSearch] = useState("");
+  const [formOpen, setFormOpen] = useState(false);
+  const [editing, setEditing] = useState<HardcopyDispatch | null>(null);
 
   // The source sheet has no tender column at all, so dispatches were only ever matched by name.
   // The seed resolves a tenderId where it can; this turns that into a real link.
@@ -57,7 +61,18 @@ export default function TenderHardcopyPage() {
             <h1 className="text-lg font-semibold text-gray-800">Hardcopy Dispatch Tracker</h1>
             <p className="text-sm text-gray-500">Physical tender documents couriered to tendering offices.</p>
           </div>
-          <div className="text-sm text-gray-500">{filtered.length} dispatches</div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => {
+                setEditing(null);
+                setFormOpen(true);
+              }}
+              className="flex items-center gap-1.5 rounded-lg bg-brand-accent px-3 py-2 text-sm font-medium text-white transition-all duration-150 hover:opacity-90 active:scale-95"
+            >
+              <Plus size={14} /> Add dispatch
+            </button>
+            <div className="text-sm text-gray-500">{filtered.length} dispatches</div>
+          </div>
         </div>
 
         <div className="flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 transition-colors duration-150 focus-within:border-cyan-500">
@@ -86,6 +101,7 @@ export default function TenderHardcopyPage() {
                   <SortTh label="Tracking No." sortKey="trackingNo" activeKey={sortKey} dir={sortDir} onSort={toggle} />
                   <SortTh label="Arrived" sortKey="arrived" activeKey={sortKey} dir={sortDir} onSort={toggle} />
                   <SortTh label="Arrived Date" sortKey="arrivedDate" activeKey={sortKey} dir={sortDir} onSort={toggle} />
+                  <th className="px-4 py-2 font-medium text-gray-500">Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -114,6 +130,29 @@ export default function TenderHardcopyPage() {
                       </span>
                     </td>
                     <td className="px-4 py-2.5 whitespace-nowrap text-gray-600">{tdate(h.arrivedDate)}</td>
+                    <td className="px-4 py-2.5">
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={() => {
+                            setEditing(h);
+                            setFormOpen(true);
+                          }}
+                          aria-label="Edit dispatch"
+                          className="rounded p-1.5 text-gray-400 transition-colors hover:bg-cyan-50 hover:text-brand-accent"
+                        >
+                          <Pencil size={14} />
+                        </button>
+                        <button
+                          onClick={() => {
+                            if (window.confirm("Remove this dispatch record?")) removeHardcopy(h.id);
+                          }}
+                          aria-label="Remove dispatch"
+                          className="rounded p-1.5 text-gray-400 transition-colors hover:bg-rose-50 hover:text-rose-500"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -121,6 +160,8 @@ export default function TenderHardcopyPage() {
           </div>
         )}
       </div>
+
+      {formOpen && <HardcopyForm dispatch={editing ?? undefined} onClose={() => setFormOpen(false)} />}
     </TenderShell>
   );
 }
