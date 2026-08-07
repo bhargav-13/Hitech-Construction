@@ -10,10 +10,12 @@ import type {
   TenderDocuments,
   TenderHandoff,
   TenderAttachment,
+  TrackerStep,
   DocPair,
   HardcopyDispatch,
   MaterialParty,
 } from "./tenderTypes";
+import { MILESTONE_STEPS, DOCUMENT_STEPS } from "./tenderTypes";
 import { taddMonths, tiso } from "./tenderHelpers";
 import { TENDER_SEED, MATERIAL_SEED, MILESTONE_SEED, DOCUMENT_SEED, HARDCOPY_SEED } from "./tenderSeed";
 
@@ -35,11 +37,23 @@ export interface ImportResult {
   skipped: number;
 }
 
+/** Generate a collision-safe key for a user-added tracker step. */
+const newStepKey = () => `tstep-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+
+/** Insert `item` into `list` at `index` (clamped); index beyond the end appends. */
+function insertAt<T>(list: T[], item: T, index: number): T[] {
+  const i = Math.max(0, Math.min(index, list.length));
+  return [...list.slice(0, i), item, ...list.slice(i)];
+}
+
 interface TenderState {
   tenders: Tender[];
   materials: MaterialParty[];
   milestones: TenderMilestones[];
   documents: TenderDocuments[];
+  /** Editable column sets for the Status / Documentation trackers (add anywhere, rename, remove). */
+  milestoneSteps: TrackerStep[];
+  documentSteps: TrackerStep[];
   hardcopy: HardcopyDispatch[];
   /**
    * Conversions into the Project module. Starts empty — Tender keeps no project list of its own;
@@ -65,9 +79,17 @@ interface TenderState {
   /** Merge imported rows, matching on tenderId. Existing rows are patched, new ones appended. */
   importTenders: (rows: Tender[], mode: "merge" | "replace") => ImportResult;
   /** Toggle a milestone step for a tender's tracker row. */
-  toggleMilestone: (id: string, key: keyof TenderMilestones) => void;
+  toggleMilestone: (id: string, key: string) => void;
   /** Toggle a document's soft/hard availability. */
   toggleDocument: (id: string, key: string, copy: keyof DocPair, raIndex?: number) => void;
+  /** Add a milestone step at `atIndex` (append if omitted / out of range). */
+  addMilestoneStep: (label: string, atIndex?: number) => void;
+  removeMilestoneStep: (key: string) => void;
+  renameMilestoneStep: (key: string, label: string) => void;
+  /** Add a document type at `atIndex` (append if omitted / out of range). */
+  addDocumentStep: (label: string, atIndex?: number) => void;
+  removeDocumentStep: (key: string) => void;
+  renameDocumentStep: (key: string, label: string) => void;
   /** Append another running-account bill — the workbook's five columns were never the real limit. */
   addRaBill: (id: string) => void;
   addAttachment: (id: string, file: TenderAttachment) => void;
@@ -102,6 +124,8 @@ export const useTenderStore = create<TenderState>()(
       materials: MATERIAL_SEED,
       milestones: MILESTONE_SEED,
       documents: DOCUMENT_SEED,
+      milestoneSteps: MILESTONE_STEPS,
+      documentSteps: DOCUMENT_STEPS,
       hardcopy: HARDCOPY_SEED,
       handoffs: [],
       lastUndo: null,
@@ -214,9 +238,8 @@ export const useTenderStore = create<TenderState>()(
 
       toggleMilestone: (id, key) =>
         set((s) => ({
-          milestones: s.milestones.map((m) =>
-            m.id === id && typeof m[key] === "boolean" ? { ...m, [key]: !m[key] } : m,
-          ),
+          // Custom steps start undefined on existing rows, so treat anything but `true` as "off".
+          milestones: s.milestones.map((m) => (m.id === id ? { ...m, [key]: m[key] !== true } : m)),
         })),
 
       toggleDocument: (id, key, copy, raIndex) =>
@@ -227,11 +250,29 @@ export const useTenderStore = create<TenderState>()(
               const raBills = d.raBills.map((p, i) => (i === raIndex ? { ...p, [copy]: !p[copy] } : p));
               return { ...d, raBills };
             }
-            const pair = d[key as keyof TenderDocuments] as DocPair | undefined;
-            if (!pair || typeof pair.soft !== "boolean") return d;
+            // A custom document type has no pair yet on older rows — default it to both-off, then flip.
+            const pair = (d[key] as DocPair | undefined) ?? { soft: false, hard: false };
             return { ...d, [key]: { ...pair, [copy]: !pair[copy] } };
           }),
         })),
+
+      addMilestoneStep: (label, atIndex) =>
+        set((s) => ({
+          milestoneSteps: insertAt(s.milestoneSteps, { key: newStepKey(), label: label.trim() || "New step" }, atIndex ?? s.milestoneSteps.length),
+        })),
+      removeMilestoneStep: (key) =>
+        set((s) => ({ milestoneSteps: s.milestoneSteps.filter((st) => st.key !== key) })),
+      renameMilestoneStep: (key, label) =>
+        set((s) => ({ milestoneSteps: s.milestoneSteps.map((st) => (st.key === key ? { ...st, label } : st)) })),
+
+      addDocumentStep: (label, atIndex) =>
+        set((s) => ({
+          documentSteps: insertAt(s.documentSteps, { key: newStepKey(), label: label.trim() || "New document" }, atIndex ?? s.documentSteps.length),
+        })),
+      removeDocumentStep: (key) =>
+        set((s) => ({ documentSteps: s.documentSteps.filter((st) => st.key !== key) })),
+      renameDocumentStep: (key, label) =>
+        set((s) => ({ documentSteps: s.documentSteps.map((st) => (st.key === key ? { ...st, label } : st)) })),
 
       addRaBill: (id) =>
         set((s) => ({
@@ -274,6 +315,8 @@ export const useTenderStore = create<TenderState>()(
           materials: MATERIAL_SEED,
           milestones: MILESTONE_SEED,
           documents: DOCUMENT_SEED,
+          milestoneSteps: MILESTONE_STEPS,
+          documentSteps: DOCUMENT_STEPS,
           hardcopy: HARDCOPY_SEED,
           handoffs: [],
           lastUndo: null,
@@ -288,6 +331,8 @@ export const useTenderStore = create<TenderState>()(
         materials: s.materials,
         milestones: s.milestones,
         documents: s.documents,
+        milestoneSteps: s.milestoneSteps,
+        documentSteps: s.documentSteps,
         hardcopy: s.hardcopy,
         handoffs: s.handoffs,
       }),

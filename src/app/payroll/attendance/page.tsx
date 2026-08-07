@@ -24,6 +24,12 @@ const todayIso = () => {
   const d = new Date();
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 };
+/** Shift an ISO date (yyyy-MM-dd) by whole days — powers the day-view ‹ › arrows. */
+const shiftIso = (iso: string, deltaDays: number): string => {
+  const [y, m, d] = iso.split("-").map(Number);
+  const dt = new Date(y, (m ?? 1) - 1, (d ?? 1) + deltaDays);
+  return `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`;
+};
 
 /**
  * Attendance — one page, two views.
@@ -105,7 +111,11 @@ export default function AttendancePage() {
             </div>
 
             {view === "DAY" ? (
-              <div className="w-40"><DatePicker value={date} onChange={setDate} placeholder="Date" /></div>
+              <div className="flex items-center gap-1 rounded-lg border border-gray-200 bg-white p-1">
+                <button onClick={() => setDate(shiftIso(date, -1))} title="Previous day" className="rounded p-1.5 text-gray-500 hover:bg-gray-50"><ChevronLeft size={15} /></button>
+                <div className="w-36"><DatePicker value={date} onChange={setDate} placeholder="Date" /></div>
+                <button onClick={() => setDate(shiftIso(date, 1))} title="Next day" className="rounded p-1.5 text-gray-500 hover:bg-gray-50"><ChevronRight size={15} /></button>
+              </div>
             ) : (
               <div className="flex items-center gap-1 rounded-lg border border-gray-200 bg-white p-1">
                 <button onClick={() => stepMonth(-1)} className="rounded p-1.5 text-gray-500 hover:bg-gray-50"><ChevronLeft size={15} /></button>

@@ -23,14 +23,8 @@ export const PAYROLL_NAV: PayrollNavNode[] = [
   { label: "Locations", href: "/payroll/locations", icon: "pin" },
   // Combined Day + Month view (formerly two pages).
   { label: "Attendance", href: "/payroll/attendance", icon: "calendar" },
-  {
-    label: "Leave",
-    icon: "calendar",
-    children: [
-      { label: "All Requests", href: "/payroll/leave" },
-      { label: "Approval Queue", href: "/payroll/leave/approvals" },
-    ],
-  },
+  // All Requests + Approval Queue are now tabs on one page.
+  { label: "Leave", href: "/payroll/leave", icon: "calendar" },
   { label: "Monthly Runs", href: "/payroll/run", icon: "wallet" },
   { label: "Loans", href: "/payroll/loans", icon: "landmark" },
   { label: "Reimbursements", href: "/payroll/reimbursements", icon: "receipt" },

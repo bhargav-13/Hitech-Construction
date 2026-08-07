@@ -5,6 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import {
   LayoutGrid,
   FileText,
+  Gavel,
   Building2,
   CalendarCheck,
   Wallet,
@@ -36,6 +37,7 @@ import { projectAvatarColor, projectInitials } from "@/lib/projectHelpers";
 
 const ICONS: Record<string, React.ComponentType<{ size?: number; className?: string }>> = {
   Dashboard: LayoutGrid,
+  Tender: Gavel,
   Report: FileText,
   Project: Building2,
   "Team Schedule": CalendarCheck,

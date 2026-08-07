@@ -5,6 +5,7 @@ import { create } from "zustand";
 import { useTaskStore } from "@/lib/taskStore";
 import { useAuthStore } from "@/lib/authStore";
 import { isOverdue, isDueToday } from "@/lib/taskTypes";
+import { formatDateIST } from "@/lib/datetime";
 import type { Task } from "@/lib/taskTypes";
 
 const SEEN_KEY = "taskopad:notifSeen";
@@ -59,7 +60,7 @@ export function relativeTime(iso: string): string {
   if (hrs < 24) return `${hrs}h ago`;
   const days = Math.floor(hrs / 24);
   if (days < 30) return `${days}d ago`;
-  return new Date(iso).toLocaleDateString();
+  return formatDateIST(iso);
 }
 
 /** Build the notification feed for a user out of their tasks. */

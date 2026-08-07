@@ -172,28 +172,33 @@ export interface DocPair {
   hard: boolean;
 }
 
-/** Milestone checklist for an applied/won tender (Status sheet). */
+/**
+ * A configurable column in the Status / Documentation trackers. The set of steps is editable at
+ * runtime (add anywhere, rename, remove), so `key` is an opaque string — the seed's fixed keys
+ * ("analysis", "fee", …) plus any custom `tstep-*` keys the user adds later.
+ */
+export interface TrackerStep {
+  key: string;
+  label: string;
+}
+
+/**
+ * Milestone checklist for an applied/won tender (Status sheet). Completion is stored per-step keyed
+ * by the tracker step's `key`; the index signature lets custom (runtime-added) steps live alongside
+ * the seed's original boolean fields.
+ */
 export interface TenderMilestones {
   id: string;
   tenderId: string;
   nameOfWork?: string | null;
-  analysis: boolean;
-  fee: boolean;
-  emd: boolean;
-  applied: boolean;
-  techBid: boolean;
-  priceBid: boolean;
-  loa: boolean;
-  security: boolean;
-  additionalSecurity: boolean;
-  agreement: boolean;
-  workOrder: boolean;
   workStartDate?: string | null;
   progress?: string | null;
+  /** Per-step completion — keyed by TrackerStep.key. Seeded keys are analysis/fee/emd/… */
+  [key: string]: unknown;
 }
 
-/** Ordered milestone steps — key must match TenderMilestones boolean fields. */
-export const MILESTONE_STEPS: { key: keyof TenderMilestones; label: string }[] = [
+/** Default milestone steps — seeded into the store, then user-editable. */
+export const MILESTONE_STEPS: TrackerStep[] = [
   { key: "analysis", label: "Analysis" },
   { key: "fee", label: "Fee" },
   { key: "emd", label: "EMD" },
@@ -207,30 +212,28 @@ export const MILESTONE_STEPS: { key: keyof TenderMilestones; label: string }[] =
   { key: "workOrder", label: "Work Order" },
 ];
 
-/** Documentation tracker for a won tender (Document Status sheet). */
+/**
+ * Documentation tracker for a won tender (Document Status sheet). Each document category's soft/hard
+ * status is stored keyed by its TrackerStep.key; the index signature lets custom (runtime-added)
+ * document types live alongside the seed's original DocPair fields.
+ */
 export interface TenderDocuments {
   id: string;
   tenderId: string;
   nameOfWork?: string | null;
-  competitiveReport: DocPair;
-  letterOfAcceptance: DocPair;
-  securityDeposit: DocPair;
-  stampDutyAgreement: DocPair;
-  workOrder: DocPair;
-  generalCorrespondence: DocPair;
   /**
    * Running-account bills. The workbook laid out 5 columns but one project is already on its 6th
    * bill, so this is unbounded — never index it against a fixed label list.
    */
   raBills: DocPair[];
-  finalBill: DocPair;
-  form3a: DocPair;
   progress?: string | null;
   viewDocuments?: string | null;
+  /** Per-document-type soft/hard status — keyed by TrackerStep.key (competitiveReport, …). */
+  [key: string]: unknown;
 }
 
-/** Document categories in tracker order (excludes raBills, handled separately). */
-export const DOCUMENT_STEPS: { key: keyof TenderDocuments; label: string }[] = [
+/** Default document categories (excludes raBills, handled separately) — seeded, then user-editable. */
+export const DOCUMENT_STEPS: TrackerStep[] = [
   { key: "competitiveReport", label: "Competitive Report" },
   { key: "letterOfAcceptance", label: "Letter of Acceptance" },
   { key: "securityDeposit", label: "Security Deposit" },

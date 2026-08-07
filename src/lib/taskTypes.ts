@@ -1,6 +1,8 @@
 // TaskOPad-style task model. Richer than the legacy `TodoTask` in types.ts (which is left
 // untouched for the existing project To-Do screens) — this one backs the Taskopad module.
 
+import { formatDateIST, formatDateTimeIST } from "./datetime";
+
 export type TaskStatus = "Pending" | "In Progress" | "On Hold" | "Stuck" | "Completed" | "Awaiting Approval";
 export type TaskPriority = "Low" | "Medium" | "High";
 
@@ -212,25 +214,15 @@ export function sameDay(a: Date, b: Date): boolean {
   );
 }
 
-const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-
+// Chat and activity timestamps must read in India Standard Time regardless of where they render
+// (prod runs in UTC), so these delegate to the IST-locked formatters.
 export function formatTaskDate(iso: string): string {
-  if (!iso) return "—";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  return `${String(d.getDate()).padStart(2, "0")} ${MONTHS[d.getMonth()]} ${d.getFullYear()}`;
+  return formatDateIST(iso);
 }
 
 // Date + time — used in the task activity log so the client can see exactly when each event happened.
 export function formatTaskDateTime(iso: string): string {
-  if (!iso) return "—";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  let h = d.getHours();
-  const ampm = h >= 12 ? "PM" : "AM";
-  h = h % 12 || 12;
-  const mins = String(d.getMinutes()).padStart(2, "0");
-  return `${String(d.getDate()).padStart(2, "0")} ${MONTHS[d.getMonth()]} ${d.getFullYear()}, ${h}:${mins} ${ampm}`;
+  return formatDateTimeIST(iso);
 }
 
 export function toIso(d: Date): string {

@@ -9,6 +9,7 @@ import { projectAvatarColor, projectInitials } from "@/lib/projectHelpers";
 import { useAuthStore } from "@/lib/authStore";
 import { useProjects } from "@/lib/useProjects";
 import { useProjectScope } from "@/lib/projectScope";
+import { formatDateTime24IST } from "@/lib/datetime";
 import * as audit from "@/lib/auditApi";
 import type { AuditActionApi, AuditLog } from "@/lib/auditApi";
 import { downloadPdf } from "@/lib/vyaparExport";
@@ -535,12 +536,7 @@ function resultLabel(statusCode: number | null): string {
   return statusCode >= 400 ? "Failed" : "Success";
 }
 
+// Audit events are timestamped in IST (prod runs in UTC), so the log always reads in local time.
 function formatWhen(iso: string): string {
-  if (!iso) return "—";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-  const hh = String(d.getHours()).padStart(2, "0");
-  const mm = String(d.getMinutes()).padStart(2, "0");
-  return `${String(d.getDate()).padStart(2, "0")} ${MONTHS[d.getMonth()]} ${d.getFullYear()}, ${hh}:${mm}`;
+  return formatDateTime24IST(iso);
 }
