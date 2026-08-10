@@ -34,22 +34,26 @@ export function PartyDrawer({
   onSaved: () => void;
 }) {
   const { departments } = useDepartments();
+  // The full backing record, so every field the source owns prefills on edit — otherwise saving
+  // would overwrite unshown fields (department, payroll, GSTIN, balances) with blanks.
+  const rawUser = existing?.raw.source === "member" ? existing.raw.user : undefined;
+  const rawParty = existing?.raw.source === "vyapar" ? existing.raw.party : undefined;
   const [type, setType] = useState<LibraryPartyType | "">(existing?.type ?? "");
   const [name, setName] = useState(existing?.name ?? "");
   const [phone, setPhone] = useState(existing?.phone ?? "");
   const [email, setEmail] = useState(existing?.email ?? "");
   const [password, setPassword] = useState("");
-  const [roleId, setRoleId] = useState<number | "">("");
-  const [departmentId, setDepartmentId] = useState<number | "">("");
-  const [staffType, setStaffType] = useState<"OFFICE" | "SITE" | "">("");
-  const [onPayroll, setOnPayroll] = useState(false);
-  const [gstin, setGstin] = useState("");
-  const [gstType, setGstType] = useState("");
-  const [state, setState] = useState("");
-  const [city, setCity] = useState("");
-  const [billingAddress, setBillingAddress] = useState("");
-  const [openingBalance, setOpeningBalance] = useState("");
-  const [creditLimit, setCreditLimit] = useState("");
+  const [roleId, setRoleId] = useState<number | "">(rawUser?.role.id ?? "");
+  const [departmentId, setDepartmentId] = useState<number | "">(rawUser?.departmentId ?? "");
+  const [staffType, setStaffType] = useState<"OFFICE" | "SITE" | "">(rawUser?.staffType ?? "");
+  const [onPayroll, setOnPayroll] = useState(rawUser?.onPayroll ?? false);
+  const [gstin, setGstin] = useState(rawParty?.gstin ?? "");
+  const [gstType, setGstType] = useState(rawParty?.gstType ?? "");
+  const [state, setState] = useState(rawParty?.state ?? "");
+  const [city, setCity] = useState(rawParty?.city ?? "");
+  const [billingAddress, setBillingAddress] = useState(rawParty?.billingAddress ?? "");
+  const [openingBalance, setOpeningBalance] = useState(rawParty?.openingBalance != null ? String(rawParty.openingBalance) : "");
+  const [creditLimit, setCreditLimit] = useState(rawParty?.creditLimit != null ? String(rawParty.creditLimit) : "");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 

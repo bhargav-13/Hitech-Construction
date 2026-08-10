@@ -35,6 +35,7 @@ function memberToParty(user: UserResponse): LibraryParty {
     isActive: user.isActive,
     subtitle: subtitle || null,
     balance: null,
+    raw: { source: "member", user },
   };
 }
 
@@ -52,6 +53,7 @@ function vyaparToParty(party: Party): LibraryParty {
     isActive: party.isActive,
     subtitle: subtitle || null,
     balance: party.balance,
+    raw: { source: "vyapar", party },
   };
 }
 

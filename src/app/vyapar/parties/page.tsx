@@ -15,6 +15,11 @@ import { partyLedgerHref } from "@/lib/vyaparLinks";
 import { exportRowsToCsv, printRows, downloadPdf } from "@/lib/vyaparExport";
 import * as vyapar from "@/lib/vyaparApi";
 import type { Party, PartyLedgerRow } from "@/lib/vyaparApi";
+import * as api from "@/lib/api";
+import type { UserResponse } from "@/lib/api";
+import { StaffLedgerPanel } from "@/components/vyapar/StaffLedgerPanel";
+import { getAllLoans, getAllReimbursements, type PayrollLoan, type PayrollReimbursement } from "@/lib/payrollClient";
+import { staffBalance } from "@/lib/staffLedger";
 import { usePartySettings } from "@/lib/usePartySettings";
 import { useVyaparProjectId } from "@/lib/projectScope";
 import {
@@ -47,13 +52,16 @@ export default function PartiesPage() {
   const { settings } = usePartySettings();
   const [tab, setTab] = useState<Tab>("details");
   const [parties, setParties] = useState<Party[]>([]);
+  // Our own members show alongside customers/suppliers so a person and their money live in one place.
+  const [members, setMembers] = useState<UserResponse[]>([]);
   const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [selectedMemberId, setSelectedMemberId] = useState<number | null>(null);
   const [ledger, setLedger] = useState<PartyLedgerRow[]>([]);
   const [ledgerLoading, setLedgerLoading] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
-  const [typeFilter, setTypeFilter] = useState<"All" | vyapar.PartyType>("All");
+  const [typeFilter, setTypeFilter] = useState<"All" | vyapar.PartyType | "STAFF">("All");
   const [groupFilter, setGroupFilter] = useState<string>("All");
   const [sortDesc, setSortDesc] = useState(false);
   const [editing, setEditing] = useState<Party | null>(null);
@@ -62,12 +70,31 @@ export default function PartiesPage() {
   const [ledgerSearch, setLedgerSearch] = useState("");
   const projectId = useVyaparProjectId();
 
+  // A member's money lives in the payroll-service. Loaded in bulk so the list can show each staff
+  // member's net balance without a call per row (manager-gated; a non-payroll user just sees none).
+  const [loans, setLoans] = useState<PayrollLoan[]>([]);
+  const [reimbursements, setReimbursements] = useState<PayrollReimbursement[]>([]);
+  const loansOf = useCallback((id: number) => loans.filter((l) => l.userId === id), [loans]);
+  const reimbursementsOf = useCallback((id: number) => reimbursements.filter((r) => r.userId === id), [reimbursements]);
+  const memberBalance = useCallback(
+    (id: number) => staffBalance(loansOf(id), reimbursementsOf(id)),
+    [loansOf, reimbursementsOf]
+  );
+
   const load = useCallback(async () => {
     setLoading(true);
     setError("");
     try {
-      const list = await vyapar.getParties(undefined, projectId);
+      const [list, users, loanList, reimbList] = await Promise.all([
+        vyapar.getParties(undefined, projectId),
+        api.getUsers(0, 500).then((r) => r.content).catch(() => [] as UserResponse[]),
+        getAllLoans().catch(() => [] as PayrollLoan[]),
+        getAllReimbursements().catch(() => [] as PayrollReimbursement[]),
+      ]);
       setParties(list);
+      setMembers(users);
+      setLoans(loanList);
+      setReimbursements(reimbList);
       setSelectedId((cur) => cur ?? list[0]?.id ?? null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Couldn't load parties.");
@@ -113,7 +140,19 @@ export default function PartiesPage() {
     return [...list].sort((a, b) => (sortDesc ? b.name.localeCompare(a.name) : a.name.localeCompare(b.name)));
   }, [parties, search, typeFilter, groupFilter, sortDesc]);
 
+  const filteredMembers = useMemo(() => {
+    // Members aren't customers/suppliers, so hide them under those type filters; a party-group
+    // filter is party-only too.
+    if (typeFilter === "CUSTOMER" || typeFilter === "SUPPLIER" || groupFilter !== "All") return [];
+    const q = search.trim().toLowerCase();
+    const list = members.filter((m) =>
+      !q ? true : [m.fullName, m.phoneNumber, m.email, m.role.name].some((f) => f?.toLowerCase().includes(q))
+    );
+    return [...list].sort((a, b) => (sortDesc ? b.fullName.localeCompare(a.fullName) : a.fullName.localeCompare(b.fullName)));
+  }, [members, search, typeFilter, groupFilter, sortDesc]);
+
   const selected = parties.find((p) => p.id === selectedId) ?? null;
+  const selectedMember = selectedMemberId != null ? members.find((m) => m.id === selectedMemberId) ?? null : null;
 
   const ledgerRows = useMemo(() => {
     const q = ledgerSearch.trim().toLowerCase();
@@ -134,10 +173,16 @@ export default function PartiesPage() {
   );
 
   const totals = useMemo(() => {
-    const receivable = parties.filter((p) => p.balance > 0).reduce((s, p) => s + p.balance, 0);
-    const payable = parties.filter((p) => p.balance < 0).reduce((s, p) => s + Math.abs(p.balance), 0);
+    let receivable = parties.filter((p) => p.balance > 0).reduce((s, p) => s + p.balance, 0);
+    let payable = parties.filter((p) => p.balance < 0).reduce((s, p) => s + Math.abs(p.balance), 0);
+    // Staff loans are a receivable; unpaid reimbursements are a payable.
+    for (const m of members) {
+      const b = memberBalance(m.id);
+      if (b > 0) receivable += b;
+      else if (b < 0) payable += -b;
+    }
     return { receivable, payable };
-  }, [parties]);
+  }, [parties, members, memberBalance]);
 
   // Groups rollup — the "Groups" tab.
   const groups = useMemo(() => {
@@ -183,7 +228,7 @@ export default function PartiesPage() {
           <div>
             <h2 className="text-base font-semibold text-gray-800">Parties</h2>
             <p className="mt-0.5 text-sm text-gray-500">
-              {parties.length} parties · To collect{" "}
+              {parties.length} parties · {members.length} staff · To collect{" "}
               <span className="font-medium text-emerald-600">{inr(totals.receivable)}</span> · To pay{" "}
               <span className="font-medium text-rose-600">{inr(totals.payable)}</span>
             </p>
@@ -361,9 +406,10 @@ export default function PartiesPage() {
                     size="sm"
                     className="flex-1"
                     options={[
-                      { value: "All", label: "All parties" },
+                      { value: "All", label: "All" },
                       { value: "CUSTOMER", label: "Customers" },
                       { value: "SUPPLIER", label: "Suppliers" },
+                      { value: "STAFF", label: "Staff" },
                     ]}
                   />
                   <button
@@ -392,11 +438,14 @@ export default function PartiesPage() {
 
               <div className="max-h-[560px] overflow-y-auto">
                 {filtered.map((p) => {
-                  const active = p.id === selectedId;
+                  const active = p.id === selectedId && selectedMemberId == null;
                   return (
                     <button
-                      key={p.id}
-                      onClick={() => setSelectedId(p.id)}
+                      key={`party-${p.id}`}
+                      onClick={() => {
+                        setSelectedId(p.id);
+                        setSelectedMemberId(null);
+                      }}
                       className={`flex w-full items-center justify-between gap-2 border-b border-gray-50 px-3 py-2.5 text-left transition-colors duration-150 last:border-b-0 ${
                         active ? "bg-cyan-50" : "hover:bg-gray-50"
                       }`}
@@ -417,14 +466,52 @@ export default function PartiesPage() {
                     </button>
                   );
                 })}
-                {filtered.length === 0 && (
+
+                {filteredMembers.length > 0 && (
+                  <div className="border-b border-gray-100 bg-gray-50/70 px-3 py-1 text-[10px] font-semibold tracking-wide text-gray-400 uppercase">
+                    Staff
+                  </div>
+                )}
+                {filteredMembers.map((m) => {
+                  const active = m.id === selectedMemberId;
+                  const bal = memberBalance(m.id);
+                  return (
+                    <button
+                      key={`member-${m.id}`}
+                      onClick={() => setSelectedMemberId(m.id)}
+                      className={`flex w-full items-center justify-between gap-2 border-b border-gray-50 px-3 py-2.5 text-left transition-colors duration-150 last:border-b-0 ${
+                        active ? "bg-cyan-50" : "hover:bg-gray-50"
+                      }`}
+                    >
+                      <span className="min-w-0">
+                        <span className={`block truncate text-sm ${active ? "font-medium text-brand-accent" : "text-gray-700"}`}>
+                          {m.fullName}
+                        </span>
+                        <span className="block truncate text-[11px] text-gray-400">{m.role.name}</span>
+                      </span>
+                      <span
+                        className={`shrink-0 text-sm ${bal > 0 ? "text-emerald-600" : bal < 0 ? "text-rose-600" : "text-gray-400"}`}
+                      >
+                        {bal ? inr(Math.abs(bal)) : "—"}
+                      </span>
+                    </button>
+                  );
+                })}
+
+                {filtered.length === 0 && filteredMembers.length === 0 && (
                   <div className="px-3 py-10 text-center text-sm text-gray-400">No parties match your filters.</div>
                 )}
               </div>
             </div>
 
             {/* ---- Detail ---- */}
-            {selected ? (
+            {selectedMember ? (
+              <StaffLedgerPanel
+                member={selectedMember}
+                loans={loansOf(selectedMember.id)}
+                reimbursements={reimbursementsOf(selectedMember.id)}
+              />
+            ) : selected && selectedMemberId == null ? (
               <div className="space-y-4">
                 <div className="rounded-xl border border-gray-200 bg-white p-4">
                   <div className="flex flex-wrap items-start justify-between gap-3">

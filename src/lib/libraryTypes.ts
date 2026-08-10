@@ -29,6 +29,9 @@ export const PARTY_TYPE_GROUPS: { label: string; types: LibraryPartyType[] }[] =
   },
 ];
 
+import type { UserResponse } from "./api";
+import type { Party } from "./vyaparApi";
+
 /** Which backing system a row came from — decides where an edit is written back to. */
 export type PartySource = "member" | "vyapar";
 
@@ -48,6 +51,9 @@ export interface LibraryParty {
   subtitle: string | null;
   /** Signed money position: positive = they owe us, negative = we owe them. Null when N/A. */
   balance: number | null;
+  /** The full backing record, so an edit form can prefill every field the source owns (without it,
+   *  editing would overwrite unshown fields — GSTIN, department, payroll — with blanks). */
+  raw: { source: "member"; user: UserResponse } | { source: "vyapar"; party: Party };
 }
 
 /** Colour per type so the pills read as a set rather than nine unrelated colours. */
