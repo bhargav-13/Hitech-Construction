@@ -13,6 +13,8 @@ import {
   FileText,
   Loader2,
   CheckCircle2,
+  Eye,
+  Lock,
   Image as ImageIcon,
   MessageSquare,
   ClipboardCheck,
@@ -27,10 +29,12 @@ import { TASK_PRIORITIES, TASK_STATUSES, formatTaskDate, formatTaskDateTime, toI
 import type { SubTask, Task, TaskAttachment, TaskComment, TaskPriority, TaskStatus } from "@/lib/taskTypes";
 import { UserAvatar, PeopleSelect, PeopleMultiSelect, ClientSelect } from "./TaskBits";
 import type { Person } from "./TaskBits";
+import { AttachmentPreview, canPreview } from "./AttachmentPreview";
 import { Select } from "@/components/Select";
 import { DatePicker } from "@/components/DatePicker";
 import type { RecurrenceRule } from "@/components/DatePicker";
 import { useDrawerDismiss } from "@/lib/useDrawerDismiss";
+import { useTaskRights } from "@/lib/taskPermissions";
 
 type Panel = "Comment" | "Attachment" | "Log Activity";
 
@@ -92,11 +96,13 @@ function ChatThread({
   attachments,
   userName,
   meId,
+  onOpenAttachment,
 }: {
   comments: TaskComment[];
   attachments: TaskAttachment[];
   userName: (id: string) => string;
   meId: string;
+  onOpenAttachment: (att: TaskAttachment) => void;
 }) {
   const entries = useMemo<ChatEntry[]>(() => {
     const merged: ChatEntry[] = [
@@ -136,31 +142,7 @@ function ChatThread({
                   {e.text}
                 </div>
               ) : (
-                <a
-                  href={e.att.url ?? undefined}
-                  download={e.att.url ? e.att.name : undefined}
-                  className={`flex max-w-[240px] items-center gap-2 rounded-2xl px-2.5 py-1.5 text-sm shadow-sm transition-opacity hover:opacity-90 ${
-                    mine
-                      ? "rounded-br-sm bg-brand-accent text-white"
-                      : "rounded-bl-sm bg-gray-100 text-gray-800"
-                  } ${e.att.url ? "cursor-pointer" : "cursor-default"}`}
-                  title={e.att.url ? `Download ${e.att.name}` : e.att.name}
-                >
-                  <span
-                    className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${
-                      mine ? "bg-white/20" : "bg-white"
-                    }`}
-                  >
-                    <FileText size={14} />
-                  </span>
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-xs font-medium">{e.att.name}</span>
-                    <span className={`block truncate text-[10px] ${mine ? "text-white/80" : "text-gray-500"}`}>
-                      {e.att.size || "File"}
-                      {e.att.url ? " · Tap to download" : " · No file data"}
-                    </span>
-                  </span>
-                </a>
+                <AttachmentBubble att={e.att} mine={mine} onOpen={onOpenAttachment} />
               )}
               <span className="mt-0.5 px-1 text-[10px] text-gray-400">{formatTaskDate(e.at)}</span>
             </div>
@@ -169,6 +151,73 @@ function ChatThread({
       })}
     </div>
   );
+}
+
+/**
+ * One attached file inside the chat. Images show as a real thumbnail so the conversation reads at a
+ * glance; everything else keeps the compact file card. Clicking opens the preview rather than
+ * downloading — downloading is still available from inside the viewer.
+ */
+function AttachmentBubble({
+  att,
+  mine,
+  onOpen,
+}: {
+  att: TaskAttachment;
+  mine: boolean;
+  onOpen: (att: TaskAttachment) => void;
+}) {
+  const previewable = canPreview(att);
+  const isImage = previewable && (att.contentType ?? "").startsWith("image/");
+  const bubble = mine ? "rounded-br-sm bg-brand-accent text-white" : "rounded-bl-sm bg-gray-100 text-gray-800";
+
+  if (isImage && att.url) {
+    return (
+      <button
+        onClick={() => onOpen(att)}
+        title={`Preview ${att.name}`}
+        className={`max-w-[240px] overflow-hidden rounded-2xl shadow-sm transition-opacity duration-150 hover:opacity-90 ${bubble}`}
+      >
+        {/* Stored as a data URL, so next/image can't optimise it. */}
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={att.url} alt={att.name} className="max-h-44 w-full object-cover" />
+        <span className="block px-2.5 py-1 text-left text-[10px] opacity-80">{att.size || "Image"}</span>
+      </button>
+    );
+  }
+
+  const body = (
+    <>
+      <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${mine ? "bg-white/20" : "bg-white"}`}>
+        <FileText size={14} />
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-xs font-medium">{att.name}</span>
+        <span className={`block truncate text-[10px] ${mine ? "text-white/80" : "text-gray-500"}`}>
+          {att.size || "File"}
+          {!att.url ? " · No file data" : previewable ? " · Tap to preview" : " · Tap to download"}
+        </span>
+      </span>
+    </>
+  );
+  const shell = `flex max-w-[240px] items-center gap-2 rounded-2xl px-2.5 py-1.5 text-left text-sm shadow-sm transition-opacity duration-150 ${bubble}`;
+
+  if (previewable) {
+    return (
+      <button onClick={() => onOpen(att)} title={`Preview ${att.name}`} className={`${shell} cursor-pointer hover:opacity-90`}>
+        {body}
+      </button>
+    );
+  }
+  // Nothing to render inline, but the bytes are there — keep the plain download.
+  if (att.url) {
+    return (
+      <a href={att.url} download={att.name} title={`Download ${att.name}`} className={`${shell} cursor-pointer hover:opacity-90`}>
+        {body}
+      </a>
+    );
+  }
+  return <span className={`${shell} cursor-default`}>{body}</span>;
 }
 
 /**
@@ -235,6 +284,7 @@ export function TaskDrawer({
 
   const createTask = useTaskStore((s) => s.createTask);
   const saveTask = useTaskStore((s) => s.saveTask);
+  const patchTask = useTaskStore((s) => s.patchTask);
   const addComment = useTaskStore((s) => s.addComment);
   const addAttachment = useTaskStore((s) => s.addAttachment);
   // Re-read the live task from the store so newly added comments/attachments/activity show at once.
@@ -266,7 +316,14 @@ export function TaskDrawer({
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   const [sendingComment, setSendingComment] = useState(false);
+  const [previewId, setPreviewId] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  // Who may change what. A task's details belong to its creator (and Super Admin); the assignee
+  // owns the work, so they get status and progress. Everyone else can still chat and attach.
+  const { rightsFor } = useTaskRights();
+  const rights = rightsFor(existing);
+  const readOnlyFields = !rights.canEditAll;
 
   const clients = parties.filter((p) => p.type === "Client");
   // A repeating task reminds at a time of day on each occurrence, so it carries no reminder date.
@@ -279,6 +336,22 @@ export function TaskDrawer({
     : allPeople;
 
   async function save(asDraft: boolean) {
+    // An assignee may move the work along but not rewrite the record, so their save is a narrow
+    // PATCH of just those two fields rather than a full PUT of the (disabled) form.
+    if (existing && !rights.canEditAll) {
+      if (!rights.canSetStatus && !rights.canSetProgress) return;
+      setSaving(true);
+      setError("");
+      try {
+        await patchTask(existing.id, { status, progress });
+        requestClose();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Could not save the task.");
+        setSaving(false);
+      }
+      return;
+    }
+
     if (!title.trim()) return setError("Task title is required.");
     if (!dueDate) return setError("Due date is required.");
     if (!assigneeId) return setError("An assignee is required.");
@@ -390,7 +463,8 @@ export function TaskDrawer({
                 step={5}
                 value={progress}
                 onChange={(e) => setProgress(Number(e.target.value))}
-                className="h-1 w-28 accent-cyan-600"
+                disabled={!rights.canSetProgress}
+                className="h-1 w-28 accent-cyan-600 disabled:cursor-not-allowed disabled:opacity-50"
               />
               <span className="w-9 text-xs font-medium text-gray-700">{progress}%</span>
             </div>
@@ -419,9 +493,17 @@ export function TaskDrawer({
                   setError("");
                 }}
                 placeholder="Write your task"
-                className="w-full border-b border-gray-200 pb-2 text-base font-medium text-gray-800 outline-none transition-colors duration-150 placeholder:text-gray-300 focus:border-cyan-500"
-                autoFocus
+                readOnly={readOnlyFields}
+                className="w-full border-b border-gray-200 pb-2 text-base font-medium text-gray-800 outline-none transition-colors duration-150 placeholder:text-gray-300 read-only:cursor-default read-only:text-gray-500 focus:border-cyan-500"
+                autoFocus={!readOnlyFields}
               />
+
+              {rights.reason && (
+                <div className="flex items-start gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-600">
+                  <Lock size={13} className="mt-0.5 shrink-0 text-gray-400" />
+                  <span>{rights.reason}</span>
+                </div>
+              )}
 
               {existing?.status === "Awaiting Approval" && (
                 <div className="flex items-center gap-2 rounded-lg border border-cyan-200 bg-cyan-50 px-3 py-2 text-xs font-medium text-cyan-800">
@@ -448,6 +530,7 @@ export function TaskDrawer({
                     onChange={setDueDate}
                     placeholder="Due date"
                     className="py-1.5"
+                    disabled={readOnlyFields}
                     recurrence={recurrenceRule}
                     onRecurrenceChange={setRecurrenceRule}
                     recurrenceInterval={recurrenceInterval}
@@ -461,27 +544,35 @@ export function TaskDrawer({
                   </div>
                   <div className="flex items-center gap-1.5">
                     {!isRepeating && (
-                      <DatePicker value={reminderDate} onChange={setReminderDate} placeholder="Date" className="py-1.5" />
+                      <DatePicker
+                        value={reminderDate}
+                        onChange={setReminderDate}
+                        placeholder="Date"
+                        className="py-1.5"
+                        disabled={readOnlyFields}
+                      />
                     )}
                     <input
                       type="time"
                       value={reminderTime}
                       onChange={(e) => setReminderTime(e.target.value)}
+                      disabled={readOnlyFields}
                       aria-label={isRepeating ? "Reminder time for each occurrence" : "Reminder time"}
-                      className="rounded-lg border border-gray-200 px-2 py-1.5 text-sm text-gray-700 outline-none transition-colors duration-150 focus:border-cyan-500"
+                      className="rounded-lg border border-gray-200 px-2 py-1.5 text-sm text-gray-700 outline-none transition-colors duration-150 focus:border-cyan-500 disabled:cursor-not-allowed disabled:bg-gray-50 disabled:opacity-70"
                     />
                     {isRepeating && <span className="text-[10px] text-gray-400">each occurrence</span>}
                     {(isRepeating ? reminderTime : reminderDate || reminderTime) ? (
                       <button
                         type="button"
                         onClick={() => { setReminderDate(""); setReminderTime(""); }}
+                        hidden={readOnlyFields}
                         title="Clear reminder"
                         className="rounded-md p-1 text-gray-400 transition-colors duration-150 hover:bg-rose-50 hover:text-rose-600"
                       >
                         <X size={13} />
                       </button>
                     ) : (
-                      !isRepeating && (
+                      !isRepeating && !readOnlyFields && (
                         <div className="flex gap-1">
                           {REMINDER_PRESETS.map((p) => (
                             <button
@@ -508,6 +599,7 @@ export function TaskDrawer({
                     value={status}
                     onChange={(v) => setStatus(v as TaskStatus)}
                     size="sm"
+                    disabled={!rights.canSetStatus}
                     options={TASK_STATUSES.map((s) => ({ value: s, label: s }))}
                   />
                 </div>
@@ -518,6 +610,7 @@ export function TaskDrawer({
                     value={priority}
                     onChange={(v) => setPriority(v as TaskPriority)}
                     size="sm"
+                    disabled={readOnlyFields}
                     options={TASK_PRIORITIES.map((p) => ({ value: p, label: p }))}
                   />
                 </div>
@@ -528,7 +621,8 @@ export function TaskDrawer({
                 onChange={(e) => setDescription(e.target.value)}
                 rows={3}
                 placeholder="Task description"
-                className="input resize-none"
+                readOnly={readOnlyFields}
+                className="input resize-none read-only:cursor-default read-only:bg-gray-50 read-only:text-gray-500"
               />
 
               <Field label="Project">
@@ -536,6 +630,7 @@ export function TaskDrawer({
                   value={projectId}
                   onChange={setProjectId}
                   placeholder="No project"
+                  disabled={readOnlyFields}
                   options={[
                     { value: "", label: "No project" },
                     ...projects.map((p) => ({ value: p.id, label: p.name })),
@@ -558,6 +653,7 @@ export function TaskDrawer({
                     }
                   }}
                   placeholder="Any department"
+                  disabled={readOnlyFields}
                   options={[
                     { value: "", label: "Any department" },
                     ...departments.map((d) => ({
@@ -573,6 +669,7 @@ export function TaskDrawer({
                   people={assigneePeople}
                   value={assigneeId}
                   onChange={setAssigneeId}
+                  disabled={readOnlyFields}
                   placeholder={departmentId ? "Select from this department" : "Select assignee"}
                 />
               </Field>
@@ -582,6 +679,7 @@ export function TaskDrawer({
                   clients={clients.map((c) => c.name)}
                   value={clientName}
                   onChange={setClientName}
+                  disabled={readOnlyFields}
                   onAddClient={(name) =>
                     addParty({ name, type: "Client", phone: "", gstin: "", rating: 0, toReceive: 0, toPay: 0 })
                   }
@@ -593,6 +691,7 @@ export function TaskDrawer({
                   people={allPeople}
                   values={followerIds}
                   onChange={setFollowerIds}
+                  disabled={readOnlyFields}
                   placeholder="Search and add followers…"
                 />
               </Field>
@@ -605,39 +704,46 @@ export function TaskDrawer({
                       <input
                         type="checkbox"
                         checked={s.done}
+                        disabled={readOnlyFields}
                         onChange={() =>
                           setSubtasks((list) =>
                             list.map((x) => (x.id === s.id ? { ...x, done: !x.done } : x))
                           )
                         }
-                        className="h-3.5 w-3.5 accent-cyan-600"
+                        className="h-3.5 w-3.5 accent-cyan-600 disabled:cursor-not-allowed disabled:opacity-50"
                       />
                       <span className={`flex-1 text-sm ${s.done ? "text-gray-400 line-through" : "text-gray-700"}`}>
                         {s.title}
                       </span>
                       <button
                         onClick={() => setSubtasks((list) => list.filter((x) => x.id !== s.id))}
+                        hidden={readOnlyFields}
                         className="rounded p-1 text-gray-300 transition-colors duration-150 hover:bg-rose-50 hover:text-rose-500"
                       >
                         <Trash2 size={13} />
                       </button>
                     </div>
                   ))}
-                  <div className="flex gap-2">
-                    <input
-                      value={subtaskInput}
-                      onChange={(e) => setSubtaskInput(e.target.value)}
-                      onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addSubtask())}
-                      placeholder="Add a sub task"
-                      className="input flex-1"
-                    />
-                    <button
-                      onClick={addSubtask}
-                      className="flex items-center gap-1 rounded-lg border border-gray-200 px-3 text-sm text-gray-600 transition-all duration-150 hover:border-brand-accent hover:text-brand-accent active:scale-95"
-                    >
-                      <Plus size={14} />
-                    </button>
-                  </div>
+                  {!readOnlyFields && (
+                    <div className="flex gap-2">
+                      <input
+                        value={subtaskInput}
+                        onChange={(e) => setSubtaskInput(e.target.value)}
+                        onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addSubtask())}
+                        placeholder="Add a sub task"
+                        className="input flex-1"
+                      />
+                      <button
+                        onClick={addSubtask}
+                        className="flex items-center gap-1 rounded-lg border border-gray-200 px-3 text-sm text-gray-600 transition-all duration-150 hover:border-brand-accent hover:text-brand-accent active:scale-95"
+                      >
+                        <Plus size={14} />
+                      </button>
+                    </div>
+                  )}
+                  {readOnlyFields && subtasks.length === 0 && (
+                    <p className="text-xs text-gray-400">No sub tasks.</p>
+                  )}
                 </div>
               </Field>
 
@@ -653,21 +759,26 @@ export function TaskDrawer({
               >
                 Close
               </button>
-              <button
-                onClick={() => save(true)}
-                disabled={saving}
-                className="rounded-lg border border-gray-200 px-4 py-2 text-sm font-medium text-gray-600 transition-all duration-150 hover:bg-gray-50 active:scale-95 disabled:opacity-50"
-              >
-                Draft
-              </button>
-              <button
-                onClick={() => save(false)}
-                disabled={saving}
-                className="flex items-center gap-1.5 rounded-lg bg-brand-accent px-5 py-2 text-sm font-medium text-white transition-all duration-150 hover:opacity-90 active:scale-95 disabled:opacity-60"
-              >
-                {saving && <Loader2 size={14} className="animate-spin" />}
-                {existing ? "Save" : "Submit"}
-              </button>
+              {rights.canEditAll && (
+                <button
+                  onClick={() => save(true)}
+                  disabled={saving}
+                  className="rounded-lg border border-gray-200 px-4 py-2 text-sm font-medium text-gray-600 transition-all duration-150 hover:bg-gray-50 active:scale-95 disabled:opacity-50"
+                >
+                  Draft
+                </button>
+              )}
+              {/* Nothing to save for a pure viewer — the chat and attachments save themselves. */}
+              {(rights.canEditAll || rights.canSetStatus || rights.canSetProgress) && (
+                <button
+                  onClick={() => save(false)}
+                  disabled={saving}
+                  className="flex items-center gap-1.5 rounded-lg bg-brand-accent px-5 py-2 text-sm font-medium text-white transition-all duration-150 hover:opacity-90 active:scale-95 disabled:opacity-60"
+                >
+                  {saving && <Loader2 size={14} className="animate-spin" />}
+                  {existing ? "Save" : "Submit"}
+                </button>
+              )}
             </div>
           </div>
 
@@ -702,6 +813,7 @@ export function TaskDrawer({
                   attachments={liveTask.attachments}
                   userName={userName}
                   meId={meId}
+                  onOpenAttachment={(a) => setPreviewId(a.id)}
                 />
               ) : panel === "Attachment" ? (
                 <div className="space-y-3">
@@ -714,39 +826,66 @@ export function TaskDrawer({
                   {liveTask.attachments.length === 0 ? (
                     <p className="py-6 text-center text-xs text-gray-400">No attachments yet.</p>
                   ) : (
-                    liveTask.attachments.map((a) => (
-                      <div
-                        key={a.id}
-                        className="group flex items-center gap-2.5 rounded-lg border border-gray-100 px-3 py-2 transition-colors duration-150 hover:border-cyan-200 hover:bg-cyan-50/30"
-                      >
-                        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-cyan-50 text-brand-accent">
-                          <FileText size={16} />
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <div className="truncate text-sm font-medium text-gray-700">{a.name}</div>
-                          <div className="text-[10px] text-gray-400">
-                            {a.size} · {formatTaskDate(a.at)}
+                    liveTask.attachments.map((a) => {
+                      const previewable = canPreview(a);
+                      const isImage = previewable && (a.contentType ?? "").startsWith("image/");
+                      return (
+                        <div
+                          key={a.id}
+                          className="group flex items-center gap-2.5 rounded-lg border border-gray-100 px-3 py-2 transition-colors duration-150 hover:border-cyan-200 hover:bg-cyan-50/30"
+                        >
+                          {/* An image thumbnail identifies the file far faster than a generic icon. */}
+                          {isImage && a.url ? (
+                            <button
+                              onClick={() => setPreviewId(a.id)}
+                              title={`Preview ${a.name}`}
+                              className="h-9 w-9 shrink-0 overflow-hidden rounded-lg transition-transform duration-150 hover:scale-105"
+                            >
+                              {/* eslint-disable-next-line @next/next/no-img-element */}
+                              <img src={a.url} alt={a.name} className="h-full w-full object-cover" />
+                            </button>
+                          ) : (
+                            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-cyan-50 text-brand-accent">
+                              <FileText size={16} />
+                            </div>
+                          )}
+                          <div className="min-w-0 flex-1">
+                            <div className="truncate text-sm font-medium text-gray-700">{a.name}</div>
+                            <div className="text-[10px] text-gray-400">
+                              {a.size} · {formatTaskDate(a.at)}
+                            </div>
                           </div>
+                          {a.url ? (
+                            <div className="flex shrink-0 items-center gap-1">
+                              {previewable && (
+                                <button
+                                  onClick={() => setPreviewId(a.id)}
+                                  title={`Preview ${a.name}`}
+                                  className="flex items-center gap-1 rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 text-xs font-medium text-gray-600 transition-all duration-150 hover:border-brand-accent hover:bg-cyan-50 hover:text-brand-accent active:scale-95"
+                                >
+                                  <Eye size={13} /> Preview
+                                </button>
+                              )}
+                              <a
+                                href={a.url}
+                                download={a.name}
+                                title={`Download ${a.name}`}
+                                className="flex items-center gap-1 rounded-lg border border-gray-200 bg-white p-1.5 text-gray-500 transition-all duration-150 hover:border-brand-accent hover:bg-cyan-50 hover:text-brand-accent active:scale-95"
+                              >
+                                <Download size={13} />
+                              </a>
+                            </div>
+                          ) : (
+                            <span
+                              title="This file was attached before download support was added, so its contents weren't stored. Re-upload it to enable download."
+                              className="shrink-0 cursor-help rounded-md bg-gray-50 px-2 py-1 text-[10px] font-medium text-gray-400"
+                            >
+                              No file data
+                            </span>
+                          )}
                         </div>
-                        {a.url ? (
-                          <a
-                            href={a.url}
-                            download={a.name}
-                            title={`Download ${a.name}`}
-                            className="flex shrink-0 items-center gap-1 rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 text-xs font-medium text-gray-600 transition-all duration-150 hover:border-brand-accent hover:bg-cyan-50 hover:text-brand-accent active:scale-95"
-                          >
-                            <Download size={13} /> Download
-                          </a>
-                        ) : (
-                          <span
-                            title="This file was attached before download support was added, so its contents weren't stored. Re-upload it to enable download."
-                            className="shrink-0 cursor-help rounded-md bg-gray-50 px-2 py-1 text-[10px] font-medium text-gray-400"
-                          >
-                            No file data
-                          </span>
-                        )}
-                      </div>
-                    ))
+                      );
+                    })
                   )}
                 </div>
               ) : (
@@ -783,6 +922,14 @@ export function TaskDrawer({
           </div>
         </div>
       </div>
+
+      {previewId && liveTask && (
+        <AttachmentPreview
+          attachments={liveTask.attachments}
+          startId={previewId}
+          onClose={() => setPreviewId(null)}
+        />
+      )}
     </div>
   );
 }

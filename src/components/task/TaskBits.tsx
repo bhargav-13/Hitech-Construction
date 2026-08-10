@@ -252,11 +252,13 @@ export function PeopleSelect({
   value,
   onChange,
   placeholder = "Select person",
+  disabled = false,
 }: {
   people: Person[];
   value: string;
   onChange: (id: string) => void;
   placeholder?: string;
+  disabled?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
@@ -268,10 +270,11 @@ export function PeopleSelect({
     <div ref={ref} className="relative">
       <button
         type="button"
+        disabled={disabled}
         onClick={() => setOpen((o) => !o)}
         className={`flex w-full items-center justify-between gap-2 rounded-lg border bg-white px-3 py-2 text-left text-sm outline-none transition-colors duration-150 ${
           open ? "border-cyan-500 ring-2 ring-cyan-500/15" : "border-gray-200 hover:border-gray-300"
-        }`}
+        } ${disabled ? "cursor-not-allowed bg-gray-50 opacity-70" : ""}`}
       >
         {selected ? (
           <span className="flex min-w-0 items-center gap-2">
@@ -324,11 +327,13 @@ export function PeopleMultiSelect({
   values,
   onChange,
   placeholder = "Add people",
+  disabled = false,
 }: {
   people: Person[];
   values: string[];
   onChange: (ids: string[]) => void;
   placeholder?: string;
+  disabled?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
@@ -340,10 +345,10 @@ export function PeopleMultiSelect({
   return (
     <div ref={ref} className="relative">
       <div
-        onClick={() => setOpen(true)}
-        className={`flex min-h-[38px] w-full cursor-text flex-wrap items-center gap-1.5 rounded-lg border bg-white px-2 py-1.5 text-sm transition-colors duration-150 ${
+        onClick={() => !disabled && setOpen(true)}
+        className={`flex min-h-[38px] w-full flex-wrap items-center gap-1.5 rounded-lg border bg-white px-2 py-1.5 text-sm transition-colors duration-150 ${
           open ? "border-cyan-500 ring-2 ring-cyan-500/15" : "border-gray-200 hover:border-gray-300"
-        }`}
+        } ${disabled ? "cursor-not-allowed bg-gray-50 opacity-70" : "cursor-text"}`}
       >
         {selected.length === 0 && <span className="px-1 text-gray-400">{placeholder}</span>}
         {selected.map((p) => (
@@ -352,6 +357,7 @@ export function PeopleMultiSelect({
             {p.name.split(" ")[0]}
             <button
               type="button"
+              hidden={disabled}
               onClick={(e) => { e.stopPropagation(); toggle(p.id); }}
               className="rounded-full p-0.5 text-brand-accent/70 transition-colors hover:bg-cyan-100 hover:text-brand-accent"
               title="Remove"
@@ -408,12 +414,14 @@ export function ClientSelect({
   onChange,
   onAddClient,
   placeholder = "No client",
+  disabled = false,
 }: {
   clients: string[];
   value: string;
   onChange: (name: string) => void;
   onAddClient: (name: string) => void;
   placeholder?: string;
+  disabled?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
@@ -437,10 +445,11 @@ export function ClientSelect({
     <div ref={ref} className="relative">
       <button
         type="button"
+        disabled={disabled}
         onClick={() => setOpen((o) => !o)}
         className={`flex w-full items-center justify-between gap-2 rounded-lg border bg-white px-3 py-2 text-left text-sm outline-none transition-colors duration-150 ${
           open ? "border-cyan-500 ring-2 ring-cyan-500/15" : "border-gray-200 hover:border-gray-300"
-        }`}
+        } ${disabled ? "cursor-not-allowed bg-gray-50 opacity-70" : ""}`}
       >
         <span className={`truncate ${value ? "text-gray-700" : "text-gray-400"}`}>{value || placeholder}</span>
         <ChevronDown size={15} className={`shrink-0 text-gray-400 transition-transform duration-200 ${open ? "rotate-180" : ""}`} />

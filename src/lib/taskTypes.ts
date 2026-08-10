@@ -47,6 +47,8 @@ export interface TaskAttachment {
   url: string | null;
   /** Uploader user id — needed to align attachment bubbles in the chat view. */
   userId: string;
+  /** MIME type as uploaded; null on older rows, where the file extension is the fallback. */
+  contentType: string | null;
 }
 
 export interface TaskActivity {
@@ -170,6 +172,7 @@ export function taskFromApi(t: ApiTask): Task {
       at: a.at,
       url: a.dataUrl ?? null,
       userId: String(a.uploadedBy),
+      contentType: a.contentType ?? null,
     })),
     activity: (t.activity ?? []).map((a) => ({
       id: String(a.id),

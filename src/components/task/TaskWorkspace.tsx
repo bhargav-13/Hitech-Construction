@@ -30,6 +30,8 @@ import { useProjectScope } from "@/lib/projectScope";
 import { useTaskStore } from "@/lib/taskStore";
 import { getAccessSelf } from "@/lib/api";
 import { useTaskUnread } from "@/lib/taskNotifications";
+import { isSuperAdminRole, useTaskRights } from "@/lib/taskPermissions";
+import type { TaskRights } from "@/lib/taskPermissions";
 import {
   TASK_PRIORITIES,
   TASK_STATUSES,
@@ -112,7 +114,10 @@ export function TaskWorkspace({ projectId }: { projectId?: string }) {
   const createTask = useTaskStore((s) => s.createTask);
   const authUserId = useAuthStore((s) => s.user?.id);
   const roleName = useAuthStore((s) => s.user?.role?.name);
-  const isSuperAdmin = roleName === "Super Admin";
+  const isSuperAdmin = isSuperAdminRole(roleName);
+  // A task's details belong to its creator (and Super Admin); the assignee may only move status
+  // and progress. Row controls are disabled to match, so nothing fails on click.
+  const { rightsFor } = useTaskRights();
   const scopeMode = useTaskStore((s) => s.scope);
   const setStoreScope = useTaskStore((s) => s.setScope);
   const [hasSubtree, setHasSubtree] = useState(false);
@@ -290,12 +295,22 @@ export function TaskWorkspace({ projectId }: { projectId?: string }) {
     (dueFrom ? 1 : 0) +
     (dueTo ? 1 : 0);
 
-  const onPatchStatus = (t: Task, status: TaskStatus) => void patchTask(t.id, { status });
-  const onPatchPriority = (t: Task, priority: TaskPriority) => void patchTask(t.id, { priority });
+  const onPatchStatus = (t: Task, status: TaskStatus) => {
+    if (!rightsFor(t).canSetStatus) return;
+    void patchTask(t.id, { status });
+  };
+  const onPatchPriority = (t: Task, priority: TaskPriority) => {
+    if (!rightsFor(t).canEditAll) return;
+    void patchTask(t.id, { priority });
+  };
   const onDelete = (t: Task) => {
+    if (!rightsFor(t).canDelete) return;
     if (confirm(`Delete "${t.title}"? This can't be undone.`)) void removeTask(t.id);
   };
-  const onTogglePin = (t: Task) => void patchTask(t.id, { pinned: !t.pinned });
+  const onTogglePin = (t: Task) => {
+    if (!rightsFor(t).canEditAll) return;
+    void patchTask(t.id, { pinned: !t.pinned });
+  };
 
   // ---- Bulk actions ----
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -322,6 +337,24 @@ export function TaskWorkspace({ projectId }: { projectId?: string }) {
     } finally {
       setBulkBusy(false);
     }
+  }
+
+  // A selection can mix tasks the user owns with ones they don't. Each bulk op therefore runs only
+  // over the rows it's allowed to touch, and says so when it had to skip some.
+  const selectedTasks = allTasks.filter((t) => selected.has(t.id));
+  const bulkEditableIds = selectedTasks.filter((t) => rightsFor(t).canEditAll).map((t) => t.id);
+  const bulkStatusIds = selectedTasks.filter((t) => rightsFor(t).canSetStatus).map((t) => t.id);
+
+  function runBulkOn(ids: string[], fn: (ids: string[]) => Promise<void>) {
+    const skipped = selected.size - ids.length;
+    if (ids.length === 0) {
+      alert("You can only change tasks you created. None of the selected tasks qualify.");
+      return;
+    }
+    if (skipped > 0 && !confirm(`${skipped} of ${selected.size} selected task(s) aren't yours to change and will be skipped. Continue?`)) {
+      return;
+    }
+    void runBulk(() => fn(ids));
   }
 
   /** Export the currently filtered tasks to CSV. */
@@ -517,7 +550,7 @@ export function TaskWorkspace({ projectId }: { projectId?: string }) {
             label="Set status"
             value="All"
             onChange={(v) =>
-              v !== "All" && runBulk(() => bulkPatch([...selected], { status: v as TaskStatus }))
+              v !== "All" && runBulkOn(bulkStatusIds, (ids) => bulkPatch(ids, { status: v as TaskStatus }))
             }
             options={["All", ...TASK_STATUSES]}
           />
@@ -525,27 +558,31 @@ export function TaskWorkspace({ projectId }: { projectId?: string }) {
             label="Set priority"
             value="All"
             onChange={(v) =>
-              v !== "All" && runBulk(() => bulkPatch([...selected], { priority: v as TaskPriority }))
+              v !== "All" && runBulkOn(bulkEditableIds, (ids) => bulkPatch(ids, { priority: v as TaskPriority }))
             }
             options={["All", ...TASK_PRIORITIES]}
           />
           <FilterSelect
             label="Assign to"
             value="All"
-            onChange={(v) => v !== "All" && runBulk(() => bulkPatch([...selected], { assigneeId: v }))}
+            onChange={(v) => v !== "All" && runBulkOn(bulkEditableIds, (ids) => bulkPatch(ids, { assigneeId: v }))}
             options={["All", ...users.map((u) => u.id)]}
             render={(v) => (v === "All" ? "—" : userName(v))}
           />
           <button
-            onClick={() => runBulk(() => bulkPatch([...selected], { pinned: true }))}
+            onClick={() => runBulkOn(bulkEditableIds, (ids) => bulkPatch(ids, { pinned: true }))}
             className="flex items-center gap-1 rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 text-xs font-medium text-gray-600 transition-all duration-150 hover:border-amber-400 hover:text-amber-600 active:scale-95"
           >
             <Pin size={12} /> Pin
           </button>
           <button
             onClick={() => {
-              if (confirm(`Delete ${selected.size} task(s)? This can't be undone.`)) {
-                void runBulk(() => bulkRemove([...selected]));
+              if (bulkEditableIds.length === 0) {
+                alert("You can only delete tasks you created.");
+                return;
+              }
+              if (confirm(`Delete ${bulkEditableIds.length} task(s)? This can't be undone.`)) {
+                runBulkOn(bulkEditableIds, (ids) => bulkRemove(ids));
               }
             }}
             className="flex items-center gap-1 rounded-lg border border-rose-200 bg-white px-2.5 py-1.5 text-xs font-medium text-rose-600 transition-all duration-150 hover:bg-rose-50 active:scale-95"
@@ -708,11 +745,12 @@ export function TaskWorkspace({ projectId }: { projectId?: string }) {
           projectName={projectName}
           showProject={!projectId}
           onOpen={setEditing}
-          onToggleDone={(t) => void patchTask(t.id, { status: t.status === "Completed" ? "Pending" : "Completed" })}
+          onToggleDone={(t) => onPatchStatus(t, t.status === "Completed" ? "Pending" : "Completed")}
           onStatus={onPatchStatus}
           onPriority={onPatchPriority}
           onDelete={onDelete}
           onTogglePin={onTogglePin}
+          rightsFor={rightsFor}
           columns={columns}
           departmentName={departmentName}
           selected={selected}
@@ -721,7 +759,7 @@ export function TaskWorkspace({ projectId }: { projectId?: string }) {
           allSelected={allSelected}
         />
       ) : view === "Kanban" ? (
-        <KanbanView tasks={tasks} userName={userName} onOpen={setEditing} onMove={(t, s) => void patchTask(t.id, { status: s })} />
+        <KanbanView tasks={tasks} userName={userName} onOpen={setEditing} onMove={onPatchStatus} />
       ) : (
         <CalendarView tasks={tasks} onOpen={setEditing} />
       )}
@@ -847,6 +885,7 @@ function ListView({
   onPriority,
   onDelete,
   onTogglePin,
+  rightsFor,
   columns,
   departmentName,
   selected,
@@ -864,6 +903,7 @@ function ListView({
   onPriority: (t: Task, p: TaskPriority) => void;
   onDelete: (t: Task) => void;
   onTogglePin: (t: Task) => void;
+  rightsFor: (t: Task) => TaskRights;
   columns: ColumnKey[];
   departmentName: (id: string | null) => string;
   selected: Set<string>;
@@ -902,6 +942,7 @@ function ListView({
         <tbody>
           {tasks.map((t) => {
             const overdue = isOverdue(t);
+            const rights = rightsFor(t);
             return (
               <tr
                 key={t.id}
@@ -923,8 +964,15 @@ function ListView({
                 <td className="px-2 py-2.5" onClick={(e) => e.stopPropagation()}>
                   <button
                     onClick={() => onTogglePin(t)}
-                    title={t.pinned ? "Unpin task" : "Pin task to top"}
-                    className={`rounded-md p-1 transition-all duration-150 active:scale-90 ${
+                    disabled={!rights.canEditAll}
+                    title={
+                      !rights.canEditAll
+                        ? "Only the task's creator can pin it"
+                        : t.pinned
+                          ? "Unpin task"
+                          : "Pin task to top"
+                    }
+                    className={`rounded-md p-1 transition-all duration-150 active:scale-90 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent ${
                       t.pinned
                         ? "text-amber-500 hover:bg-amber-100"
                         : "text-gray-300 opacity-0 group-hover:opacity-100 hover:bg-gray-100 hover:text-amber-500"
@@ -986,12 +1034,12 @@ function ListView({
                 {/* Inline editors — change priority/status without opening the task. */}
                 {show("priority") && (
                   <td className="px-4 py-2.5" onClick={(e) => e.stopPropagation()}>
-                    <PrioritySelect priority={t.priority} onChange={(p) => onPriority(t, p)} />
+                    <PrioritySelect priority={t.priority} onChange={(p) => onPriority(t, p)} disabled={!rights.canEditAll} />
                   </td>
                 )}
                 {show("status") && (
                   <td className="px-4 py-2.5" onClick={(e) => e.stopPropagation()}>
-                    <StatusSelect status={t.status} onChange={(s) => onStatus(t, s)} />
+                    <StatusSelect status={t.status} onChange={(s) => onStatus(t, s)} disabled={!rights.canSetStatus} />
                   </td>
                 )}
                 {show("progress") && (
@@ -1003,8 +1051,9 @@ function ListView({
                 <td className="px-4 py-2.5" onClick={(e) => e.stopPropagation()}>
                   <button
                     onClick={() => onDelete(t)}
-                    title="Delete task"
-                    className="rounded-md p-1.5 text-gray-400 transition-all duration-150 hover:bg-rose-50 hover:text-rose-600 active:scale-90"
+                    disabled={!rights.canDelete}
+                    title={rights.canDelete ? "Delete task" : "Only the task's creator can delete it"}
+                    className="rounded-md p-1.5 text-gray-400 transition-all duration-150 hover:bg-rose-50 hover:text-rose-600 active:scale-90 disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-gray-400"
                   >
                     <Trash2 size={15} />
                   </button>
