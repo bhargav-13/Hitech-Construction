@@ -5,6 +5,8 @@ import Link from "next/link";
 import { TenderShell, TenderEmpty } from "@/components/tender/TenderShell";
 import { SortTh } from "@/components/vyapar/SortTh";
 import { TenderForm } from "@/components/tender/TenderForm";
+import { ImportDialog } from "@/components/vyapar/ImportDialog";
+import { tenderImportConfig } from "@/lib/tenderImportConfigs";
 import { useTableSort } from "@/lib/useTableSort";
 import { useTenderStore } from "@/lib/tenderStore";
 import { EMD_MODE_META, EMD_STATE_META, type Tender } from "@/lib/tenderTypes";
@@ -13,7 +15,7 @@ import { BUCKET_META } from "@/lib/tenderTypes";
 import { tdate, tiso, tmoney, tval } from "@/lib/tenderHelpers";
 import { exportTenders } from "@/lib/tenderExcel";
 import { inr } from "@/lib/format";
-import { Download, Landmark, Pencil, Plus, Search, Undo2 } from "lucide-react";
+import { Download, Landmark, Pencil, Plus, Search, Undo2, Upload } from "lucide-react";
 
 type Filter = "BLOCKED" | "RECOVERABLE" | "RELEASED" | "PENDING" | "ALL";
 
@@ -35,10 +37,13 @@ const FILTERS: { key: Filter; label: string; hint: string }[] = [
 export default function TenderEmdPage() {
   const tenders = useTenderStore((s) => s.tenders);
   const updateTender = useTenderStore((s) => s.updateTender);
+  const addTender = useTenderStore((s) => s.addTender);
   const [filter, setFilter] = useState<Filter>("BLOCKED");
   const [search, setSearch] = useState("");
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<Tender | null>(null);
+  const [importing, setImporting] = useState(false);
+  const importConfig = useMemo(() => tenderImportConfig(addTender), [addTender]);
 
   const money = useMemo(() => exposure(tenders), [tenders]);
 
@@ -92,6 +97,12 @@ export default function TenderEmdPage() {
             <p className="text-sm text-gray-500">Every rupee of earnest money, where it sits and whether it is coming back.</p>
           </div>
           <div className="flex items-center gap-2">
+            <button
+              onClick={() => setImporting(true)}
+              className="flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs font-medium text-gray-600 transition-colors duration-150 hover:bg-gray-50"
+            >
+              <Upload size={14} /> Import
+            </button>
             <button
               onClick={() => exportTenders(sorted, "emd-register.xlsx", "EMD")}
               className="flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs font-medium text-gray-600 transition-colors duration-150 hover:bg-gray-50"
@@ -239,6 +250,7 @@ export default function TenderEmdPage() {
       </div>
 
       {formOpen && <TenderForm tender={editing ?? undefined} initialStage="APPLIED" onClose={() => setFormOpen(false)} />}
+      {importing && <ImportDialog config={importConfig} onClose={() => setImporting(false)} onImported={() => setImporting(false)} />}
     </TenderShell>
   );
 }

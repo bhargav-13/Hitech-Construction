@@ -42,3 +42,39 @@ export function inrAxis(value: number): string {
 export function formatLakh(value: number): string {
   return inrNumber(value);
 }
+
+/**
+ * Normalize any incoming date to ISO `YYYY-MM-DD`. Vyapar/Excel exports use Indian day-first
+ * formats (`31/10/2025`, `31-10-2025`, `31.10.2025`, 2-digit years too); already-ISO values pass
+ * through untouched, and anything unrecognisable is returned as-is so nothing is silently dropped.
+ * This is what import should store so dates sort, range-filter and display correctly.
+ */
+export function toIsoDate(value: string | null | undefined): string {
+  const v = String(value ?? "").trim();
+  if (!v) return "";
+  if (/^\d{4}-\d{2}-\d{2}/.test(v)) return v.slice(0, 10);
+  const m = v.match(/^(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{2,4})$/);
+  if (m) {
+    const d = m[1];
+    const mo = m[2];
+    let y = m[3];
+    if (y.length === 2) y = (Number(y) > 70 ? "19" : "20") + y;
+    return `${y}-${mo.padStart(2, "0")}-${d.padStart(2, "0")}`;
+  }
+  return v;
+}
+
+/**
+ * Render a stored book date as `DD/MM/YYYY`. Accepts ISO (`2025-10-31`) and tolerates legacy rows
+ * that were imported before date normalization existed and stored raw `DD/MM/YYYY` — those are
+ * shown as-is rather than producing `undefined/undefined/…`.
+ */
+export function bookDate(value: string | null | undefined): string {
+  const v = String(value ?? "").trim();
+  if (!v) return "—";
+  if (/^\d{4}-\d{2}-\d{2}/.test(v)) {
+    const [y, m, d] = v.slice(0, 10).split("-");
+    return `${d}/${m}/${y}`;
+  }
+  return v;
+}

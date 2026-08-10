@@ -5,10 +5,13 @@ import { TenderShell, TenderEmpty } from "@/components/tender/TenderShell";
 import { StepEditor } from "@/components/tender/StepEditor";
 import { TrackerDetailDrawer } from "@/components/tender/TrackerDetailDrawer";
 import { MilestoneForm } from "@/components/tender/MilestoneForm";
+import { ImportDialog } from "@/components/vyapar/ImportDialog";
+import { milestoneImportConfig } from "@/lib/tenderImportConfigs";
+import { exportRowsToCsv } from "@/lib/vyaparExport";
 import { useTenderStore } from "@/lib/tenderStore";
 import type { Tender, TenderMilestones, TrackerStep } from "@/lib/tenderTypes";
 import { tdate, tval } from "@/lib/tenderHelpers";
-import { CalendarDays, ListChecks, Plus, Search, SlidersHorizontal } from "lucide-react";
+import { CalendarDays, Download, ListChecks, Plus, Search, SlidersHorizontal, Upload } from "lucide-react";
 
 export default function TenderTrackerPage() {
   const milestones = useTenderStore((s) => s.milestones);
@@ -18,8 +21,11 @@ export default function TenderTrackerPage() {
   const addMilestoneStep = useTenderStore((s) => s.addMilestoneStep);
   const removeMilestoneStep = useTenderStore((s) => s.removeMilestoneStep);
   const renameMilestoneStep = useTenderStore((s) => s.renameMilestoneStep);
+  const addMilestone = useTenderStore((s) => s.addMilestone);
   const [search, setSearch] = useState("");
   const [editing, setEditing] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const importConfig = useMemo(() => milestoneImportConfig(addMilestone), [addMilestone]);
   // Which milestone card is open in the tracker-detail drawer (task: card opens the tracker, not the tender).
   const [selectedId, setSelectedId] = useState<string | null>(null);
   // Add / edit a tracker record.
@@ -52,6 +58,24 @@ export default function TenderTrackerPage() {
             <p className="text-sm text-gray-500">Milestone checklist per tender — click any step to toggle it.</p>
           </div>
           <div className="flex items-center gap-2">
+            <button
+              onClick={() => setImporting(true)}
+              className="flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-600 transition-colors hover:bg-gray-50"
+            >
+              <Upload size={14} /> Import
+            </button>
+            <button
+              onClick={() =>
+                exportRowsToCsv(
+                  "tender-status-tracker",
+                  ["Name of Work", "Tender ID", "Work Start Date", "Progress note"],
+                  filtered.map((m) => [m.nameOfWork, m.tenderId, m.workStartDate, m.progress]),
+                )
+              }
+              className="flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-600 transition-colors hover:bg-gray-50"
+            >
+              <Download size={14} /> Export
+            </button>
             <button
               onClick={() => setEditing((v) => !v)}
               className={`flex items-center gap-1.5 rounded-lg border px-3 py-2 text-sm transition-colors ${
@@ -124,6 +148,7 @@ export default function TenderTrackerPage() {
       )}
 
       {formOpen && <MilestoneForm milestone={editingRecord ?? undefined} onClose={() => setFormOpen(false)} />}
+      {importing && <ImportDialog config={importConfig} onClose={() => setImporting(false)} onImported={() => setImporting(false)} />}
     </TenderShell>
   );
 }

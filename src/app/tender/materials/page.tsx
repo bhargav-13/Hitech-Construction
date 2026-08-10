@@ -3,15 +3,21 @@
 import { useMemo, useState } from "react";
 import { TenderShell, TenderEmpty } from "@/components/tender/TenderShell";
 import { SortTh } from "@/components/vyapar/SortTh";
+import { ImportDialog } from "@/components/vyapar/ImportDialog";
+import { materialImportConfig } from "@/lib/tenderImportConfigs";
+import { exportRowsToCsv } from "@/lib/vyaparExport";
 import { useTableSort } from "@/lib/useTableSort";
 import { useTenderStore } from "@/lib/tenderStore";
 import { tval } from "@/lib/tenderHelpers";
 import type { MaterialParty } from "@/lib/tenderTypes";
-import { Boxes, Mail, Search } from "lucide-react";
+import { Boxes, Download, Mail, Search, Upload } from "lucide-react";
 
 export default function TenderMaterialsPage() {
   const materials = useTenderStore((s) => s.materials);
+  const addMaterial = useTenderStore((s) => s.addMaterial);
   const [search, setSearch] = useState("");
+  const [importing, setImporting] = useState(false);
+  const importConfig = useMemo(() => materialImportConfig(addMaterial), [addMaterial]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -41,7 +47,27 @@ export default function TenderMaterialsPage() {
             <h1 className="text-lg font-semibold text-gray-800">Material Party Directory</h1>
             <p className="text-sm text-gray-500">Suppliers and manufacturers for tender material sourcing.</p>
           </div>
-          <div className="text-sm text-gray-500">{filtered.length} parties</div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setImporting(true)}
+              className="flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-600 transition-colors duration-150 hover:bg-gray-50"
+            >
+              <Upload size={14} /> Import
+            </button>
+            <button
+              onClick={() =>
+                exportRowsToCsv(
+                  "tender-material-parties",
+                  ["Party", "Material / Type", "Make", "Location", "Contact", "Email"],
+                  sorted.map((m) => [m.party, m.manufacturerType, m.make, m.location, m.contact, m.email]),
+                )
+              }
+              className="flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-600 transition-colors duration-150 hover:bg-gray-50"
+            >
+              <Download size={14} /> Export
+            </button>
+            <div className="text-sm text-gray-500">{filtered.length} parties</div>
+          </div>
         </div>
 
         <div className="flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 transition-colors duration-150 focus-within:border-cyan-500">
@@ -93,6 +119,7 @@ export default function TenderMaterialsPage() {
           </div>
         )}
       </div>
+      {importing && <ImportDialog config={importConfig} onClose={() => setImporting(false)} onImported={() => setImporting(false)} />}
     </TenderShell>
   );
 }

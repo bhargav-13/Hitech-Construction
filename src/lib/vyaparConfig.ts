@@ -145,6 +145,10 @@ export const VYAPAR_REPORTS: ReportDef[] = [
   { id: "profit-loss", title: "Profit And Loss", group: "Transaction" },
   { id: "bill-wise-profit", title: "Bill Wise Profit", group: "Transaction" },
   { id: "cash-flow", title: "Cash Flow", group: "Transaction" },
+  // Expense
+  { id: "expense", title: "Expense Transaction Report", group: "Expense" },
+  { id: "expense-category", title: "Expense Category Report", group: "Expense" },
+  { id: "expense-item", title: "Expense Item Report", group: "Expense" },
   // Party
   { id: "party", title: "Party Statement", group: "Party" },
   { id: "party-profit", title: "Party wise Profit & Loss", group: "Party" },
@@ -179,6 +183,7 @@ export const VYAPAR_REPORTS: ReportDef[] = [
 
 export const REPORT_GROUPS = [
   "Transaction",
+  "Expense",
   "Party",
   "GST",
   "Item / Stock",

@@ -108,30 +108,89 @@ export function ImportDialog({
     e.target.value = "";
     if (!file) return;
     setError("");
-    // .xlsx is a zip archive — ask for CSV, which every spreadsheet app exports.
-    if (/\.xlsx?$/i.test(file.name)) {
-      setError("Save the sheet as CSV first (File → Save As → CSV), then upload it here.");
+    let table: string[][];
+    try {
+      if (/\.xlsx?$/i.test(file.name)) {
+        // Read the workbook directly (lazy-loaded so it doesn't weigh down every page).
+        const XLSX = await import("xlsx");
+        const wb = XLSX.read(await file.arrayBuffer(), { type: "array" });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        table = (XLSX.utils.sheet_to_json(ws, { header: 1, blankrows: false, raw: false, defval: "" }) as unknown[][]).map(
+          (r) => r.map((c) => String(c ?? ""))
+        );
+      } else {
+        table = parseCsv(await file.text());
+      }
+    } catch {
+      setError("Couldn't read that file — save it as CSV or a standard .xlsx and try again.");
       return;
     }
-    const parsed = parseCsv(await file.text());
-    if (parsed.length === 0) {
+    // Vyapar (and many exports) put a title/"Generated on …" line above the real header. Skip any
+    // such preamble by starting at the first row that looks like a header — 3+ non-empty cells.
+    const headerIdx = table.findIndex((r) => r.filter((c) => c.trim()).length >= 3);
+    const rows = table.slice(headerIdx === -1 ? 0 : headerIdx).filter((r) => r.some((c) => c.trim()));
+    if (rows.length === 0) {
       setError("That file looks empty.");
       return;
     }
     setFileName(file.name);
-    setHeaders(parsed[0]);
-    setRows(parsed.slice(1));
-    setMapping(parsed[0].map(config.guess));
+    setHeaders(rows[0]);
+    setRows(rows.slice(1));
+    setMapping(rows[0].map(config.guess));
   }
 
-  const dataRows = hasHeader ? rows : [headers, ...rows];
+  const dataRows = useMemo(() => (hasHeader ? rows : [headers, ...rows]), [hasHeader, rows, headers]);
   const reqIdx = mapping.indexOf(config.requiredKey);
-  const validCount = useMemo(() => {
-    if (reqIdx === -1) return 0;
-    const present = dataRows.filter((r) => (r[reqIdx] ?? "").trim());
-    // Grouped imports count distinct documents, not line rows.
-    return config.group ? new Set(present.map((r) => (r[reqIdx] ?? "").trim())).size : present.length;
-  }, [dataRows, reqIdx, config.group]);
+
+  // The records that will actually be created — built once and reused for the count, the preview
+  // total and the commit, so "Import N" always matches what lands.
+  const records = useMemo<Record<string, unknown>[]>(() => {
+    if (reqIdx === -1) return [];
+    const rowRecs = dataRows
+      .filter((r) => (r[reqIdx] ?? "").trim())
+      .map((r) => {
+        const rec: Record<string, unknown> = {};
+        mapping.forEach((key, i) => {
+          const v = (r[i] ?? "").trim();
+          if (!v || key === "skip") return;
+          const custom = config.coerce?.(key, v);
+          rec[key] = custom !== undefined ? custom : fieldByKey[key]?.numeric ? num(v) : v;
+        });
+        return rec;
+      });
+
+    const scopeBase = {
+      ...(config.base ?? {}),
+      ...(config.scoped ? { projectId: projectId ?? null } : {}),
+    };
+
+    if (!config.group) return rowRecs.map((r) => ({ ...scopeBase, ...r }));
+
+    // Fold rows sharing a group key into one document. A *blank* key never merges — each such row
+    // is its own bill — so exports with missing invoice numbers don't collapse into a few records.
+    const { byKey, lineFields } = config.group;
+    const lineSet = new Set(lineFields);
+    const groups = new Map<string, Record<string, unknown>[]>();
+    rowRecs.forEach((rec, i) => {
+      const raw = String(rec[byKey] ?? "").trim();
+      const key = raw || `__row_${i}__`;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key)!.push(rec);
+    });
+    return [...groups.values()].map((rowsInGroup) => {
+      const header: Record<string, unknown> = { ...scopeBase };
+      // Header fields come from the first row; line fields become the lines array.
+      for (const [k, v] of Object.entries(rowsInGroup[0])) if (!lineSet.has(k)) header[k] = v;
+      header.lines = rowsInGroup.map((r) => {
+        const line: Record<string, unknown> = {};
+        for (const k of lineFields) if (r[k] !== undefined) line[k] = r[k];
+        return line;
+      });
+      return header;
+    });
+  }, [dataRows, mapping, reqIdx, config, fieldByKey, projectId]);
+
+  const validCount = records.length;
 
   const preview = useMemo(() => {
     if (reqIdx === -1) return [];
@@ -152,51 +211,6 @@ export function ImportDialog({
     setBusy(true);
     setError("");
     try {
-      // One typed record per data row (mapped fields only — base/scope are merged in below).
-      const rowRecs = dataRows
-        .filter((r) => (r[reqIdx] ?? "").trim())
-        .map((r) => {
-          const rec: Record<string, unknown> = {};
-          mapping.forEach((key, i) => {
-            const v = (r[i] ?? "").trim();
-            if (!v || key === "skip") return;
-            const custom = config.coerce?.(key, v);
-            rec[key] = custom !== undefined ? custom : fieldByKey[key]?.numeric ? num(v) : v;
-          });
-          return rec;
-        });
-
-      const scopeBase = {
-        ...(config.base ?? {}),
-        ...(config.scoped ? { projectId: projectId ?? null } : {}),
-      };
-
-      let records: Record<string, unknown>[];
-      if (config.group) {
-        // Fold rows that share the group key into one document with a lines[] array.
-        const { byKey, lineFields } = config.group;
-        const lineSet = new Set(lineFields);
-        const groups = new Map<string, Record<string, unknown>[]>();
-        for (const rec of rowRecs) {
-          const key = String(rec[byKey] ?? "").trim();
-          if (!key) continue;
-          if (!groups.has(key)) groups.set(key, []);
-          groups.get(key)!.push(rec);
-        }
-        records = [...groups.values()].map((rowsInGroup) => {
-          const header: Record<string, unknown> = { ...scopeBase };
-          // Header fields come from the first row; line fields become the lines array.
-          for (const [k, v] of Object.entries(rowsInGroup[0])) if (!lineSet.has(k)) header[k] = v;
-          header.lines = rowsInGroup.map((r) => {
-            const line: Record<string, unknown> = {};
-            for (const k of lineFields) if (r[k] !== undefined) line[k] = r[k];
-            return line;
-          });
-          return header;
-        });
-      } else {
-        records = rowRecs.map((r) => ({ ...scopeBase, ...r }));
-      }
       setDone(await config.commit(records));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Import failed.");
@@ -240,9 +254,9 @@ export function ImportDialog({
                   onClick={() => fileRef.current?.click()}
                   className="flex items-center gap-2 rounded-lg border border-dashed border-gray-300 px-4 py-3 text-sm font-medium text-brand-accent transition-all duration-150 hover:border-brand-accent hover:bg-cyan-50/40 active:scale-95"
                 >
-                  <Upload size={15} /> {fileName || "Select CSV file"}
+                  <Upload size={15} /> {fileName || "Select CSV or Excel file"}
                 </button>
-                <input ref={fileRef} type="file" accept=".csv,text/csv" hidden onChange={pick} />
+                <input ref={fileRef} type="file" accept=".csv,text/csv,.xlsx,.xls" hidden onChange={pick} />
                 <button
                   onClick={() => exportRowsToCsv(config.template.name, config.template.head, [config.template.row])}
                   className="flex items-center gap-1.5 text-sm font-medium text-gray-500 transition-colors duration-150 hover:text-brand-accent"
@@ -329,8 +343,8 @@ export function ImportDialog({
             {headers.length === 0 && (
               <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-gray-300 py-12 text-center">
                 <FileSpreadsheet size={26} className="mb-2 text-gray-300" />
-                <p className="text-sm text-gray-500">Pick a CSV to get started.</p>
-                <p className="mt-1 text-xs text-gray-400">We&apos;ll detect the columns for you.</p>
+                <p className="text-sm text-gray-500">Pick a CSV or Excel (.xlsx) file to get started.</p>
+                <p className="mt-1 text-xs text-gray-400">We&apos;ll skip any title rows and detect the columns for you.</p>
               </div>
             )}
           </>

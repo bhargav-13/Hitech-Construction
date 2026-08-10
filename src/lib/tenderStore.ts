@@ -36,6 +36,7 @@ import {
   updateHardcopyApi,
   deleteHardcopyApi,
   listMaterialsApi,
+  createMaterialApi,
 } from "./tenderApi";
 
 /** Log-and-swallow: backend persistence is best-effort so the UI never blocks on it. */
@@ -151,6 +152,8 @@ interface TenderState {
   removeHardcopy: (id: string) => void;
   /** Register a user-added closed-lost reason (deduped, case-insensitive). */
   addLossReason: (label: string) => void;
+  /** Add a material-party record (used by the directory + CSV import). */
+  addMaterial: (m: MaterialParty) => void;
   addAttachment: (id: string, file: TenderAttachment) => void;
   removeAttachment: (id: string, attachmentId: string) => void;
   undo: () => void;
@@ -443,6 +446,15 @@ export const useTenderStore = create<TenderState>()(
           const exists = s.customLossReasons.some((r) => r.toLowerCase() === clean.toLowerCase());
           return exists ? {} : { customLossReasons: [...s.customLossReasons, clean] };
         }),
+
+      addMaterial: (m) => {
+        set((s) => ({ materials: [{ ...m }, ...s.materials] }));
+        if (get().backend) {
+          createMaterialApi(m)
+            .then((saved) => set((s) => ({ materials: s.materials.map((x) => (x.id === m.id ? saved : x)) })))
+            .catch(warn("Material create failed to sync"));
+        }
+      },
 
       addAttachment: (id, file) =>
         set((s) => ({

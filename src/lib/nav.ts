@@ -5,23 +5,23 @@ import type { NavItem } from "./types";
 // Visibility is still permission-gated per user via NAV_MODULE below.
 export const NAV_ITEMS: NavItem[] = [
   { label: "Dashboard", href: "/" },
-  { label: "Tender", href: "/tender", badge: "Soon" },
+  { label: "Tender", href: "/tender" },
   { label: "Project", href: "/project" },
   { label: "Taskopad", href: "/taskopad" },
   { label: "Vyapar", href: "/vyapar" },
+  { label: "Procurement", href: "/procurement", badge: "Soon" },
   { label: "Payroll", href: "/payroll" },
   { label: "Audit", href: "/audit" },
+  { label: "Library", href: "/library" },
   { label: "Setting", href: "/settings" },
   // --- Not implemented yet ---
   // { label: "Report", href: "/report" },
   // { label: "Team Schedule", href: "/team-schedule" },
   // { label: "Finance", href: "/finance" },
   // { label: "CRM", href: "/crm" },
-  // { label: "Procurement", href: "/procurement" },
   // { label: "Warehouse", href: "/warehouse" },
   // { label: "Equipment", href: "/equipment" },
   // { label: "Asset", href: "/asset" },
-  // { label: "Library", href: "/library" },
   // { label: "Services", href: "/services" },
 ];
 
@@ -42,11 +42,15 @@ export const NAV_MODULE: Record<string, string> = {
   "/finance": "FINANCE",
   "/payroll": "PAYROLL",
   "/crm": "CRM",
-  "/procurement": "PROCUREMENT",
+  // Procurement is a seeded "Soon" demo — deliberately left ungated so it shows for everyone while
+  // the backend has no PROCUREMENT:* permissions yet. Restore this mapping once the module is real.
+  // "/procurement": "PROCUREMENT",
   "/warehouse": "WAREHOUSE",
   "/equipment": "EQUIPMENT",
   "/asset": "ASSET",
-  "/library": "LIBRARY",
+  // Library aggregates records the user can already reach elsewhere (members, Vyapar parties), and
+  // the backend has no LIBRARY:* permissions yet — left ungated until it does.
+  // "/library": "LIBRARY",
   "/settings": "SETTINGS",
   "/services": "SERVICES",
 };

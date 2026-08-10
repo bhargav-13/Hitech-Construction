@@ -84,6 +84,73 @@ body {
   }
 }
 
+/* Org chart — a top-down role tree. Connector lines are drawn with pseudo-elements on each
+   <li> (the classic pure-CSS org-chart technique) so the markup stays a plain nested list.
+   The wrapper handles horizontal scroll, so the chart never breaks the page layout as it grows. */
+.orgtree ul {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  padding-top: 22px;
+}
+.orgtree li {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  list-style: none;
+  padding: 22px 10px 0 10px;
+}
+.orgtree li::before,
+.orgtree li::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 50%;
+  width: 50%;
+  height: 22px;
+  border-top: 2px solid #d5deea;
+}
+.orgtree li::after {
+  right: auto;
+  left: 50%;
+  border-left: 2px solid #d5deea;
+}
+.orgtree li:only-child::after,
+.orgtree li:only-child::before {
+  display: none;
+}
+.orgtree li:only-child {
+  padding-top: 22px;
+}
+.orgtree li:first-child::before,
+.orgtree li:last-child::after {
+  border: 0 none;
+}
+.orgtree li:last-child::before {
+  border-right: 2px solid #d5deea;
+  border-radius: 0 6px 0 0;
+}
+.orgtree li:first-child::after {
+  border-radius: 6px 0 0 0;
+}
+.orgtree ul ul::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: 0;
+  height: 22px;
+  border-left: 2px solid #d5deea;
+}
+.orgtree > ul {
+  padding-top: 0;
+}
+.orgtree > ul > li::before,
+.orgtree > ul > li::after {
+  display: none;
+}
+
 /* Shared, lightweight motion primitives used across drawers, dropdowns and page content.
    Kept deliberately simple (no animation library) — fade/slide on mount only, no exit tween. */
 @keyframes fade-in {

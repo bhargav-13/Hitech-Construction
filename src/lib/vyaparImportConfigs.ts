@@ -8,6 +8,7 @@
 import * as vyapar from "./vyaparApi";
 import type { DocType } from "./vyaparApi";
 import type { ImportConfig } from "@/components/vyapar/ImportDialog";
+import { toIsoDate } from "./format";
 
 const has = (h: string, ...needles: string[]) => needles.some((n) => h.includes(n));
 const norm = (header: string) => header.toLowerCase().replace(/[^a-z]/g, "");
@@ -271,6 +272,8 @@ function paymentImportConfig(direction: "IN" | "OUT"): ImportConfig {
       if (has(h, "note", "remark", "desc")) return "notes";
       return "skip";
     },
+    // Vyapar exports dates day-first (31/10/2025); store them as ISO so the ledger sorts right.
+    coerce: (key, value) => (key === "paymentDate" ? toIsoDate(value) : undefined),
     template: {
       name: `payment-${inbound ? "in" : "out"}-import-template`,
       head: ["Party Name", "Payment Date", "Amount", "Payment Mode", "Reference No.", "Notes"],
@@ -288,9 +291,15 @@ function paymentImportConfig(direction: "IN" | "OUT"): ImportConfig {
     commit: async (records) => {
       const rows = records as (Partial<vyapar.Payment> & { bankAccountId?: number | null })[];
       let created = 0;
+      // Import every row we can — one bad row must not abort the whole sheet (that's how a
+      // 400-row import silently landed only ~80). Failures are logged, not thrown.
       for (const r of rows) {
-        await vyapar.createPayment(r);
-        created++;
+        try {
+          await vyapar.createPayment(r);
+          created++;
+        } catch (err) {
+          console.error("Payment import: skipped a row", r, err);
+        }
       }
       return created;
     },
@@ -300,109 +309,174 @@ function paymentImportConfig(direction: "IN" | "OUT"): ImportConfig {
 export const paymentInImportConfig = paymentImportConfig("IN");
 export const paymentOutImportConfig = paymentImportConfig("OUT");
 
-// ---- Documents (sale, purchase, estimate, orders, returns, challan) ----
-/** The mapped columns that describe a single line item within a document. */
-const DOC_LINE_FIELDS = ["itemName", "description", "unit", "quantity", "rate", "discountPercent", "taxPercent"];
+// ---- Documents (sale, purchase, estimate, orders, returns, challan, expense) ----
+/**
+ * The mapped columns that live on a line rather than the bill header. `amount` is here because a
+ * Vyapar transaction export is one row per bill with only a Total Amount (no per-line rate) — that
+ * amount becomes a single synthetic line — while an item-wise export carries a real per-line
+ * quantity/rate. Both shapes fold into the same document model.
+ */
+const DOC_LINE_FIELDS = ["itemName", "description", "unit", "quantity", "rate", "amount", "discountPercent", "taxPercent"];
 
 /**
- * Import config for a multi-line billing document. The sheet is one row per line item; rows sharing
- * the same Document No. are folded into one document (its lines), with the party/date/etc. taken
- * from the group's first row. Parties are matched to existing masters by name.
+ * Import config for a billing document, built to match how Vyapar actually exports.
+ *
+ * Real Vyapar transaction reports are **one row per bill** and frequently have a blank invoice
+ * number — so keying/grouping on the invoice number (as we used to) silently dropped every blank
+ * row and merged unrelated bills, which is how a full export landed only a fraction of its rows.
+ * Instead the required field is the amount (always present); each row becomes its own bill (blank
+ * invoice numbers never merge — see {@link import("@/components/vyapar/ImportDialog").ImportDialog}),
+ * and rows that share a *non-blank* invoice number still fold into one multi-line bill. When a row
+ * has no item detail, its Total Amount becomes a single line so the bill total is preserved.
+ * Parties are matched to existing masters by name; unknown/blank parties import as cash bills.
  */
 export function documentImportConfig(docType: DocType): ImportConfig {
   const label = vyapar.DOC_LABEL[docType] ?? "Document";
   const supplierSide = docType === "PURCHASE" || docType === "PURCHASE_ORDER" || docType === "PURCHASE_RETURN";
+  const lineLabel = docType === "EXPENSE" ? "Expense" : supplierSide ? "Purchase" : "Sale";
   return {
     title: `Import ${label} from Excel`,
     entityNoun: "documents",
-    requiredKey: "invoiceNo",
-    requiredLabel: "Document No.",
+    requiredKey: "amount",
+    requiredLabel: "Amount",
     scoped: true,
     base: { docType },
     fields: [
-      { key: "invoiceNo", label: "Document No. *" },
+      { key: "amount", label: "Amount *", numeric: true },
+      { key: "invoiceNo", label: "Invoice / Bill No." },
       { key: "partyName", label: supplierSide ? "Supplier Name" : "Customer Name" },
       { key: "invoiceDate", label: "Date" },
       { key: "dueDate", label: "Due Date" },
+      { key: "paidAmount", label: "Received / Paid Amount", numeric: true },
+      { key: "paymentStatus", label: "Payment Status" },
       { key: "paymentType", label: "Payment Type" },
       { key: "stateOfSupply", label: "State of Supply" },
-      { key: "notes", label: "Notes" },
+      { key: "description", label: "Description / Notes" },
       { key: "itemName", label: "Item Name" },
-      { key: "description", label: "Item Description" },
       { key: "unit", label: "Unit" },
       { key: "quantity", label: "Quantity", numeric: true },
-      { key: "rate", label: "Rate / Price", numeric: true },
+      { key: "rate", label: "Rate / Unit Price", numeric: true },
       { key: "discountPercent", label: "Discount %", numeric: true },
       { key: "taxPercent", label: "Tax %", numeric: true },
     ],
     guess: (header) => {
       const h = norm(header);
-      if (has(h, "invoiceno", "documentno", "docno", "billno", "orderno", "challanno", "voucherno") || h === "no" || h === "number")
-        return "invoiceNo";
+      // Order matters: match the more specific money columns before the generic "amount".
+      if (has(h, "receivedpaid", "paidamount", "amountpaid", "amountreceived")) return "paidAmount";
+      if (has(h, "balancedue", "balance")) return "skip"; // derived from total − paid
+      if (has(h, "totalamount", "netamount", "grandtotal", "invoiceamount") || h === "amount" || h === "total") return "amount";
+      if (has(h, "paymentstatus") || h === "status") return "paymentStatus";
+      if (has(h, "invoiceno", "billno", "txnno", "voucherno", "documentno", "docno") || h === "invoicenotxnno") return "invoiceNo";
+      if (has(h, "orderno", "challanno", "challanorderno")) return "skip"; // reference we don't store
+      // Skip contact/identity columns before the party match — "Party Phone No." must not be read
+      // as the party name (it contains "party").
+      if (has(h, "phone", "mobile", "contact", "gstin")) return "skip";
       if (has(h, "party", "customer", "supplier", "vendor")) return "partyName";
       if (has(h, "duedate")) return "dueDate";
       if (h.includes("date")) return "invoiceDate";
       if (has(h, "paymenttype", "paymentmode", "mode")) return "paymentType";
-      if (has(h, "state", "supply")) return "stateOfSupply";
-      if (has(h, "note", "remark")) return "notes";
-      if (has(h, "itemname", "item", "product", "particular")) return "itemName";
-      if (has(h, "description", "desc")) return "description";
-      if (h.includes("unit")) return "unit";
+      if (has(h, "stateofsupply", "placeofsupply") || h === "state") return "stateOfSupply";
+      if (has(h, "itemname", "product", "particular") || h === "item") return "itemName";
+      if (has(h, "unitprice", "rate", "price")) return "rate";
       if (has(h, "qty", "quantity")) return "quantity";
-      if (has(h, "rate", "price", "amount")) return "rate";
-      if (has(h, "discount", "disc")) return "discountPercent";
-      if (has(h, "tax", "gst")) return "taxPercent";
+      if (h === "unit") return "unit";
+      if (has(h, "discountpercent", "discperc")) return "discountPercent";
+      if (h.includes("discount")) return "skip"; // flat discount amount — avoid double-counting
+      if (has(h, "taxpercent", "gstpercent")) return "taxPercent";
+      if (h === "tax" || has(h, "taxamount")) return "skip";
+      if (has(h, "description", "narration", "remark", "note") || h === "desc") return "description";
+      // GSTIN, phone, HSN/SAC, category, code, transaction type, etc. — not needed.
       return "skip";
     },
+    // Vyapar exports dates day-first (31/10/2025); normalize to ISO so the books sort/filter and
+    // don't render as "undefined/undefined/31/10/2025".
+    coerce: (key, value) => (key === "invoiceDate" || key === "dueDate" ? toIsoDate(value) : undefined),
     template: {
       name: `${docType.toLowerCase()}-import-template`,
-      head: ["Document No.", supplierSide ? "Supplier Name" : "Customer Name", "Date", "Item Name", "Unit", "Quantity", "Rate", "Tax %"],
-      row: ["INV-1001", supplierSide ? "Steel Suppliers" : "Acme Traders", "2026-08-01", "TMT Bar 12mm", "KG", "1200", "62", "18"],
+      head: ["Date", "Invoice No", supplierSide ? "Supplier Name" : "Customer Name", "Total Amount", "Received/Paid Amount", "Payment Status", "Description"],
+      row: ["2026-08-01", "", supplierSide ? "Steel Suppliers" : "Acme Traders", "125000", "0", "Unpaid", "Cement — site A"],
     },
     preview: [
-      { key: "invoiceNo", label: "Doc No." },
+      { key: "invoiceDate", label: "Date" },
+      { key: "invoiceNo", label: "Bill No.", render: (v) => v || "(auto)" },
       { key: "partyName", label: "Party" },
-      { key: "itemName", label: "Item" },
-      { key: "quantity", label: "Qty", align: "right", render: (v) => v ?? "1" },
-      { key: "rate", label: "Rate", align: "right", render: (v) => v ?? "0" },
+      { key: "amount", label: "Amount", align: "right", render: (v) => v ?? "0" },
+      { key: "paymentStatus", label: "Status", render: (v) => v ?? "—" },
     ],
     group: { byKey: "invoiceNo", lineFields: DOC_LINE_FIELDS },
     commit: async (records) => {
-      // Match line-level party names to existing party masters (case-insensitive).
+      // Match party names to existing masters (case-insensitive). The invoice's party name is
+      // derived from a linked master on the backend, so an unmatched name would show as "—" —
+      // auto-create the party (as Vyapar does on import) so vendors/customers and their balances
+      // come through.
       const parties = await vyapar.getParties();
       const byName = new Map(parties.map((p) => [p.name.trim().toLowerCase(), p.id]));
+      const newPartyType: vyapar.PartyType = supplierSide || docType === "EXPENSE" ? "SUPPLIER" : "CUSTOMER";
       let created = 0;
       for (const rec of records) {
         const d = rec as Record<string, unknown>;
-        const nameKey = d.partyName ? String(d.partyName).trim().toLowerCase() : "";
-        const lines = ((d.lines as Record<string, unknown>[]) ?? [])
-          .map((l) => ({
-            itemId: null,
-            itemName: String(l.itemName ?? "").trim(),
-            description: l.description ? String(l.description) : null,
-            unit: l.unit ? String(l.unit) : null,
-            quantity: Number(l.quantity) || 1,
-            rate: Number(l.rate) || 0,
-            discountPercent: Number(l.discountPercent) || 0,
-            taxPercent: Number(l.taxPercent) || 0,
-          }))
-          .filter((l) => l.itemName);
+        const rawName = d.partyName ? String(d.partyName).trim() : "";
+        const nameKey = rawName.toLowerCase();
+        let partyId: number | null = nameKey ? byName.get(nameKey) ?? null : null;
+        if (rawName && partyId == null) {
+          try {
+            const p = await vyapar.createParty({ name: rawName, partyType: newPartyType });
+            partyId = p.id;
+            byName.set(nameKey, p.id);
+          } catch (err) {
+            console.error("Document import: couldn't create party", rawName, err);
+          }
+        }
+        const rawLines = (d.lines as Record<string, unknown>[]) ?? [];
+        const lines = rawLines
+          .map((l) => {
+            const qty = Number(l.quantity) || 1;
+            const amt = Number(l.amount) || 0;
+            // Prefer an explicit rate; otherwise spread the row's Total Amount across the quantity
+            // so a header-only bill (no per-line rate) keeps its exact total.
+            const rate = Number(l.rate) || (amt ? amt / qty : 0);
+            const name = String(l.itemName ?? "").trim() || String(l.description ?? "").trim() || lineLabel;
+            return {
+              itemId: null,
+              itemName: name,
+              description: l.description ? String(l.description) : null,
+              unit: l.unit ? String(l.unit) : null,
+              quantity: qty,
+              rate,
+              discountPercent: Number(l.discountPercent) || 0,
+              taxPercent: Number(l.taxPercent) || 0,
+            };
+          })
+          .filter((l) => l.rate > 0 || l.quantity > 0);
         if (lines.length === 0) continue;
-        await vyapar.createInvoice({
-          docType,
-          projectId: (d.projectId as number | null) ?? null,
-          invoiceNo: d.invoiceNo ? String(d.invoiceNo) : undefined,
-          partyId: nameKey ? byName.get(nameKey) ?? null : null,
-          invoiceDate: d.invoiceDate ? String(d.invoiceDate) : undefined,
-          dueDate: d.dueDate ? String(d.dueDate) : null,
-          paymentType: d.paymentType ? String(d.paymentType) : undefined,
-          stateOfSupply: d.stateOfSupply ? String(d.stateOfSupply) : null,
-          notes: d.notes ? String(d.notes) : null,
-          isCash: false,
-          paidAmount: 0,
-          lines,
-        });
-        created++;
+
+        // Payment: a "Paid" status settles the bill in full (even if the paid column reads 0/blank);
+        // otherwise an explicit paid amount makes it partial, and anything else stays unpaid.
+        const status = String(d.paymentStatus ?? "").trim().toLowerCase();
+        const paidCol = d.paidAmount != null && String(d.paidAmount) !== "" ? Number(d.paidAmount) || 0 : null;
+        const fullyPaid = status === "paid" || status === "received";
+        const isCash = fullyPaid;
+        const paidAmount = fullyPaid ? undefined : paidCol != null && paidCol > 0 ? paidCol : 0;
+        // Import every document we can — one bad row must not abort the rest of the sheet.
+        try {
+          await vyapar.createInvoice({
+            docType,
+            projectId: (d.projectId as number | null) ?? null,
+            invoiceNo: d.invoiceNo ? String(d.invoiceNo) : undefined,
+            partyId,
+            invoiceDate: d.invoiceDate ? String(d.invoiceDate) : undefined,
+            dueDate: d.dueDate ? String(d.dueDate) : null,
+            paymentType: d.paymentType ? String(d.paymentType) : undefined,
+            stateOfSupply: d.stateOfSupply ? String(d.stateOfSupply) : null,
+            notes: d.description ? String(d.description) : null,
+            isCash,
+            paidAmount,
+            lines,
+          });
+          created++;
+        } catch (err) {
+          console.error("Document import: skipped a document", d.invoiceNo, err);
+        }
       }
       return created;
     },

@@ -12,9 +12,9 @@ import { InvoiceBuilder } from "@/components/vyapar/InvoiceBuilder";
 import { UploadBillDialog } from "@/components/vyapar/UploadBillDialog";
 import { ImportDialog } from "@/components/vyapar/ImportDialog";
 import { documentImportConfig } from "@/lib/vyaparImportConfigs";
-import { SortTh } from "@/components/vyapar/SortTh";
+import { FilterTh, useColumnFilters } from "@/components/vyapar/ColumnFilter";
 import { useTableSort } from "@/lib/useTableSort";
-import { inr } from "@/lib/format";
+import { inr, bookDate } from "@/lib/format";
 import { useVyaparProjectId } from "@/lib/projectScope";
 import { downloadInvoicePdf, downloadPdf } from "@/lib/vyaparExport";
 import * as vyapar from "@/lib/vyaparApi";
@@ -118,9 +118,24 @@ export function InvoiceWorkspace({
     });
   }, [invoices, search, statusFilter]);
 
+  // Vyapar-style per-column funnels stack on top of the search/status filter.
+  const columns = useMemo(
+    () => ({
+      date: { get: (i: Invoice) => i.invoiceDate ?? "", type: "text" as const },
+      number: { get: (i: Invoice) => i.invoiceNo, type: "text" as const },
+      party: { get: (i: Invoice) => i.partyName ?? "", type: "text" as const },
+      paymentType: { get: (i: Invoice) => i.paymentType, type: "select" as const, options: PAYMENT_TYPES },
+      amount: { get: (i: Invoice) => i.total, type: "number" as const },
+      balance: { get: (i: Invoice) => i.balance, type: "number" as const },
+      status: { get: (i: Invoice) => i.status, type: "select" as const, options: ["Paid", "Partial", "Unpaid"] },
+    }),
+    []
+  );
+  const { filtered, filters, setFilter } = useColumnFilters(rows, columns);
+
   // Sortable columns — defaults to newest first, like Vyapar's own lists.
   const { sorted, sortKey, sortDir, toggle } = useTableSort<Invoice>(
-    rows,
+    filtered,
     {
       date: (i) => i.invoiceDate,
       number: (i) => i.invoiceNo,
@@ -134,10 +149,10 @@ export function InvoiceWorkspace({
   );
 
   const totals = useMemo(() => {
-    const total = rows.reduce((s, i) => s + i.total, 0);
-    const received = rows.reduce((s, i) => s + i.paidAmount, 0);
+    const total = filtered.reduce((s, i) => s + i.total, 0);
+    const received = filtered.reduce((s, i) => s + i.paidAmount, 0);
     return { total, received, balance: total - received };
-  }, [rows]);
+  }, [filtered]);
 
   async function remove(inv: Invoice) {
     if (!confirm(`Delete ${inv.invoiceNo}? Stock and balances will be reversed.`)) return;
@@ -151,7 +166,7 @@ export function InvoiceWorkspace({
 
   function exportCsv() {
     const head = ["Date", "Invoice no", "Party", "Payment Type", "Total", "Paid", "Balance", "Status"];
-    const lines = rows.map((i) => [
+    const lines = filtered.map((i) => [
       i.invoiceDate ?? "", i.invoiceNo, i.partyName ?? "", i.paymentType,
       i.total, i.paidAmount, i.balance, i.status,
     ]);
@@ -173,7 +188,7 @@ export function InvoiceWorkspace({
         <div className="flex gap-2">
           <button
             onClick={exportCsv}
-            disabled={rows.length === 0}
+            disabled={filtered.length === 0}
             className="flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-600 transition-all duration-150 hover:bg-gray-50 active:scale-95 disabled:opacity-50"
           >
             <Download size={14} /> Export
@@ -183,11 +198,11 @@ export function InvoiceWorkspace({
               downloadPdf(
                 title,
                 ["Date", "Invoice no", "Party", "Payment Type", "Total", "Paid", "Balance", "Status"],
-                rows.map((i) => [i.invoiceDate ?? "", i.invoiceNo, i.partyName ?? "", i.paymentType, inr(i.total), inr(i.paidAmount), inr(i.balance), i.status]),
+                filtered.map((i) => [i.invoiceDate ?? "", i.invoiceNo, i.partyName ?? "", i.paymentType, inr(i.total), inr(i.paidAmount), inr(i.balance), i.status]),
                 { rightAlignFrom: 4 }
               )
             }
-            disabled={rows.length === 0}
+            disabled={filtered.length === 0}
             className="flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-600 transition-all duration-150 hover:bg-gray-50 active:scale-95 disabled:opacity-50"
           >
             <FileText size={14} className="text-rose-600" /> PDF
@@ -283,7 +298,7 @@ export function InvoiceWorkspace({
         <div className="flex min-h-[240px] items-center justify-center gap-2 rounded-xl border border-dashed border-gray-300 bg-white text-sm text-gray-400">
           <Spinner size={16} className="text-brand-accent" /> Loading…
         </div>
-      ) : rows.length === 0 ? (
+      ) : filtered.length === 0 ? (
         <VyaparEmpty
           icon={FileText}
           title={invoices.length === 0 ? `No ${title.toLowerCase()} yet` : "Nothing matches"}
@@ -301,13 +316,13 @@ export function InvoiceWorkspace({
           <table className="w-full min-w-[900px] border-collapse text-sm">
             <thead>
               <tr className="border-b border-gray-100 bg-gray-50 text-left text-gray-500">
-                <SortTh label="Date" sortKey="date" activeKey={sortKey} dir={sortDir} onSort={toggle} />
-                <SortTh label={numberColLabel} sortKey="number" activeKey={sortKey} dir={sortDir} onSort={toggle} />
-                <SortTh label="Party Name" sortKey="party" activeKey={sortKey} dir={sortDir} onSort={toggle} />
-                {!NON_PAYMENT && <SortTh label="Payment Type" sortKey="paymentType" activeKey={sortKey} dir={sortDir} onSort={toggle} />}
-                <SortTh label="Amount" sortKey="amount" activeKey={sortKey} dir={sortDir} onSort={toggle} align="right" />
-                {!NON_PAYMENT && <SortTh label="Balance" sortKey="balance" activeKey={sortKey} dir={sortDir} onSort={toggle} align="right" />}
-                {!NON_PAYMENT && <SortTh label="Status" sortKey="status" activeKey={sortKey} dir={sortDir} onSort={toggle} />}
+                <FilterTh label="Date" sortKey="date" activeKey={sortKey} dir={sortDir} onSort={toggle} filterKey="date" type="text" filter={filters.date} onApply={setFilter} />
+                <FilterTh label={numberColLabel} sortKey="number" activeKey={sortKey} dir={sortDir} onSort={toggle} filterKey="number" type="text" filter={filters.number} onApply={setFilter} />
+                <FilterTh label="Party Name" sortKey="party" activeKey={sortKey} dir={sortDir} onSort={toggle} filterKey="party" type="text" filter={filters.party} onApply={setFilter} />
+                {!NON_PAYMENT && <FilterTh label="Payment Type" sortKey="paymentType" activeKey={sortKey} dir={sortDir} onSort={toggle} filterKey="paymentType" type="select" options={PAYMENT_TYPES} filter={filters.paymentType} onApply={setFilter} />}
+                <FilterTh label="Amount" sortKey="amount" activeKey={sortKey} dir={sortDir} onSort={toggle} align="right" filterKey="amount" type="number" filter={filters.amount} onApply={setFilter} />
+                {!NON_PAYMENT && <FilterTh label="Balance" sortKey="balance" activeKey={sortKey} dir={sortDir} onSort={toggle} align="right" filterKey="balance" type="number" filter={filters.balance} onApply={setFilter} />}
+                {!NON_PAYMENT && <FilterTh label="Status" sortKey="status" activeKey={sortKey} dir={sortDir} onSort={toggle} filterKey="status" type="select" options={["Paid", "Partial", "Unpaid"]} filter={filters.status} onApply={setFilter} />}
                 <th className="w-10 px-4 py-2" />
               </tr>
             </thead>
@@ -318,7 +333,7 @@ export function InvoiceWorkspace({
                   onClick={() => setEditing(i)}
                   className="cursor-pointer border-b border-gray-50 transition-colors duration-150 last:border-b-0 even:bg-gray-50/40 hover:bg-cyan-50/40"
                 >
-                  <td className="px-4 py-2.5 whitespace-nowrap text-gray-600">{formatDate(i.invoiceDate)}</td>
+                  <td className="px-4 py-2.5 whitespace-nowrap text-gray-600">{bookDate(i.invoiceDate)}</td>
                   <td className="px-4 py-2.5 font-medium text-gray-800">{i.invoiceNo}</td>
                   <td className="px-4 py-2.5 text-gray-700">{i.partyName ?? "—"}</td>
                   {!NON_PAYMENT && <td className="px-4 py-2.5 text-gray-600">{i.paymentType}</td>}
@@ -480,9 +495,3 @@ function PaymentDrawer({
   );
 }
 
-const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-function formatDate(iso: string | null): string {
-  if (!iso || iso.length < 10) return "—";
-  const [y, m, d] = iso.slice(0, 10).split("-");
-  return `${d}/${m}/${y}`;
-}

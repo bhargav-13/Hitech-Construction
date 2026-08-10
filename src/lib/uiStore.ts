@@ -24,6 +24,9 @@ interface UiState {
   /** Tender's own inner rail. */
   tenderRailCollapsed: boolean;
   toggleTenderRail: () => void;
+  /** Procurement's own inner rail. */
+  procurementRailCollapsed: boolean;
+  toggleProcurementRail: () => void;
 }
 
 export const useUiStore = create<UiState>()(
@@ -37,6 +40,8 @@ export const useUiStore = create<UiState>()(
       togglePayrollRail: () => set((s) => ({ payrollRailCollapsed: !s.payrollRailCollapsed })),
       tenderRailCollapsed: false,
       toggleTenderRail: () => set((s) => ({ tenderRailCollapsed: !s.tenderRailCollapsed })),
+      procurementRailCollapsed: false,
+      toggleProcurementRail: () => set((s) => ({ procurementRailCollapsed: !s.procurementRailCollapsed })),
     }),
     {
       name: "hitech.ui.v1",

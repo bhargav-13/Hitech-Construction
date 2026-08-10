@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { type ChangeEvent, type ComponentType, useEffect, useMemo, useState } from "react";
 import { AppShell } from "@/components/AppShell";
 import { Drawer, DrawerField } from "@/components/Drawer";
 import { Spinner } from "@/components/Spinner";
@@ -9,13 +9,18 @@ import { projectAvatarColor } from "@/lib/projectHelpers";
 import * as api from "@/lib/api";
 import type { ModuleResponse, RoleResponse, UserResponse } from "@/lib/api";
 import {
+  Camera,
   ChevronRight,
+  LayoutGrid,
+  Network,
   Pencil,
+  Rows3,
   Search,
   Trash2,
   UserCheck,
   UserMinus,
   UserRound,
+  X,
 } from "lucide-react";
 import { RowMenu, RowMenuDivider, RowMenuItem } from "@/components/RowMenu";
 import { useDepartments } from "@/lib/useDepartments";
@@ -98,6 +103,7 @@ function RolesAndAccess() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [roleFilter, setRoleFilter] = useState<number | "all">("all");
+  const [hierarchyView, setHierarchyView] = useState<"chart" | "list">("chart");
   const [roleDrawer, setRoleDrawer] = useState<RoleDrawerState>(null);
   const [userDrawer, setUserDrawer] = useState<UserDrawerState>(null);
 
@@ -171,11 +177,41 @@ function RolesAndAccess() {
 
       {error && <div className="rounded-lg bg-rose-50 px-4 py-2 text-sm text-rose-600">{error}</div>}
 
-      <RoleHierarchy
-        roles={roles}
-        usersByRoleId={usersByRoleId}
-        onManage={(role) => setRoleDrawer({ mode: "edit", role })}
-      />
+      <div className="rounded-xl border border-gray-200 bg-white">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-100 px-4 py-3">
+          <div>
+            <h3 className="text-sm font-semibold text-gray-800">Org Structure</h3>
+            <p className="mt-0.5 text-xs text-gray-400">
+              Roles by &ldquo;reports to&rdquo;. Click a role to manage its access.
+            </p>
+          </div>
+          <ViewToggle
+            value={hierarchyView}
+            onChange={setHierarchyView}
+            options={[
+              { value: "chart", label: "Org chart", icon: Network },
+              { value: "list", label: "List", icon: Rows3 },
+            ]}
+          />
+        </div>
+        <div className="p-3">
+          {roles.length === 0 ? (
+            <div className="py-10 text-center text-sm text-gray-400">No roles yet.</div>
+          ) : hierarchyView === "chart" ? (
+            <RoleOrgChart
+              roles={roles}
+              usersByRoleId={usersByRoleId}
+              onManage={(role) => setRoleDrawer({ mode: "edit", role })}
+            />
+          ) : (
+            <RoleHierarchy
+              roles={roles}
+              usersByRoleId={usersByRoleId}
+              onManage={(role) => setRoleDrawer({ mode: "edit", role })}
+            />
+          )}
+        </div>
+      </div>
 
       <AccountsSection
         roles={roles}
@@ -270,16 +306,76 @@ function PayrollPill({ onPayroll }: { onPayroll: boolean }) {
   );
 }
 
-function Avatar({ name, id, size = 32 }: { name: string; id: string; size?: number }) {
+/** First+last initial, e.g. "Rakesh Shah" → "RS"; single word → first two letters. */
+function initialsOf(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "?";
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
+
+function Avatar({
+  name,
+  id,
+  photoUrl,
+  size = 32,
+}: {
+  name: string;
+  id: string;
+  photoUrl?: string | null;
+  size?: number;
+}) {
+  if (photoUrl) {
+    return (
+      // Data-URL/hosted avatars — a plain img is correct here (next/image can't optimize data URLs).
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        src={photoUrl}
+        alt={name}
+        title={name}
+        className="shrink-0 rounded-full object-cover ring-2 ring-white"
+        style={{ width: size, height: size }}
+      />
+    );
+  }
   return (
     <div
       title={name}
-      className={`flex shrink-0 items-center justify-center rounded-full text-white ${projectAvatarColor(id)}`}
-      style={{ width: size, height: size }}
+      className={`flex shrink-0 items-center justify-center rounded-full font-semibold text-white ring-2 ring-white ${projectAvatarColor(id)}`}
+      style={{ width: size, height: size, fontSize: Math.max(9, Math.round(size * 0.36)) }}
     >
-      <UserRound size={Math.round(size * 0.6)} strokeWidth={2} />
+      {initialsOf(name)}
     </div>
   );
+}
+
+/**
+ * Read an image file and return a small square-ish JPEG data URL. Downscaling to ~256px keeps the
+ * payload light enough to store inline on the user record (no separate file storage needed).
+ */
+function fileToAvatarDataUrl(file: File, max = 256): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("read failed"));
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = () => reject(new Error("decode failed"));
+      img.onload = () => {
+        const scale = Math.min(1, max / Math.max(img.width, img.height));
+        const w = Math.round(img.width * scale);
+        const h = Math.round(img.height * scale);
+        const canvas = document.createElement("canvas");
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) return reject(new Error("no canvas context"));
+        ctx.drawImage(img, 0, 0, w, h);
+        resolve(canvas.toDataURL("image/jpeg", 0.85));
+      };
+      img.src = reader.result as string;
+    };
+    reader.readAsDataURL(file);
+  });
 }
 
 
@@ -301,6 +397,7 @@ function AccountsSection({
   onDeleteUser: (user: UserResponse) => void;
 }) {
   const [search, setSearch] = useState("");
+  const [view, setView] = useState<"table" | "grid">("table");
 
   const filtered = users.filter((user) => {
     if (roleFilter !== "all" && user.role.id !== roleFilter) return false;
@@ -309,48 +406,82 @@ function AccountsSection({
     return user.fullName.toLowerCase().includes(q) || user.email.toLowerCase().includes(q);
   });
 
-  const roleById = new Map(roles.map((r) => [r.id, r]));
-
   return (
     <div className="space-y-3">
-      <div className="flex items-center justify-between gap-4">
+      <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h3 className="text-sm font-semibold text-gray-800">Member Directory</h3>
-          <p className="mt-0.5 text-xs text-gray-400">Everyone with an account — their role, posting and payroll status.</p>
+          <p className="mt-0.5 text-xs text-gray-400">
+            {filtered.length} of {users.length} {users.length === 1 ? "member" : "members"} — their role, posting and payroll status.
+          </p>
         </div>
-        <div className="flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-1.5 transition-colors duration-150 focus-within:border-cyan-400">
-          <Search size={14} className="text-gray-400" />
-          <input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search…"
-            className="w-48 bg-transparent text-sm outline-none"
+        {/* A role dropdown (not tabs) so the filter scales to any number of roles. */}
+        <div className="flex flex-wrap items-center gap-2">
+          <Select
+            value={roleFilter === "all" ? "all" : String(roleFilter)}
+            onChange={(v) => onRoleFilterChange(v === "all" ? "all" : Number(v))}
+            size="sm"
+            className="min-w-[170px]"
+            options={[
+              { value: "all", label: `All roles (${users.length})` },
+              ...roles.map((role) => ({
+                value: String(role.id),
+                label: `${role.name} (${users.filter((u) => u.role.id === role.id).length})`,
+              })),
+            ]}
+          />
+          <div className="flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-1.5 transition-colors duration-150 focus-within:border-cyan-400">
+            <Search size={14} className="text-gray-400" />
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search…"
+              className="w-40 bg-transparent text-sm outline-none"
+            />
+          </div>
+          <ViewToggle
+            value={view}
+            onChange={setView}
+            options={[
+              { value: "table", label: "Table", icon: Rows3 },
+              { value: "grid", label: "Grid", icon: LayoutGrid },
+            ]}
           />
         </div>
       </div>
 
-      <div className="flex gap-4 border-b border-gray-200 text-sm">
-        <button
-          onClick={() => onRoleFilterChange("all")}
-          className={`-mb-px border-b-2 px-1 pb-2 font-medium transition-colors duration-150 ${
-            roleFilter === "all" ? "border-brand-accent text-brand-accent" : "border-transparent text-gray-500 hover:text-gray-700"
-          }`}
-        >
-          All ({users.length})
-        </button>
-        {roles.map((role) => (
-          <button
-            key={role.id}
-            onClick={() => onRoleFilterChange(role.id)}
-            className={`-mb-px border-b-2 px-1 pb-2 font-medium transition-colors duration-150 ${
-              roleFilter === role.id ? "border-brand-accent text-brand-accent" : "border-transparent text-gray-500 hover:text-gray-700"
-            }`}
-          >
-            {role.name} ({users.filter((u) => u.role.id === role.id).length})
-          </button>
-        ))}
-      </div>
-
+      {filtered.length === 0 ? (
+        <div className="rounded-xl border border-dashed border-gray-300 bg-white py-10 text-center text-sm text-gray-400">
+          No members match.
+        </div>
+      ) : view === "grid" ? (
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {filtered.map((user) => (
+            <button
+              key={user.id}
+              onClick={() => onEditUser(user)}
+              className="group rounded-xl border border-gray-200 bg-white p-4 text-left transition-all duration-150 hover:-translate-y-0.5 hover:border-brand-accent hover:shadow-md active:scale-[0.99]"
+            >
+              <div className="flex items-center gap-3">
+                <Avatar name={user.fullName} id={String(user.id)} photoUrl={user.photoUrl} size={44} />
+                <div className="min-w-0">
+                  <div className="truncate font-medium text-gray-800 group-hover:text-brand-accent">{user.fullName}</div>
+                  <div className="truncate text-xs text-gray-400">{user.email}</div>
+                </div>
+              </div>
+              <div className="mt-3 flex flex-wrap items-center gap-1.5">
+                <span className="rounded-md bg-cyan-50 px-2 py-0.5 text-xs font-medium text-brand-accent">{user.role.name}</span>
+                {user.departmentName && (
+                  <span className="rounded-md bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-500">{user.departmentName}</span>
+                )}
+                <PostingPill staffType={user.staffType} />
+                <PayrollPill onPayroll={user.onPayroll} />
+                <StatusPill active={user.isActive} />
+              </div>
+            </button>
+          ))}
+        </div>
+      ) : (
       <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white">
         <table className="w-full min-w-[860px] border-collapse text-sm">
           <thead>
@@ -373,7 +504,7 @@ function AccountsSection({
               >
                 <td className="px-4 py-2">
                   <div className="flex items-center gap-2.5">
-                    <Avatar name={user.fullName} id={String(user.id)} size={30} />
+                    <Avatar name={user.fullName} id={String(user.id)} photoUrl={user.photoUrl} size={30} />
                     <div className="min-w-0">
                       <div className="font-medium text-gray-800">{user.fullName}</div>
                       <div className="truncate text-xs text-gray-400">{user.email}</div>
@@ -430,23 +561,128 @@ function AccountsSection({
                 </td>
               </tr>
             ))}
-            {filtered.length === 0 && (
-              <tr>
-                <td colSpan={7} className="px-4 py-8 text-center text-sm text-gray-400">
-                  No members match.
-                </td>
-              </tr>
-            )}
           </tbody>
         </table>
       </div>
+      )}
     </div>
   );
 }
 
 /**
- * The org ladder — roles laid out as an indented tree by "reports to". Makes the hierarchy readable
- * at a glance: who's at the top, who reports to whom, and how many people hold each role.
+ * Builds the role hierarchy from "reports to". Super Admin is the fixed root; any role without a
+ * valid parent falls under it, so the tree always has a single owner at the top. Shared by the
+ * org-chart and list views.
+ */
+function buildRoleTree(roles: RoleResponse[]) {
+  const byId = new Map(roles.map((r) => [r.id, r]));
+  const superAdmin =
+    roles.find((r) => r.name.toLowerCase() === "super admin") ?? roles.find((r) => r.isSystem);
+  const childrenOf = new Map<number | "root", RoleResponse[]>();
+  for (const r of roles) {
+    if (superAdmin && r.id === superAdmin.id) continue; // the root itself
+    const hasParent = r.reportsToRoleId != null && byId.has(r.reportsToRoleId);
+    const key: number | "root" = hasParent ? r.reportsToRoleId! : superAdmin ? superAdmin.id : "root";
+    const list = childrenOf.get(key) ?? [];
+    list.push(r);
+    childrenOf.set(key, list);
+  }
+  const roots = superAdmin
+    ? [superAdmin]
+    : (childrenOf.get("root") ?? []).sort((a, b) => a.name.localeCompare(b.name));
+  return { roots, childrenOf };
+}
+
+/** A small stack of member avatars for a role card — up to four faces, then a "+N" chip. */
+function AvatarStack({ members, max = 4 }: { members: UserResponse[]; max?: number }) {
+  if (members.length === 0) {
+    return (
+      <div className="flex h-[30px] w-[30px] items-center justify-center rounded-full border border-dashed border-gray-300 text-gray-300">
+        <UserRound size={15} />
+      </div>
+    );
+  }
+  const shown = members.slice(0, max);
+  const extra = members.length - shown.length;
+  return (
+    <div className="flex -space-x-2">
+      {shown.map((m) => (
+        <Avatar key={m.id} name={m.fullName} id={String(m.id)} photoUrl={m.photoUrl} size={30} />
+      ))}
+      {extra > 0 && (
+        <span className="flex h-[30px] w-[30px] items-center justify-center rounded-full bg-gray-100 text-[10px] font-semibold text-gray-500 ring-2 ring-white">
+          +{extra}
+        </span>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The org chart — the "reports to" hierarchy drawn top-down as connected cards, each showing the
+ * role's people as avatars. Scrolls horizontally inside its own container so it never breaks the
+ * page layout as the org grows wider.
+ */
+function RoleOrgChart({
+  roles,
+  usersByRoleId,
+  onManage,
+}: {
+  roles: RoleResponse[];
+  usersByRoleId: Map<number, UserResponse[]>;
+  onManage: (role: RoleResponse) => void;
+}) {
+  const { roots, childrenOf } = buildRoleTree(roles);
+
+  function Node({ role, seen }: { role: RoleResponse; seen: Set<number> }) {
+    if (seen.has(role.id)) return null; // defensive against a data loop
+    const nextSeen = new Set(seen).add(role.id);
+    const kids = (childrenOf.get(role.id) ?? []).sort((a, b) => a.name.localeCompare(b.name));
+    const members = usersByRoleId.get(role.id) ?? [];
+    return (
+      <li>
+        <button
+          onClick={() => onManage(role)}
+          className="group flex w-44 flex-col items-center rounded-xl border border-gray-200 bg-white px-3 py-3 text-center shadow-sm transition-all duration-150 hover:-translate-y-0.5 hover:border-brand-accent hover:shadow-md active:scale-[0.99]"
+        >
+          <AvatarStack members={members} />
+          <div className="mt-2 truncate text-sm font-semibold text-gray-800 group-hover:text-brand-accent">
+            {role.name}
+          </div>
+          <div className="mt-0.5 flex items-center gap-1.5">
+            {role.isSystem && (
+              <span className="rounded-full bg-gray-100 px-1.5 py-0.5 text-[9px] font-medium text-gray-500">System</span>
+            )}
+            <span className="text-[11px] text-gray-400">
+              {members.length} {members.length === 1 ? "person" : "people"}
+            </span>
+          </div>
+        </button>
+        {kids.length > 0 && (
+          <ul>
+            {kids.map((k) => (
+              <Node key={k.id} role={k} seen={nextSeen} />
+            ))}
+          </ul>
+        )}
+      </li>
+    );
+  }
+
+  return (
+    <div className="orgtree overflow-x-auto pb-3">
+      <ul>
+        {roots.map((r) => (
+          <Node key={r.id} role={r} seen={new Set()} />
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+/**
+ * The org ladder — roles laid out as an indented tree by "reports to". The compact list view,
+ * best for deep hierarchies; the org chart is the visual alternative.
  */
 function RoleHierarchy({
   roles,
@@ -457,28 +693,7 @@ function RoleHierarchy({
   usersByRoleId: Map<number, UserResponse[]>;
   onManage: (role: RoleResponse) => void;
 }) {
-  const byId = new Map(roles.map((r) => [r.id, r]));
-  // Super Admin is the fixed top of the ladder — it reports to no one and everything sits under it.
-  const superAdmin =
-    roles.find((r) => r.name.toLowerCase() === "super admin") ?? roles.find((r) => r.isSystem);
-  // Group each role under its parent. Any role without a valid parent falls under Super Admin
-  // (rather than floating at the root) so the tree always has a single owner at the top.
-  const childrenOf = new Map<number | "root", RoleResponse[]>();
-  for (const r of roles) {
-    if (superAdmin && r.id === superAdmin.id) continue; // the root itself
-    const hasParent = r.reportsToRoleId != null && byId.has(r.reportsToRoleId);
-    const key: number | "root" = hasParent
-      ? r.reportsToRoleId!
-      : superAdmin
-        ? superAdmin.id
-        : "root";
-    const list = childrenOf.get(key) ?? [];
-    list.push(r);
-    childrenOf.set(key, list);
-  }
-  const roots = superAdmin
-    ? [superAdmin]
-    : (childrenOf.get("root") ?? []).sort((a, b) => a.name.localeCompare(b.name));
+  const { roots, childrenOf } = buildRoleTree(roles);
 
   function Node({ role, seen }: { role: RoleResponse; seen: Set<number> }) {
     if (seen.has(role.id)) return null; // defensive against a data loop
@@ -512,20 +727,42 @@ function RoleHierarchy({
     );
   }
 
-  if (roles.length === 0) {
-    return <div className="rounded-xl border border-dashed border-gray-300 bg-white py-10 text-center text-sm text-gray-400">No roles yet.</div>;
-  }
-
   return (
-    <div className="rounded-xl border border-gray-200 bg-white p-3">
-      <p className="mb-2 px-1 text-xs text-gray-400">
-        Top of the ladder first. Set a role&apos;s manager with the &ldquo;Reports to&rdquo; field when you edit it.
-      </p>
-      <ul className="space-y-0.5">
-        {roots.map((r) => (
-          <Node key={r.id} role={r} seen={new Set()} />
-        ))}
-      </ul>
+    <ul className="space-y-0.5">
+      {roots.map((r) => (
+        <Node key={r.id} role={r} seen={new Set()} />
+      ))}
+    </ul>
+  );
+}
+
+/** A compact segmented control for switching between two or more views. */
+function ViewToggle<T extends string>({
+  value,
+  onChange,
+  options,
+}: {
+  value: T;
+  onChange: (v: T) => void;
+  options: { value: T; label: string; icon: ComponentType<{ size?: number }> }[];
+}) {
+  return (
+    <div className="flex items-center gap-0.5 rounded-lg border border-gray-200 bg-gray-50 p-0.5">
+      {options.map((o) => {
+        const Icon = o.icon;
+        const active = value === o.value;
+        return (
+          <button
+            key={o.value}
+            onClick={() => onChange(o.value)}
+            className={`flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-all duration-150 ${
+              active ? "bg-white text-brand-accent shadow-sm" : "text-gray-500 hover:text-gray-700"
+            }`}
+          >
+            <Icon size={13} /> {o.label}
+          </button>
+        );
+      })}
     </div>
   );
 }
@@ -746,8 +983,22 @@ function UserDrawer({
   const [staffType, setStaffType] = useState<"OFFICE" | "SITE" | "">(existing?.staffType ?? "");
   const [onPayroll, setOnPayroll] = useState(existing?.onPayroll ?? false);
   const [isActive, setIsActive] = useState(existing?.isActive ?? true);
+  const [photoUrl, setPhotoUrl] = useState<string | null>(existing?.photoUrl ?? null);
+  const [photoErr, setPhotoErr] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+
+  async function onPickPhoto(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    setPhotoErr("");
+    try {
+      setPhotoUrl(await fileToAvatarDataUrl(file));
+    } catch {
+      setPhotoErr("Couldn't read that image.");
+    }
+  }
 
   async function submit() {
     if (!fullName.trim() || roleId === "" || (!existing && (!email.trim() || !password))) {
@@ -766,6 +1017,8 @@ function UserDrawer({
           staffType: staffType || null,
           onPayroll,
           isActive,
+          // "" clears an existing photo (backend treats null as "unchanged").
+          photoUrl: photoUrl ?? "",
         });
       } else {
         await api.createUser({
@@ -777,6 +1030,7 @@ function UserDrawer({
           departmentId: departmentId === "" ? null : (departmentId as number),
           staffType: staffType || null,
           onPayroll,
+          photoUrl: photoUrl ?? undefined,
         });
       }
       onSaved();
@@ -794,6 +1048,27 @@ function UserDrawer({
       saveLabel={saving ? "Saving…" : "Save"}
     >
       <div className="space-y-4">
+        {/* Profile photo — shown on the org chart and directory. */}
+        <div className="flex items-center gap-4">
+          <Avatar name={fullName || "New member"} id={String(existing?.id ?? "new")} photoUrl={photoUrl} size={64} />
+          <div className="flex flex-col items-start gap-1.5">
+            <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-gray-200 px-3 py-1.5 text-sm font-medium text-gray-600 transition-colors duration-150 hover:bg-gray-50">
+              <Camera size={14} /> {photoUrl ? "Change photo" : "Upload photo"}
+              <input type="file" accept="image/*" hidden onChange={onPickPhoto} />
+            </label>
+            {photoUrl && (
+              <button
+                type="button"
+                onClick={() => setPhotoUrl(null)}
+                className="inline-flex items-center gap-1 text-xs font-medium text-rose-600 transition-opacity duration-150 hover:opacity-80"
+              >
+                <X size={12} /> Remove
+              </button>
+            )}
+            {photoErr && <span className="text-xs text-rose-600">{photoErr}</span>}
+          </div>
+        </div>
+
         <DrawerField label="Full Name" required>
           <input value={fullName} onChange={(e) => setFullName(e.target.value)} className="input" />
         </DrawerField>

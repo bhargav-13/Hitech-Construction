@@ -76,6 +76,8 @@ export interface UserResponse {
   departmentName: string | null;
   staffType: "OFFICE" | "SITE" | null;
   onPayroll: boolean;
+  /** Profile photo as a data URL (or hosted URL); null until one is uploaded. */
+  photoUrl: string | null;
 }
 
 export interface UserPageResponse {
@@ -95,6 +97,7 @@ export interface UserCreateRequest {
   departmentId?: number | null;
   staffType?: "OFFICE" | "SITE" | null;
   onPayroll?: boolean;
+  photoUrl?: string | null;
 }
 
 export interface UserUpdateRequest {
@@ -105,6 +108,7 @@ export interface UserUpdateRequest {
   staffType?: "OFFICE" | "SITE" | null;
   onPayroll?: boolean;
   isActive?: boolean;
+  photoUrl?: string | null;
 }
 
 export interface CurrentUserResponse {

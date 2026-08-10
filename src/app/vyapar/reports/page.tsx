@@ -16,11 +16,11 @@ import { VyaparShell, VyaparEmpty } from "@/components/vyapar/VyaparShell";
 import { VYAPAR_REPORTS, REPORT_GROUPS } from "@/lib/vyaparConfig";
 import { Spinner } from "@/components/Spinner";
 import { DatePicker } from "@/components/DatePicker";
-import { inr } from "@/lib/format";
+import { inr, bookDate, toIsoDate } from "@/lib/format";
 import { useVyaparProjectId } from "@/lib/projectScope";
 import * as vyapar from "@/lib/vyaparApi";
 import type { CashBankTxn, Invoice, InvoiceLine, Item, Party, Payment } from "@/lib/vyaparApi";
-import { ChevronRight, Download, FileText } from "lucide-react";
+import { ChevronLeft, ChevronRight, Download, FileText } from "lucide-react";
 
 type ReportId = string;
 
@@ -109,6 +109,13 @@ function ReportDetail({ id, onBack }: { id: ReportId; onBack: () => void }) {
   const [loading, setLoading] = useState(true);
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
+  // The Day Book is a single-day view (Vyapar's own default): it opens on today with prev/next
+  // stepping. Setting either From or To switches it to range mode and the stepper steps aside.
+  const isDaybook = id === "daybook";
+  const [day, setDay] = useState(() => new Date().toISOString().slice(0, 10));
+  const usingRange = !!(from || to);
+  const effFrom = isDaybook && !usingRange ? day : from;
+  const effTo = isDaybook && !usingRange ? day : to;
   const projectId = useVyaparProjectId();
 
   const load = useCallback(async () => {
@@ -154,12 +161,13 @@ function ReportDetail({ id, onBack }: { id: ReportId; onBack: () => void }) {
   const inRange = useCallback(
     (date: string | null) => {
       if (!date) return true;
-      const d = date.slice(0, 10);
-      if (from && d < from) return false;
-      if (to && d > to) return false;
+      // Normalize so legacy rows stored as DD/MM/YYYY still range-filter against ISO bounds.
+      const d = toIsoDate(date);
+      if (effFrom && d < effFrom) return false;
+      if (effTo && d > effTo) return false;
       return true;
     },
-    [from, to]
+    [effFrom, effTo]
   );
 
   const sales = useMemo(() => invoices.filter((i) => i.docType === "SALE" && inRange(i.invoiceDate)), [invoices, inRange]);
@@ -186,14 +194,57 @@ function ReportDetail({ id, onBack }: { id: ReportId; onBack: () => void }) {
           <h2 className="text-base font-semibold text-gray-800">{meta.title}</h2>
         </div>
         <div className="flex flex-wrap items-end gap-3">
+          {isDaybook && (
+            <div className="block">
+              <span className="mb-1 block text-[11px] font-medium tracking-wide text-gray-400 uppercase">Day</span>
+              <div className={`flex items-center gap-1.5 ${usingRange ? "opacity-40" : ""}`}>
+                <button
+                  onClick={() => setDay((d) => shiftDay(d, -1))}
+                  disabled={usingRange}
+                  title="Previous day"
+                  className="rounded-lg border border-gray-200 p-2 text-gray-500 transition-all duration-150 hover:bg-gray-50 active:scale-95 disabled:cursor-not-allowed"
+                >
+                  <ChevronLeft size={15} />
+                </button>
+                <DatePicker value={day} onChange={setDay} placeholder="Day" className="min-w-[150px] py-1.5" />
+                <button
+                  onClick={() => setDay((d) => shiftDay(d, 1))}
+                  disabled={usingRange}
+                  title="Next day"
+                  className="rounded-lg border border-gray-200 p-2 text-gray-500 transition-all duration-150 hover:bg-gray-50 active:scale-95 disabled:cursor-not-allowed"
+                >
+                  <ChevronRight size={15} />
+                </button>
+                <button
+                  onClick={() => setDay(new Date().toISOString().slice(0, 10))}
+                  disabled={usingRange}
+                  className="rounded-lg border border-gray-200 px-2.5 py-2 text-xs font-medium text-gray-600 transition-all duration-150 hover:bg-gray-50 active:scale-95 disabled:cursor-not-allowed"
+                >
+                  Today
+                </button>
+              </div>
+            </div>
+          )}
           <label className="block">
-            <span className="mb-1 block text-[11px] font-medium tracking-wide text-gray-400 uppercase">From</span>
+            <span className="mb-1 block text-[11px] font-medium tracking-wide text-gray-400 uppercase">
+              {isDaybook ? "From (range)" : "From"}
+            </span>
             <DatePicker value={from} onChange={setFrom} placeholder="From" className="min-w-[150px] py-1.5" />
           </label>
           <label className="block">
-            <span className="mb-1 block text-[11px] font-medium tracking-wide text-gray-400 uppercase">To</span>
+            <span className="mb-1 block text-[11px] font-medium tracking-wide text-gray-400 uppercase">
+              {isDaybook ? "To (range)" : "To"}
+            </span>
             <DatePicker value={to} onChange={setTo} min={from || undefined} placeholder="To" className="min-w-[150px] py-1.5" />
           </label>
+          {isDaybook && usingRange && (
+            <button
+              onClick={() => { setFrom(""); setTo(""); }}
+              className="rounded-lg border border-gray-200 px-2.5 py-2 text-xs font-medium text-gray-600 transition-all duration-150 hover:bg-gray-50 active:scale-95"
+            >
+              Clear range
+            </button>
+          )}
         </div>
       </div>
 
@@ -481,6 +532,130 @@ function ReportBody({
           head={["Date", "Money In", "Money Out", "Net"]}
           rows={rows.map(([d, v]) => [fmt(d), inr(v.in), inr(v.out), inr(v.in - v.out)])}
           alignRight={[1, 2, 3]}
+        />
+      </>
+    );
+  }
+
+  // ---------------------------------------------------------------- Expense
+
+  if (id === "expense" || id === "expense-category" || id === "expense-item") {
+    // An expense's category lives in `notes` (the backend has no dedicated column yet), matching
+    // how the Expenses screen stores it.
+    const catOf = (e: Invoice) => e.notes?.trim() || "Uncategorised";
+
+    if (id === "expense-category") {
+      const map = new Map<string, { count: number; total: number; balance: number }>();
+      expenses.forEach((e) => {
+        const k = catOf(e);
+        const cur = map.get(k) ?? { count: 0, total: 0, balance: 0 };
+        cur.count += 1;
+        cur.total += e.total;
+        cur.balance += e.balance;
+        map.set(k, cur);
+      });
+      const rows = [...map.entries()].sort((a, b) => b[1].total - a[1].total);
+      const chart = rows.slice(0, 10).map(([name, v]) => ({ name: name.slice(0, 14), value: v.total }));
+      return (
+        <>
+          <SummaryStrip
+            stats={[
+              { label: "Categories", value: String(rows.length) },
+              { label: "Total spend", value: inr(sum(rows.map(([, v]) => v.total))) },
+              { label: "Unpaid", value: inr(sum(rows.map(([, v]) => v.balance))) },
+            ]}
+            onDownload={() => onDownload(rows.map(([k, v]) => [k, v.count, v.total, v.balance]), ["Category", "Transactions", "Total", "Balance"])}
+          />
+          {chart.length > 0 && (
+            <ChartCard title="Spend by category">
+              <BarChart data={chart} margin={{ top: 5, right: 8, left: -18, bottom: 0 }}>
+                <CartesianGrid vertical={false} stroke="#f1f1ef" />
+                <XAxis dataKey="name" tick={{ fontSize: 10, fill: "#94a3b8" }} axisLine={false} tickLine={false} />
+                <YAxis tick={{ fontSize: 10, fill: "#94a3b8" }} axisLine={false} tickLine={false} />
+                <Tooltip contentStyle={TOOLTIP} formatter={(v) => [inr(Number(v)), "Spend"]} />
+                <Bar dataKey="value" fill="#e11d48" radius={[5, 5, 0, 0]} maxBarSize={40} />
+              </BarChart>
+            </ChartCard>
+          )}
+          <SimpleTable
+            head={["Category", "Transactions", "Total", "Balance"]}
+            rows={rows.map(([k, v]) => [k, String(v.count), inr(v.total), inr(v.balance)])}
+            alignRight={[1, 2, 3]}
+          />
+        </>
+      );
+    }
+
+    if (id === "expense-item") {
+      const map = new Map<string, { qty: number; amount: number }>();
+      expenses.forEach((e) =>
+        e.lines.forEach((l) => {
+          const k = l.itemName?.trim() || "—";
+          const cur = map.get(k) ?? { qty: 0, amount: 0 };
+          cur.qty += l.quantity;
+          cur.amount += l.amount;
+          map.set(k, cur);
+        })
+      );
+      const rows = [...map.entries()].sort((a, b) => b[1].amount - a[1].amount);
+      return (
+        <>
+          <SummaryStrip
+            stats={[
+              { label: "Expense items", value: String(rows.length) },
+              { label: "Total", value: inr(sum(rows.map(([, v]) => v.amount))) },
+            ]}
+            onDownload={() => onDownload(rows.map(([k, v]) => [k, v.qty, v.amount]), ["Expense Item", "Qty", "Amount"])}
+          />
+          <SimpleTable
+            head={["Expense Item", "Qty", "Amount"]}
+            rows={rows.map(([k, v]) => [k, String(v.qty), inr(v.amount)])}
+            alignRight={[1, 2]}
+          />
+        </>
+      );
+    }
+
+    // Flat transaction list of every expense in range.
+    const total = sum(expenses.map((e) => e.total));
+    const paid = sum(expenses.map((e) => e.paidAmount));
+    const byCat = new Map<string, number>();
+    expenses.forEach((e) => byCat.set(catOf(e), (byCat.get(catOf(e)) ?? 0) + e.total));
+    const chart = [...byCat.entries()]
+      .map(([name, value]) => ({ name: name.slice(0, 14), value }))
+      .sort((a, b) => b.value - a.value)
+      .slice(0, 10);
+    return (
+      <>
+        <SummaryStrip
+          stats={[
+            { label: "Expenses", value: String(expenses.length) },
+            { label: "Total", value: inr(total) },
+            { label: "Paid", value: inr(paid) },
+            { label: "Balance", value: inr(total - paid) },
+          ]}
+          onDownload={() =>
+            onDownload(
+              expenses.map((e) => [e.invoiceDate ?? "", catOf(e), e.invoiceNo, e.partyName ?? "", e.total, e.paidAmount, e.balance, e.status]),
+              ["Date", "Category", "Exp No.", "Party", "Total", "Paid", "Balance", "Status"]
+            )
+          }
+        />
+        {chart.length > 0 && (
+          <ChartCard title="Expense by category">
+            <BarChart data={chart} margin={{ top: 5, right: 8, left: -18, bottom: 0 }}>
+              <CartesianGrid vertical={false} stroke="#f1f1ef" />
+              <XAxis dataKey="name" tick={{ fontSize: 10, fill: "#94a3b8" }} axisLine={false} tickLine={false} />
+              <YAxis tick={{ fontSize: 10, fill: "#94a3b8" }} axisLine={false} tickLine={false} />
+              <Tooltip contentStyle={TOOLTIP} formatter={(v) => [inr(Number(v)), "Amount"]} />
+              <Bar dataKey="value" fill="#e11d48" radius={[5, 5, 0, 0]} maxBarSize={40} />
+            </BarChart>
+          </ChartCard>
+        )}
+        <SimpleTable
+          head={["Date", "Category", "Exp No.", "Party", "Total", "Balance", "Status"]}
+          rows={expenses.map((e) => [fmt(e.invoiceDate), catOf(e), e.invoiceNo || "—", e.partyName ?? "—", inr(e.total), inr(e.balance), e.status])}
+          alignRight={[4, 5]}
         />
       </>
     );
@@ -1171,7 +1346,12 @@ function SimpleTable({ head, rows, alignRight = [] }: { head: string[]; rows: (s
 }
 
 function fmt(iso: string | null): string {
-  if (!iso || iso.length < 10) return "—";
-  const [y, m, d] = iso.slice(0, 10).split("-");
-  return `${d}/${m}/${y}`;
+  return bookDate(iso);
+}
+
+/** Step an ISO date by whole days — used by the Day Book's prev/next arrows. */
+function shiftDay(iso: string, delta: number): string {
+  const d = new Date(`${iso}T00:00:00`);
+  d.setDate(d.getDate() + delta);
+  return d.toISOString().slice(0, 10);
 }

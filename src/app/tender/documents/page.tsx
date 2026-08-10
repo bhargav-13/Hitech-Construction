@@ -4,11 +4,14 @@ import { useMemo, useState } from "react";
 import { TenderShell, TenderEmpty } from "@/components/tender/TenderShell";
 import { StepEditor } from "@/components/tender/StepEditor";
 import { DocumentForm } from "@/components/tender/DocumentForm";
+import { ImportDialog } from "@/components/vyapar/ImportDialog";
+import { documentImportConfig } from "@/lib/tenderImportConfigs";
+import { exportRowsToCsv } from "@/lib/vyaparExport";
 import { useTenderStore } from "@/lib/tenderStore";
 import { raLabel } from "@/lib/tenderTypes";
 import type { DocPair, TenderDocuments, TrackerStep } from "@/lib/tenderTypes";
 import { tval } from "@/lib/tenderHelpers";
-import { Check, FileText, FolderOpen, Pencil, Plus, Search, SlidersHorizontal, Trash2 } from "lucide-react";
+import { Check, Download, FileText, FolderOpen, Pencil, Plus, Search, SlidersHorizontal, Trash2, Upload } from "lucide-react";
 
 export default function TenderDocumentsPage() {
   const documents = useTenderStore((s) => s.documents);
@@ -19,11 +22,14 @@ export default function TenderDocumentsPage() {
   const removeDocumentStep = useTenderStore((s) => s.removeDocumentStep);
   const renameDocumentStep = useTenderStore((s) => s.renameDocumentStep);
   const removeDocument = useTenderStore((s) => s.removeDocument);
+  const addDocument = useTenderStore((s) => s.addDocument);
   const [search, setSearch] = useState("");
   const [editing, setEditing] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [formOpen, setFormOpen] = useState(false);
   const [editingRecord, setEditingRecord] = useState<TenderDocuments | null>(null);
+  const [importing, setImporting] = useState(false);
+  const importConfig = useMemo(() => documentImportConfig(addDocument), [addDocument]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -49,6 +55,24 @@ export default function TenderDocumentsPage() {
             <p className="text-sm text-gray-500">Pick a tender on the left; its soft &amp; hard copy status opens on the right — click a box to toggle.</p>
           </div>
           <div className="flex items-center gap-2">
+            <button
+              onClick={() => setImporting(true)}
+              className="flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-600 transition-colors hover:bg-gray-50"
+            >
+              <Upload size={14} /> Import
+            </button>
+            <button
+              onClick={() =>
+                exportRowsToCsv(
+                  "tender-documentation",
+                  ["Name of Work", "Tender ID", "Progress note", "View Documents"],
+                  filtered.map((d) => [d.nameOfWork, d.tenderId, d.progress, d.viewDocuments]),
+                )
+              }
+              className="flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-600 transition-colors hover:bg-gray-50"
+            >
+              <Download size={14} /> Export
+            </button>
             <button
               onClick={() => setEditing((v) => !v)}
               className={`flex items-center gap-1.5 rounded-lg border px-3 py-2 text-sm transition-colors ${
@@ -132,6 +156,7 @@ export default function TenderDocumentsPage() {
       </div>
 
       {formOpen && <DocumentForm document={editingRecord ?? undefined} onClose={() => setFormOpen(false)} />}
+      {importing && <ImportDialog config={importConfig} onClose={() => setImporting(false)} onImported={() => setImporting(false)} />}
     </TenderShell>
   );
 }

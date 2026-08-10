@@ -596,7 +596,12 @@ function ExpenseForm({
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 function formatDate(iso: string | null): string {
-  if (!iso || iso.length < 10) return "—";
-  const [y, m, d] = iso.slice(0, 10).split("-");
-  return `${d} ${MONTHS[Number(m) - 1] ?? m} ${y}`;
+  const v = (iso ?? "").trim();
+  if (!v) return "—";
+  // ISO (2025-10-31) → "31 Oct 2025"; legacy imported rows (raw DD/MM/YYYY) are shown as-is.
+  if (/^\d{4}-\d{2}-\d{2}/.test(v)) {
+    const [y, m, d] = v.slice(0, 10).split("-");
+    return `${d} ${MONTHS[Number(m) - 1] ?? m} ${y}`;
+  }
+  return v;
 }

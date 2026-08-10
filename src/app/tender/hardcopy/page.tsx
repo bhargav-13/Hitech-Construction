@@ -5,11 +5,14 @@ import Link from "next/link";
 import { TenderShell, TenderEmpty } from "@/components/tender/TenderShell";
 import { SortTh } from "@/components/vyapar/SortTh";
 import { HardcopyForm } from "@/components/tender/HardcopyForm";
+import { ImportDialog } from "@/components/vyapar/ImportDialog";
+import { hardcopyImportConfig } from "@/lib/tenderImportConfigs";
+import { exportRowsToCsv } from "@/lib/vyaparExport";
 import { useTableSort } from "@/lib/useTableSort";
 import { useTenderStore } from "@/lib/tenderStore";
 import { tdate, tval } from "@/lib/tenderHelpers";
 import type { HardcopyDispatch } from "@/lib/tenderTypes";
-import { Pencil, Plus, Search, Trash2, Truck } from "lucide-react";
+import { Download, Pencil, Plus, Search, Trash2, Truck, Upload } from "lucide-react";
 
 function arrivedChip(status?: string | null) {
   const s = (status ?? "").toUpperCase();
@@ -22,9 +25,12 @@ export default function TenderHardcopyPage() {
   const hardcopy = useTenderStore((s) => s.hardcopy);
   const tenders = useTenderStore((s) => s.tenders);
   const removeHardcopy = useTenderStore((s) => s.removeHardcopy);
+  const addHardcopy = useTenderStore((s) => s.addHardcopy);
   const [search, setSearch] = useState("");
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<HardcopyDispatch | null>(null);
+  const [importing, setImporting] = useState(false);
+  const importConfig = useMemo(() => hardcopyImportConfig(addHardcopy), [addHardcopy]);
 
   // The source sheet has no tender column at all, so dispatches were only ever matched by name.
   // The seed resolves a tenderId where it can; this turns that into a real link.
@@ -62,6 +68,24 @@ export default function TenderHardcopyPage() {
             <p className="text-sm text-gray-500">Physical tender documents couriered to tendering offices.</p>
           </div>
           <div className="flex items-center gap-2">
+            <button
+              onClick={() => setImporting(true)}
+              className="flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-600 transition-colors duration-150 hover:bg-gray-50"
+            >
+              <Upload size={14} /> Import
+            </button>
+            <button
+              onClick={() =>
+                exportRowsToCsv(
+                  "tender-hardcopy",
+                  ["Date", "Name of Work", "Tender ID", "Documents", "Packed By", "Dispatch By", "Tracking No.", "Arrived", "Arrived Date", "Remarks"],
+                  sorted.map((h) => [h.date, h.nameOfWork, h.tenderId, h.documentList, h.packedBy, h.dispatchBy, h.trackingNo, h.arrived, h.arrivedDate, h.remarks]),
+                )
+              }
+              className="flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-600 transition-colors duration-150 hover:bg-gray-50"
+            >
+              <Download size={14} /> Export
+            </button>
             <button
               onClick={() => {
                 setEditing(null);
@@ -162,6 +186,7 @@ export default function TenderHardcopyPage() {
       </div>
 
       {formOpen && <HardcopyForm dispatch={editing ?? undefined} onClose={() => setFormOpen(false)} />}
+      {importing && <ImportDialog config={importConfig} onClose={() => setImporting(false)} onImported={() => setImporting(false)} />}
     </TenderShell>
   );
 }
