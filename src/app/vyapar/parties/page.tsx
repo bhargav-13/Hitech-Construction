@@ -65,7 +65,7 @@ export default function PartiesPage() {
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState<"All" | vyapar.PartyType | "STAFF">("All");
   const [groupFilter, setGroupFilter] = useState<string>("All");
-  const [sortDesc, setSortDesc] = useState(false);
+  const [sortMode, setSortMode] = useState<"receivable" | "payable">("receivable");
   const [editing, setEditing] = useState<Party | null>(null);
   const [creating, setCreating] = useState(false);
   const [importing, setImporting] = useState(false);
@@ -139,8 +139,11 @@ export default function PartiesPage() {
       if (!q) return true;
       return [p.name, p.phone, p.gstin, p.partyGroup].some((f) => f?.toLowerCase().includes(q));
     });
-    return [...list].sort((a, b) => (sortDesc ? b.name.localeCompare(a.name) : a.name.localeCompare(b.name)));
-  }, [parties, search, typeFilter, groupFilter, sortDesc]);
+    if (sortMode === "payable") {
+      return [...list].sort((a, b) => a.balance - b.balance);
+    }
+    return [...list].sort((a, b) => b.balance - a.balance);
+  }, [parties, search, typeFilter, groupFilter, sortMode]);
 
   const filteredMembers = useMemo(() => {
     // Members aren't customers/suppliers, so hide them under those type filters; a party-group
@@ -150,8 +153,9 @@ export default function PartiesPage() {
     const list = members.filter((m) =>
       !q ? true : [m.fullName, m.phoneNumber, m.email, m.role.name].some((f) => f?.toLowerCase().includes(q))
     );
-    return [...list].sort((a, b) => (sortDesc ? b.fullName.localeCompare(a.fullName) : a.fullName.localeCompare(b.fullName)));
-  }, [members, search, typeFilter, groupFilter, sortDesc]);
+    // Members always A→Z; balance sort applies only to parties.
+    return [...list].sort((a, b) => a.fullName.localeCompare(b.fullName));
+  }, [members, search, typeFilter, groupFilter, sortMode]);
 
   const selected = parties.find((p) => p.id === selectedId) ?? null;
   const selectedMember = selectedMemberId != null ? members.find((m) => m.id === selectedMemberId) ?? null : null;
@@ -442,11 +446,22 @@ export default function PartiesPage() {
                     ]}
                   />
                   <button
-                    onClick={() => setSortDesc((s) => !s)}
-                    title={sortDesc ? "Sort Z→A" : "Sort A→Z"}
-                    className="rounded-lg border border-gray-200 p-1.5 text-gray-400 transition-colors duration-150 hover:bg-gray-50 hover:text-gray-600"
+                    onClick={() =>
+                      setSortMode((m) => (m === "receivable" ? "payable" : "receivable"))
+                    }
+                    title={
+                      sortMode === "receivable"
+                        ? "Sort by highest payable"
+                        : "Sort by highest to collect"
+                    }
+                    className={`flex items-center gap-1 rounded-lg border px-2 py-1.5 text-xs font-medium transition-all duration-150 ${
+                      sortMode === "receivable"
+                        ? "border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+                        : "border-rose-300 bg-rose-50 text-rose-700 hover:bg-rose-100"
+                    }`}
                   >
-                    <ArrowUpDown size={14} />
+                    <ArrowUpDown size={13} />
+                    {sortMode === "receivable" ? "To Collect" : "To Pay"}
                   </button>
                 </div>
                 {settings.partyGrouping && groups.length > 1 && (
