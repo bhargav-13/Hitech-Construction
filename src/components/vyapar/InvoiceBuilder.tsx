@@ -4,16 +4,49 @@ import { useMemo, useState } from "react";
 import { Drawer } from "@/components/Drawer";
 import { Select } from "@/components/Select";
 import { DatePicker } from "@/components/DatePicker";
-import { inr } from "@/lib/format";
+import { TypeaheadPicker } from "@/components/vyapar/TypeaheadPicker";
+import { ItemDialog } from "@/components/vyapar/ItemDialog";
+import { PartyDialog } from "@/components/vyapar/PartyDialog";
+import { LinkPaymentDialog } from "@/components/vyapar/LinkPaymentDialog";
+// Aliased: `calc` below uses a local `qty` accumulator, and shadowing the formatter would be a trap.
+import { inr, qty as formatQty } from "@/lib/format";
 import { usePaymentTypeOptions } from "@/lib/bankScope";
+import { useVyaparSettings } from "@/lib/useVyaparSettings";
 import { useVyaparProjectId } from "@/lib/projectScope";
 import { useProjects } from "@/lib/useProjects";
 import * as vyapar from "@/lib/vyaparApi";
 import { STATES_OF_SUPPLY } from "@/lib/vyaparApi";
 import type { DocType, Invoice, Item, Party } from "@/lib/vyaparApi";
-import { Plus, X } from "lucide-react";
+import { GripVertical, Link2, Plus, X } from "lucide-react";
 
 const UNITS = ["NONE", "PCS", "NOS", "KG", "TON", "MTR", "SQM", "CUM", "BAG", "BOX", "LTR", "HOUR"];
+
+/**
+ * The GST slabs Vyapar offers in the Tax column. It's a picker there, not a free number box —
+ * typing an arbitrary rate is how you end up with a 17% line that no return will accept.
+ */
+const TAX_RATES = [0, 0.25, 3, 5, 12, 18, 28];
+const taxLabel = (rate: number) => (rate === 0 ? "None" : `GST@${rate}%`);
+
+/** The heading printed above the terms block — Vyapar's "Title" dropdown. */
+const TERMS_TITLES = ["Terms and Conditions", "Sale Invoice", "Purchase Bill", "Note", "Declaration"];
+
+/**
+ * The prefixes configured for one document type in Settings → Transaction.
+ *
+ * Kept out of the component so the parse (and its guard against a malformed blob) doesn't sit
+ * inside a `useMemo` body, which the React compiler can't memoize through a try/catch.
+ */
+function configuredPrefixes(json: string | null, docType: DocType): string[] {
+  if (!json) return [];
+  try {
+    const byType = JSON.parse(json) as Record<string, string>;
+    const raw = byType[docType];
+    return raw ? raw.split(",").map((s) => s.trim()).filter(Boolean) : [];
+  } catch {
+    return [];
+  }
+}
 
 type LineDraft = {
   itemId: number | null;
@@ -49,17 +82,26 @@ export function InvoiceBuilder({
   items,
   onClose,
   onSaved,
+  onItemCreated,
+  onPartyCreated,
 }: {
   docType: DocType;
   existing?: Invoice;
   parties: Party[];
   items: Item[];
   onClose: () => void;
-  onSaved: () => void;
+  /** `again` is true when the user chose Save & New, so the form should stay open. */
+  onSaved: (again?: boolean) => void;
+  /** Lets the parent fold an inline-created master into its own list without a full reload. */
+  onItemCreated?: (item: Item) => void;
+  onPartyCreated?: (party: Party) => void;
 }) {
   const projectId = useVyaparProjectId();
   const { projects } = useProjects();
   const paymentTypeOptions = usePaymentTypeOptions();
+  // The form's shape follows Settings, as it does in Vyapar: due dates, round-off behaviour and
+  // which grid columns exist are all switches, not hardcoded decisions.
+  const { settings } = useVyaparSettings();
   const isPurchase = docType === "PURCHASE";
   // Estimates, proformas, sale orders and delivery challans are planning docs: they don't move stock
   // or party balance (see vyapar-service POSTED). So: no cash/credit toggle, no received amount.
@@ -75,7 +117,9 @@ export function InvoiceBuilder({
   const noToggle = noPayment || isReturn || isPurchase;
   const partyRequired = noPayment || isReturn || isPurchase;
   const singleNumber = noPayment || isReturn || isPurchase; // Bill/Ref/Order/Challan/Return No. — no prefix
-  const showDueDate = docType === "SALE" || isOrder || isChallan; // only these carry a due date
+  // Vyapar hides Due Date behind Settings → Transaction → "Due Dates and Payment Terms"; orders
+  // and challans carry their own delivery date regardless.
+  const showDueDate = (docType === "SALE" && settings.dueDatesEnabled) || isOrder || isChallan;
   const moneyLabel = isPurchase ? "Paid" : "Received"; // money out vs money in
   const numberLabel = isPurchase
     ? "Bill Number"
@@ -111,17 +155,30 @@ export function InvoiceBuilder({
   // Sales default to cash (fully received); purchases default to unpaid until a Paid amount is entered.
   const [isCash, setIsCash] = useState(existing?.isCash ?? docType !== "PURCHASE");
   const [partyId, setPartyId] = useState(existing?.partyId ? String(existing.partyId) : "");
+  /** What's typed in the party box — kept apart from `partyId` so free text can be searched. */
+  const [partyText, setPartyText] = useState(existing?.partyName ?? "");
+  // Inline creation, so an unknown item or party doesn't force the document to be abandoned.
+  const [creatingItem, setCreatingItem] = useState<{ idx: number; name: string } | null>(null);
+  const [creatingParty, setCreatingParty] = useState<string | null>(null);
+  // Other open bills this document's receipt also settles.
+  const [linkingPayment, setLinkingPayment] = useState(false);
+  const [paymentLinks, setPaymentLinks] = useState<{ invoiceId: number; amount: number }[]>([]);
   // Which construction project this document belongs to — defaults to the header scope, editable.
   const [selectedProjectId, setSelectedProjectId] = useState(
     existing?.projectId != null ? String(existing.projectId) : projectId != null ? String(projectId) : ""
   );
   const [phone, setPhone] = useState("");
+  /** Walk-in billing address, used when a cash bill isn't tied to a saved party. */
+  const [billingAddress, setBillingAddress] = useState(existing?.billingAddress ?? "");
   const [invoicePrefix, setInvoicePrefix] = useState(existing?.invoicePrefix ?? "");
   const [invoiceNo, setInvoiceNo] = useState(existing?.invoiceNo ?? "");
   const [invoiceDate, setInvoiceDate] = useState(existing?.invoiceDate ?? new Date().toISOString().slice(0, 10));
   const [dueDate, setDueDate] = useState(existing?.dueDate ?? "");
   const [stateOfSupply, setStateOfSupply] = useState(existing?.stateOfSupply ?? "");
   const [terms, setTerms] = useState(existing?.terms ?? "Thank you for doing business with us.");
+  const [termsTitle, setTermsTitle] = useState(isPurchase ? "Purchase Bill" : "Sale Invoice");
+  /** Vyapar lets the round-off figure itself be nudged by hand. */
+  const [roundOffOverride, setRoundOffOverride] = useState<number | null>(null);
   const [notes, setNotes] = useState(existing?.notes ?? "");
   const [discountPercent, setDiscountPercent] = useState(existing?.discountPercent ?? 0);
   const [discountAmount, setDiscountAmount] = useState(existing?.discount ?? 0);
@@ -131,6 +188,10 @@ export function InvoiceBuilder({
   // Received amount, so a sale can be saved fully/partly paid — mirrors Vyapar's Received / Balance.
   const [received, setReceived] = useState(existing?.paidAmount ?? 0);
   const [receivedTouched, setReceivedTouched] = useState(existing != null);
+  /** Vyapar's ☑ next to Received — off books the document as fully outstanding. */
+  const [receiveOn, setReceiveOn] = useState(existing ? (existing.paidAmount ?? 0) > 0 : true);
+  /** Cheque/NEFT number for the received portion. */
+  const [paymentReference, setPaymentReference] = useState(existing?.paymentReference ?? "");
   // Payment mode for the received portion — Vyapar's "Payment Type" picker on a paid invoice.
   const [paymentMode, setPaymentMode] = useState(
     existing?.paymentType && existing.paymentType !== "Credit" ? existing.paymentType : "Cash"
@@ -151,6 +212,21 @@ export function InvoiceBuilder({
   );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+
+  /**
+   * A signature of everything the user can edit. Comparing it against the value captured on mount
+   * tells us whether closing would throw work away — which is what Vyapar's "Current changes will
+   * be discarded" prompt guards. Comparing a snapshot rather than setting a flag in every setter
+   * means an edit that's typed and then undone correctly reads as clean.
+   */
+  const signature = JSON.stringify({
+    partyId, selectedProjectId, invoicePrefix, invoiceNo, invoiceDate, dueDate, stateOfSupply,
+    terms, notes, discountPercent, discountAmount, roundOffOn, priceHasTax, received, isCash,
+    paymentMode, paymentReference, receiveOn, partyText, lines,
+  });
+  // Captured on the first render only — state, not a ref, so nothing is read during render.
+  const [initialSignature] = useState(signature);
+  const dirty = signature !== initialSignature;
 
   /** Mirrors the server's maths exactly so the on-screen preview always matches what gets saved. */
   const calc = useMemo(() => {
@@ -175,13 +251,25 @@ export function InvoiceBuilder({
     });
     const headerDisc = discountPercent > 0 ? (net * discountPercent) / 100 : Number(discountAmount) || 0;
     const beforeRound = net + taxTotal - headerDisc;
-    // Round-off nudges the total to the nearest rupee, like Vyapar's checkbox.
-    const roundOff = roundOffOn ? Math.round(beforeRound) - beforeRound : 0;
+    // Round-off follows Settings → Transaction: Nearest/Up/Down, to 1, 10 or 100. We used to
+    // hardcode "nearest rupee", which is only one of nine combinations Vyapar offers.
+    const step = settings.roundOffTo > 0 ? settings.roundOffTo : 1;
+    const rounded =
+      settings.roundOffMode === "UP"
+        ? Math.ceil(beforeRound / step) * step
+        : settings.roundOffMode === "DOWN"
+          ? Math.floor(beforeRound / step) * step
+          : Math.round(beforeRound / step) * step;
+    // A hand-typed round-off wins over the computed one, until the checkbox is cleared.
+    const roundOff = !roundOffOn ? 0 : (roundOffOverride ?? rounded - beforeRound);
     return { rows, qty, discTotal, taxTotal, net, headerDisc, roundOff, total: beforeRound + roundOff };
-  }, [lines, discountPercent, discountAmount, roundOffOn, priceHasTax]);
+  }, [
+    lines, discountPercent, discountAmount, roundOffOn, priceHasTax, roundOffOverride,
+    settings.roundOffMode, settings.roundOffTo,
+  ]);
 
   // Received defaults to the full total on a cash bill and nothing on credit, until the user edits it.
-  const displayReceived = receivedTouched ? received : isCash ? calc.total : 0;
+  const displayReceived = !receiveOn ? 0 : receivedTouched ? received : isCash ? calc.total : 0;
   const balanceDue = Math.max(0, calc.total - displayReceived);
   const selectedParty = parties.find((p) => String(p.id) === partyId) ?? null;
 
@@ -189,22 +277,27 @@ export function InvoiceBuilder({
     setLines((prev) => prev.map((l, i) => (i === idx ? { ...l, ...patch } : l)));
   }
 
+  /** Reorder a line. Vyapar lets rows be dragged; up/down covers the same need without a DnD lib. */
+  function moveLine(idx: number, delta: number) {
+    setLines((prev) => {
+      const to = idx + delta;
+      if (to < 0 || to >= prev.length) return prev;
+      const next = [...prev];
+      [next[idx], next[to]] = [next[to], next[idx]];
+      return next;
+    });
+  }
+
   /** Picking a party pulls in its phone and, for a sale, its state as the place of supply. */
-  function pickParty(value: string) {
-    setPartyId(value);
-    const p = parties.find((x) => String(x.id) === value);
-    if (!p) return;
+  function pickParty(p: Party) {
+    setPartyId(String(p.id));
+    setPartyText(p.name);
     setPhone(p.phone ?? "");
     if (p.state && STATES_OF_SUPPLY.includes(p.state)) setStateOfSupply(p.state);
   }
 
   /** Choosing a catalogue item fills in its rate, unit and tax — the usual billing shortcut. */
-  function pickItem(idx: number, value: string) {
-    const item = items.find((x) => String(x.id) === value);
-    if (!item) {
-      setLine(idx, { itemId: null });
-      return;
-    }
+  function applyItem(idx: number, item: Item) {
     setLine(idx, {
       itemId: item.id,
       itemName: item.name,
@@ -214,7 +307,7 @@ export function InvoiceBuilder({
     });
   }
 
-  async function save() {
+  async function save(again = false) {
     const clean = lines.filter((l) => l.itemName.trim());
     if (clean.length === 0) {
       setError("Add at least one item.");
@@ -252,6 +345,10 @@ export function InvoiceBuilder({
         paidAmount: noPayment ? 0 : Math.min(displayReceived, calc.total),
         isCash: noPayment ? false : isCash,
         paymentType: noPayment ? "Credit" : displayReceived > 0 ? paymentMode : "Credit",
+        paymentReference: displayReceived > 0 ? paymentReference || null : null,
+        // Only meaningful on a cash bill with no party — otherwise the party carries the address.
+        billingName: !partyId && partyText.trim() ? partyText.trim() : null,
+        billingAddress: !partyId && billingAddress.trim() ? billingAddress.trim() : null,
         stateOfSupply: stateOfSupply || null,
         terms: terms || null,
         notes: notes || null,
@@ -272,24 +369,91 @@ export function InvoiceBuilder({
           };
         }),
       };
-      if (existing) await vyapar.updateInvoice(existing.id, body);
-      else await vyapar.createInvoice(body);
-      onSaved();
+      // When the receipt also settles other bills, the money can't live on this document's
+      // paidAmount alone — it becomes a real payment whose links the server uses to recompute
+      // every touched document's paid amount (including this one).
+      const spreading = !noPayment && paymentLinks.length > 0 && displayReceived > 0;
+      if (spreading) body.paidAmount = 0;
+
+      const saved = existing
+        ? await vyapar.updateInvoice(existing.id, body)
+        : await vyapar.createInvoice(body);
+
+      if (spreading) {
+        const spentElsewhere = paymentLinks.reduce((s, l) => s + l.amount, 0);
+        const onThisDoc = Math.max(0, Math.min(displayReceived - spentElsewhere, calc.total));
+        await vyapar.createPayment({
+          direction: isPurchase ? "OUT" : "IN",
+          partyId: Number(partyId),
+          amount: displayReceived,
+          mode: paymentMode,
+          reference: paymentReference || null,
+          paymentDate: invoiceDate,
+          projectId: selectedProjectId ? Number(selectedProjectId) : null,
+          links: [
+            ...(onThisDoc > 0 ? [{ invoiceId: saved.id, amount: onThisDoc }] : []),
+            ...paymentLinks,
+          ],
+        });
+      }
+      if (again) {
+        // Vyapar's "Save & New": keep the form open with a clean slate and the party retained, so
+        // a run of documents for the same customer can be entered without reopening the form.
+        setInvoiceNo("");
+        setLines([emptyLine(), emptyLine()]);
+        setReceived(0);
+        setReceivedTouched(false);
+        setNotes("");
+        setDiscountPercent(0);
+        setDiscountAmount(0);
+        setSaving(false);
+      }
+      onSaved(again);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Couldn't save this document.");
       setSaving(false);
     }
   }
 
-  const relevantParties = parties.filter((p) => (isSupplierSide ? p.partyType === "SUPPLIER" : p.partyType === "CUSTOMER"));
-  const partyOptions = relevantParties.length ? relevantParties : parties;
+  /**
+   * Every party is selectable on every document.
+   *
+   * Vyapar has no customer/supplier field at all — the direction is derived from the transactions
+   * a party appears in, so the same firm can both buy from you and sell to you. We keep the
+   * `partyType` column (it drives grouping and reporting elsewhere) but no longer filter by it:
+   * hiding a supplier from a sale was the concrete bug that behaviour caused. The likely side is
+   * sorted first so the common case is still one keystroke away.
+   */
+  /**
+   * Prefixes offered for this document type, plus whatever the document already carries (so
+   * editing an old bill never silently rewrites its number) and a "None" escape.
+   */
+  const existingPrefix = existing?.invoicePrefix ?? "";
+  const configuredPrefixList = settings.prefixes;
+  const prefixOptions = useMemo(() => {
+    const all = [
+      ...new Set([...configuredPrefixes(configuredPrefixList, docType), ...(existingPrefix ? [existingPrefix] : [])]),
+    ];
+    return [{ value: "", label: "None" }, ...all.map((p) => ({ value: p, label: p }))];
+  }, [configuredPrefixList, docType, existingPrefix]);
+
+  const partyOptions = useMemo(() => {
+    const wanted = isSupplierSide ? "SUPPLIER" : "CUSTOMER";
+    return [...parties].sort((a, b) => {
+      const rank = (p: Party) => (p.partyType === wanted ? 0 : 1);
+      return rank(a) - rank(b) || a.name.localeCompare(b.name);
+    });
+  }, [parties, isSupplierSide]);
 
   return (
     <Drawer
       title={existing ? existing.invoiceNo : docHeading}
       onClose={onClose}
-      onSave={save}
+      onSave={() => save(false)}
+      // Only offered when creating — "Save & New" on an edit would be a confusing no-op.
+      onSaveAndNew={existing ? undefined : () => save(true)}
       saveLabel={saving ? "Saving…" : "Save"}
+      dirty={dirty}
       width="max-w-6xl"
     >
       <div className="space-y-5">
@@ -327,12 +491,28 @@ export function InvoiceBuilder({
               />
             </Field>
             <div>
-              <Field label={partyRequired ? "Party *" : isPurchase ? (isCash ? "Supplier" : "Supplier *") : isCash ? "Customer" : "Customer *"}>
-                <Select
-                  value={partyId}
-                  onChange={pickParty}
-                  placeholder="Search by name"
-                  options={[{ value: "", label: "Select party" }, ...partyOptions.map((p) => ({ value: String(p.id), label: p.name }))]}
+              <Field label={isCash && !partyRequired ? "Billing Name (Optional)" : partyRequired ? "Party *" : isPurchase ? "Supplier *" : "Customer *"}>
+                <TypeaheadPicker<Party>
+                  value={partyText}
+                  onChange={(text) => {
+                    setPartyText(text);
+                    // Editing the text clears the selection until another party is picked.
+                    setPartyId("");
+                  }}
+                  rows={partyOptions}
+                  getKey={(p) => p.id}
+                  getLabel={(p) => p.name}
+                  columns={[
+                    {
+                      label: "Balance",
+                      get: (p) => inr(Math.abs(p.balance)),
+                      className: (p) => (p.balance >= 0 ? "text-emerald-600" : "text-rose-600"),
+                    },
+                  ]}
+                  onPick={pickParty}
+                  onCreate={(typed) => setCreatingParty(typed)}
+                  createLabel="Add Party"
+                  placeholder="Search by Name/Phone"
                 />
               </Field>
               {selectedParty && (
@@ -344,6 +524,20 @@ export function InvoiceBuilder({
             <Field label="Phone No.">
               <input value={phone} onChange={(e) => setPhone(e.target.value)} className="input" placeholder="Phone No." />
             </Field>
+
+            {/* Cash mode: Vyapar drops the party requirement and takes a walk-in's name and
+                address instead, with the saved-party list tucked behind SHOW PARTIES. */}
+            {isCash && !partyRequired && (
+              <Field label="Billing Address">
+                <textarea
+                  value={billingAddress}
+                  onChange={(e) => setBillingAddress(e.target.value)}
+                  rows={3}
+                  className="input resize-none"
+                  placeholder="Billing Address"
+                />
+              </Field>
+            )}
           </div>
 
           <div className="space-y-3">
@@ -359,11 +553,14 @@ export function InvoiceBuilder({
             ) : (
               <Field label={numberLabel}>
                 <div className="flex gap-2">
-                  <input
+                  {/* Vyapar picks the prefix from the ones configured per document type in
+                      Settings → Transaction, rather than letting each bill invent its own. */}
+                  <Select
                     value={invoicePrefix}
-                    onChange={(e) => setInvoicePrefix(e.target.value)}
-                    placeholder="Prefix"
-                    className="input w-32 font-mono"
+                    onChange={setInvoicePrefix}
+                    size="sm"
+                    className="w-36"
+                    options={prefixOptions}
                   />
                   <input
                     value={invoiceNo}
@@ -399,6 +596,14 @@ export function InvoiceBuilder({
         <div className="overflow-x-auto rounded-xl border border-gray-200">
           <table className="w-full min-w-[980px] border-collapse text-sm">
             <thead>
+              {/* Vyapar groups the grid header: DISCOUNT and TAX each span a % and an Amount
+                  column, so the two pairs read as one concept rather than four loose columns. */}
+              <tr className="border-b border-gray-100 bg-gray-50 text-center text-[11px] font-medium tracking-wide text-gray-500 uppercase">
+                <th colSpan={6} className="px-2 pt-2" />
+                <th colSpan={2} className="border-l border-gray-200 px-2 pt-2">Discount</th>
+                <th colSpan={2} className="border-l border-gray-200 px-2 pt-2">Tax</th>
+                <th colSpan={2} className="px-2 pt-2" />
+              </tr>
               <tr className="border-b border-gray-200 bg-gray-50 text-left text-[11px] font-medium tracking-wide text-gray-500 uppercase">
                 <th className="w-8 px-2 py-2 text-center">#</th>
                 <th className="px-2 py-2">Item</th>
@@ -418,31 +623,55 @@ export function InvoiceBuilder({
                     </select>
                   </div>
                 </th>
-                <th className="w-20 px-2 py-2 text-right">Disc %</th>
-                <th className="w-24 px-2 py-2 text-right">Disc ₹</th>
-                <th className="w-20 px-2 py-2 text-right">Tax %</th>
-                <th className="w-24 px-2 py-2 text-right">Tax ₹</th>
+                <th className="w-20 px-2 py-1 text-right">%</th>
+                <th className="w-24 px-2 py-1 text-right">Amount</th>
+                <th className="w-28 px-2 py-1 text-right">%</th>
+                <th className="w-24 px-2 py-1 text-right">Amount</th>
                 <th className="w-28 px-2 py-2 text-right">Amount</th>
                 <th className="w-8 px-1 py-2" />
               </tr>
             </thead>
             <tbody>
               {lines.map((l, idx) => (
-                <tr key={idx} className="border-b border-gray-50 last:border-b-0">
-                  <td className="px-2 py-1.5 text-center text-xs text-gray-400">{idx + 1}</td>
+                <tr key={idx} className="group/row border-b border-gray-50 last:border-b-0 hover:bg-cyan-50/20">
+                  {/* Vyapar reveals a move handle and a delete on hover at the row start. */}
+                  <td className="group/num px-1 py-1.5 text-center text-xs text-gray-400">
+                    <span className="inline-flex items-center gap-0.5">
+                      <button
+                        type="button"
+                        title="Move row up"
+                        aria-label={`Move row ${idx + 1} up`}
+                        disabled={idx === 0}
+                        onClick={() => moveLine(idx, -1)}
+                        className="rounded p-0.5 text-gray-300 opacity-0 transition-opacity duration-150 group-hover/row:opacity-100 hover:text-brand-accent disabled:!opacity-0"
+                      >
+                        <GripVertical size={12} />
+                      </button>
+                      <span>{idx + 1}</span>
+                    </span>
+                  </td>
                   <td className="px-2 py-1.5">
-                    <Select
-                      value={l.itemId ? String(l.itemId) : ""}
-                      onChange={(v) => pickItem(idx, v)}
-                      size="sm"
-                      placeholder="Select item"
-                      options={[{ value: "", label: "Custom item" }, ...items.map((i) => ({ value: String(i.id), label: i.name }))]}
-                    />
-                    <input
+                    <TypeaheadPicker<Item>
                       value={l.itemName}
-                      onChange={(e) => setLine(idx, { itemName: e.target.value })}
+                      // Typing over a picked item detaches it — the line becomes a free-text entry,
+                      // which Vyapar allows for one-off charges that aren't in the catalogue.
+                      onChange={(text) => setLine(idx, { itemName: text, itemId: null })}
+                      rows={items}
+                      getKey={(i) => i.id}
+                      getLabel={(i) => i.name}
+                      columns={[
+                        { label: "Sale Price", get: (i) => inr(i.salePrice) },
+                        { label: "Purchase Price", get: (i) => inr(i.purchasePrice) },
+                        {
+                          label: "Stock",
+                          get: (i) => formatQty(i.stockQty),
+                          className: (i) => (i.lowStock ? "text-rose-600" : "text-emerald-600"),
+                        },
+                      ]}
+                      onPick={(item) => applyItem(idx, item)}
+                      onCreate={(typed) => setCreatingItem({ idx, name: typed })}
+                      createLabel="Add Item"
                       placeholder="Item name"
-                      className="mt-1 w-full rounded-md border border-gray-200 px-2 py-1 text-sm outline-none focus:border-cyan-500"
                     />
                   </td>
                   <td className="px-2 py-1.5">
@@ -458,8 +687,27 @@ export function InvoiceBuilder({
                   </td>
                   <Num value={l.rate} onChange={(v) => setLine(idx, { rate: v })} />
                   <Num value={l.discountPercent} onChange={(v) => setLine(idx, { discountPercent: v })} />
-                  <td className="px-2 py-1.5 text-right text-gray-500">{calc.rows[idx] ? inr(calc.rows[idx].disc) : "—"}</td>
-                  <Num value={l.taxPercent} onChange={(v) => setLine(idx, { taxPercent: v })} />
+                  {/* Discount ₹ is editable in Vyapar and back-solves the percentage. */}
+                  <td className="px-2 py-1.5">
+                    <input
+                      type="number"
+                      value={calc.rows[idx] ? Number(calc.rows[idx].disc.toFixed(2)) : 0}
+                      onChange={(e) => {
+                        const amount = Number(e.target.value) || 0;
+                        const gross = (Number(l.quantity) || 0) * (calc.rows[idx]?.baseRate ?? 0);
+                        setLine(idx, { discountPercent: gross > 0 ? (amount / gross) * 100 : 0 });
+                      }}
+                      className="w-full rounded-md border border-gray-200 px-2 py-1 text-right text-sm outline-none focus:border-cyan-500"
+                    />
+                  </td>
+                  <td className="px-2 py-1.5">
+                    <Select
+                      value={String(l.taxPercent)}
+                      onChange={(v) => setLine(idx, { taxPercent: Number(v) })}
+                      size="sm"
+                      options={TAX_RATES.map((r) => ({ value: String(r), label: taxLabel(r) }))}
+                    />
+                  </td>
                   <td className="px-2 py-1.5 text-right text-gray-500">{calc.rows[idx] ? inr(calc.rows[idx].tax) : "—"}</td>
                   <td className="px-2 py-1.5 text-right font-medium text-gray-800">{calc.rows[idx] ? inr(calc.rows[idx].amount) : "—"}</td>
                   <td className="px-1 py-1.5">
@@ -504,6 +752,17 @@ export function InvoiceBuilder({
         <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
           <div className="rounded-xl border border-gray-200 p-4">
             <div className="mb-2 text-sm font-semibold text-gray-700">Terms &amp; Conditions</div>
+            {/* Vyapar titles the block, and the title prints on the document. */}
+            <div className="mb-2">
+              <Field label="Title">
+                <Select
+                  value={termsTitle}
+                  onChange={setTermsTitle}
+                  size="sm"
+                  options={TERMS_TITLES.map((t) => ({ value: t, label: t }))}
+                />
+              </Field>
+            </div>
             <textarea
               value={terms}
               onChange={(e) => setTerms(e.target.value)}
@@ -544,42 +803,83 @@ export function InvoiceBuilder({
                 <span className="text-xs text-gray-400">₹</span>
               </div>
             </div>
-            <label className="flex items-center justify-between gap-2 pt-1">
-              <span className="flex items-center gap-2 text-gray-500">
-                <input type="checkbox" checked={roundOffOn} onChange={(e) => setRoundOffOn(e.target.checked)} className="h-4 w-4 accent-cyan-600" />
+            <div className="flex items-center justify-between gap-2 pt-1">
+              <label className="flex cursor-pointer items-center gap-2 text-gray-500">
+                <input
+                  type="checkbox"
+                  checked={roundOffOn}
+                  onChange={(e) => {
+                    setRoundOffOn(e.target.checked);
+                    setRoundOffOverride(null);
+                  }}
+                  className="h-4 w-4 accent-cyan-600"
+                />
                 Round Off
-              </span>
-              <span className="text-gray-600">{calc.roundOff >= 0 ? "+" : "−"}{inr(Math.abs(calc.roundOff))}</span>
-            </label>
+              </label>
+              <input
+                type="number"
+                step="0.01"
+                value={Number(calc.roundOff.toFixed(2))}
+                disabled={!roundOffOn}
+                onChange={(e) => setRoundOffOverride(Number(e.target.value) || 0)}
+                className="w-24 rounded-md border border-gray-200 px-2 py-1 text-right text-sm outline-none focus:border-cyan-500 disabled:bg-gray-100 disabled:text-gray-400"
+              />
+            </div>
             <div className="mt-2 flex items-center justify-between border-t border-gray-200 pt-2">
               <span className="font-semibold text-gray-700">Total</span>
               <span className="text-xl font-semibold text-gray-900">{inr(calc.total)}</span>
             </div>
+            {/* Vyapar gates the received amount behind a checkbox — unticking it books the whole
+                document as outstanding without having to zero the number by hand. */}
             {!noPayment && (
               <div className="mt-1 flex items-center justify-between gap-2">
-                <span className="text-gray-500">{moneyLabel}</span>
+                <label className="flex cursor-pointer items-center gap-2 text-gray-500">
+                  <input
+                    type="checkbox"
+                    checked={receiveOn}
+                    onChange={(e) => {
+                      setReceiveOn(e.target.checked);
+                      setReceived(e.target.checked ? calc.total : 0);
+                      setReceivedTouched(true);
+                    }}
+                    className="h-4 w-4 accent-cyan-600"
+                  />
+                  {moneyLabel}
+                </label>
                 <div className="flex items-center gap-1">
                   <span className="text-xs text-gray-400">₹</span>
                   <input
                     type="number"
                     value={displayReceived}
+                    disabled={!receiveOn}
                     onChange={(e) => { setReceived(Number(e.target.value)); setReceivedTouched(true); }}
-                    className="w-28 rounded-md border border-gray-200 px-2 py-1 text-right text-sm outline-none focus:border-cyan-500"
+                    className="w-28 rounded-md border border-gray-200 px-2 py-1 text-right text-sm outline-none focus:border-cyan-500 disabled:bg-gray-100 disabled:text-gray-400"
                   />
                 </div>
               </div>
             )}
-            {!noPayment && displayReceived > 0 && (
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-gray-500">Payment Type</span>
-                <Select
-                  value={paymentMode}
-                  onChange={setPaymentMode}
-                  size="sm"
-                  className="w-44"
-                  options={paymentTypeOptions}
-                />
-              </div>
+            {!noPayment && receiveOn && displayReceived > 0 && (
+              <>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-gray-500">Payment Type</span>
+                  <Select
+                    value={paymentMode}
+                    onChange={setPaymentMode}
+                    size="sm"
+                    className="w-44"
+                    options={paymentTypeOptions}
+                  />
+                </div>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-gray-500">Reference No.</span>
+                  <input
+                    value={paymentReference}
+                    onChange={(e) => setPaymentReference(e.target.value)}
+                    placeholder="NEFT / cheque no"
+                    className="w-44 rounded-md border border-gray-200 px-2 py-1 text-sm outline-none focus:border-cyan-500"
+                  />
+                </div>
+              </>
             )}
             {!noPayment && (
               <div className="flex items-center justify-between">
@@ -594,7 +894,70 @@ export function InvoiceBuilder({
             )}
           </div>
         </div>
+
+        {/* Vyapar puts LINK PAYMENT on the document form too, not just on Payment-In: the money
+            received with this bill can settle *other* open bills for the same party. */}
+        {!noPayment && partyId && receiveOn && displayReceived > 0 && (
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-gray-200 p-4">
+            <div>
+              <div className="text-sm font-semibold text-gray-700">Link Payment</div>
+              <p className="mt-0.5 text-xs text-gray-400">
+                {paymentLinks.length === 0
+                  ? "Settles this document only."
+                  : `Also settling ${paymentLinks.length} other transaction${paymentLinks.length > 1 ? "s" : ""}.`}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setLinkingPayment(true)}
+              className="flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3.5 py-2 text-sm font-semibold text-white transition-all duration-150 hover:bg-emerald-700 active:scale-95"
+            >
+              <Link2 size={14} /> Link Payment
+            </button>
+          </div>
+        )}
       </div>
+
+      {linkingPayment && partyId && (
+        <LinkPaymentDialog
+          partyId={Number(partyId)}
+          partyName={selectedParty?.name ?? "—"}
+          received={displayReceived}
+          onClose={() => setLinkingPayment(false)}
+          onDone={(links, amount) => {
+            setPaymentLinks(links);
+            setReceived(amount);
+            setReceivedTouched(true);
+            setLinkingPayment(false);
+          }}
+        />
+      )}
+
+      {/* Inline masters — Vyapar's ⊕ Add Item / ⊕ Add Party rows open the real form, and the new
+          record drops straight back into the line or field that asked for it. */}
+      {creatingItem && (
+        <ItemDialog
+          initialName={creatingItem.name}
+          onClose={() => setCreatingItem(null)}
+          onSaved={(saved) => {
+            onItemCreated?.(saved);
+            applyItem(creatingItem.idx, saved);
+            setCreatingItem(null);
+          }}
+        />
+      )}
+
+      {creatingParty !== null && (
+        <PartyDialog
+          initialName={creatingParty}
+          onClose={() => setCreatingParty(null)}
+          onSaved={(saved) => {
+            onPartyCreated?.(saved);
+            pickParty(saved);
+            setCreatingParty(null);
+          }}
+        />
+      )}
     </Drawer>
   );
 }

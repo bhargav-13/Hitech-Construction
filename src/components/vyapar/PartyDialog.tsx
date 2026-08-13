@@ -20,18 +20,21 @@ type Tab = (typeof TABS)[number];
 export function PartyDialog({
   existing,
   defaultType = "CUSTOMER",
+  initialName,
   onClose,
   onSaved,
 }: {
   existing?: Party;
   defaultType?: vyapar.PartyType;
+  /** Seeds the name when opened from an invoice's "⊕ Add Party" with text already typed. */
+  initialName?: string;
   onClose: () => void;
   onSaved: (saved: Party, again: boolean) => void;
 }) {
   const { settings } = usePartySettings();
   const [tab, setTab] = useState<Tab>("GST & Address");
 
-  const [name, setName] = useState(existing?.name ?? "");
+  const [name, setName] = useState(existing?.name ?? initialName ?? "");
   const [gstin, setGstin] = useState(existing?.gstin ?? "");
   const [phone, setPhone] = useState(existing?.phone ?? "");
   const [partyType, setPartyType] = useState<vyapar.PartyType>(existing?.partyType ?? defaultType);
@@ -108,6 +111,8 @@ export function PartyDialog({
       onClose={onClose}
       onSave={() => submit(false)}
       saveLabel={saving ? "Saving…" : "Save"}
+      // A party is worth guarding once its name has been typed — that's the required field.
+      dirty={Boolean(name.trim()) && name.trim() !== (existing?.name ?? "")}
       width="max-w-3xl"
     >
       <div className="space-y-5">

@@ -7,19 +7,20 @@ import { Drawer, DrawerField } from "@/components/Drawer";
 import { Select } from "@/components/Select";
 import { Spinner } from "@/components/Spinner";
 import { DatePicker } from "@/components/DatePicker";
-import { RowMenu, RowMenuDivider, RowMenuItem } from "@/components/RowMenu";
 import { InvoiceBuilder } from "@/components/vyapar/InvoiceBuilder";
 import { UploadBillDialog } from "@/components/vyapar/UploadBillDialog";
 import { ImportDialog } from "@/components/vyapar/ImportDialog";
 import { documentImportConfig } from "@/lib/vyaparImportConfigs";
 import { FilterTh, useColumnFilters } from "@/components/vyapar/ColumnFilter";
+import { DateRangeFilter, defaultRange, inRange, type DateRange } from "@/components/vyapar/DateRangeFilter";
+import { InvoiceHistoryDialog, TxnRowActions } from "@/components/vyapar/TxnRowActions";
 import { useTableSort } from "@/lib/useTableSort";
 import { inr, bookDate } from "@/lib/format";
 import { useVyaparProjectId } from "@/lib/projectScope";
-import { downloadInvoicePdf, downloadPdf } from "@/lib/vyaparExport";
+import { downloadInvoicePdf, downloadPdf, printRows } from "@/lib/vyaparExport";
 import * as vyapar from "@/lib/vyaparApi";
 import type { DocType, Invoice, Item, Party } from "@/lib/vyaparApi";
-import { Download, FileText, Plus, Search, Trash2, Upload, Wallet, X } from "lucide-react";
+import { Download, FileText, Plus, Search, Upload } from "lucide-react";
 
 const PAYMENT_TYPES = ["Cash", "Credit", "Bank", "UPI", "Cheque"];
 
@@ -72,6 +73,9 @@ export function InvoiceWorkspace({
   const [importing, setImporting] = useState(false);
   const [paying, setPaying] = useState<Invoice | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [history, setHistory] = useState<Invoice | null>(null);
+  // Vyapar opens every transaction list on the current year, not on everything ever recorded.
+  const [range, setRange] = useState<DateRange>(() => defaultRange("This Year"));
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -112,11 +116,12 @@ export function InvoiceWorkspace({
   const rows = useMemo(() => {
     const q = search.trim().toLowerCase();
     return invoices.filter((i) => {
+      if (!inRange(i.invoiceDate, range)) return false;
       if (statusFilter !== "All" && i.status !== statusFilter) return false;
       if (!q) return true;
       return [i.invoiceNo, i.partyName, i.invoiceDate].some((f) => f?.toLowerCase().includes(q));
     });
-  }, [invoices, search, statusFilter]);
+  }, [invoices, search, statusFilter, range]);
 
   // Vyapar-style per-column funnels stack on top of the search/status filter.
   const columns = useMemo(
@@ -149,10 +154,36 @@ export function InvoiceWorkspace({
   );
 
   const totals = useMemo(() => {
-    const total = filtered.reduce((s, i) => s + i.total, 0);
-    const received = filtered.reduce((s, i) => s + i.paidAmount, 0);
-    return { total, received, balance: total - received };
-  }, [filtered]);
+    // Cancelled documents stay in the list but stop counting towards the period's money.
+    const live = filtered.filter((i) => !i.cancelled);
+    const total = live.reduce((s, i) => s + i.total, 0);
+    const received = live.reduce((s, i) => s + i.paidAmount, 0);
+
+    /**
+     * Vyapar's "▲ 69.01% vs last year" badge: the same span of days immediately before the
+     * selected range. Needs an explicit range on both ends, so "All" shows no comparison.
+     */
+    let deltaPercent: number | null = null;
+    if (range.from && range.to) {
+      const from = new Date(range.from);
+      const to = new Date(range.to);
+      const span = to.getTime() - from.getTime();
+      const prevTo = new Date(from.getTime() - 86_400_000);
+      const prevFrom = new Date(prevTo.getTime() - span);
+      const iso = (d: Date) => d.toISOString().slice(0, 10);
+      const prevTotal = invoices
+        .filter((i) => !i.cancelled && i.invoiceDate)
+        .filter((i) => {
+          const d = i.invoiceDate!.slice(0, 10);
+          return d >= iso(prevFrom) && d <= iso(prevTo);
+        })
+        .reduce((s, i) => s + i.total, 0);
+      // A jump from nothing isn't a percentage, so leave the badge off rather than show ∞.
+      if (prevTotal > 0) deltaPercent = ((total - prevTotal) / prevTotal) * 100;
+    }
+
+    return { total, received, balance: total - received, deltaPercent };
+  }, [filtered, invoices, range]);
 
   async function remove(inv: Invoice) {
     if (!confirm(`Delete ${inv.invoiceNo}? Stock and balances will be reversed.`)) return;
@@ -163,6 +194,51 @@ export function InvoiceWorkspace({
       setError(err instanceof Error ? err.message : "Couldn't delete this document.");
     }
   }
+
+  /** Runs one of the row actions and refreshes, surfacing any failure in the page's error strip. */
+  async function run(action: () => Promise<unknown>, failure: string) {
+    try {
+      await action();
+      load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : failure);
+    }
+  }
+
+  /**
+   * Cancel keeps the document and its number but takes it out of the balances — Vyapar treats it
+   * as distinct from delete, so the confirmation has to say which one this is.
+   */
+  function cancel(inv: Invoice) {
+    if (!confirm(`Cancel ${inv.invoiceNo}? It stays in the books but stops counting towards balances and stock.`)) return;
+    run(() => vyapar.cancelInvoice(inv.id), "Couldn't cancel this document.");
+  }
+
+  function reopen(inv: Invoice) {
+    run(() => vyapar.reopenInvoice(inv.id), "Couldn't reopen this document.");
+  }
+
+  function duplicate(inv: Invoice) {
+    run(() => vyapar.duplicateInvoice(inv.id), "Couldn't duplicate this document.");
+  }
+
+  function convertToReturn(inv: Invoice) {
+    const noun = docType === "PURCHASE" ? "debit note" : "credit note";
+    if (!confirm(`Raise a ${noun} against ${inv.invoiceNo}?`)) return;
+    run(() => vyapar.convertToReturn(inv.id), "Couldn't convert this document.");
+  }
+
+  /** Print one document, using the same table renderer the list export uses. */
+  function printOne(inv: Invoice) {
+    printRows(
+      `${noun} · ${inv.invoiceNo}`,
+      ["Item", "Qty", "Rate", "Tax", "Amount"],
+      inv.lines.map((l) => [l.itemName, l.quantity, inr(l.rate), inr(l.taxAmount), inr(l.amount)]),
+      `${inv.partyName ?? "—"} · ${bookDate(inv.invoiceDate)} · Total ${inr(inv.total)}`
+    );
+  }
+
+  const partyOf = (inv: Invoice) => parties.find((p) => p.id === inv.partyId);
 
   function exportCsv() {
     const head = ["Date", "Invoice no", "Party", "Payment Type", "Total", "Paid", "Balance", "Status"];
@@ -230,7 +306,20 @@ export function InvoiceWorkspace({
         </div>
       </div>
 
-      {/* Totals card — Vyapar shows "Total Quotations" for estimates/proformas, "Total Sales Amount" otherwise */}
+      {/* Vyapar's filter bar sits directly under the title on every transaction list. */}
+      <DateRangeFilter value={range} onChange={setRange} />
+
+      {/* Purchase Bills uses Vyapar's older summary: three tiles read as a formula. */}
+      {docType === "PURCHASE" ? (
+        <div className="flex flex-wrap items-center gap-3">
+          <Tile label="Paid" value={inr(totals.received)} tone="emerald" />
+          <span className="text-xl font-semibold text-gray-400">+</span>
+          <Tile label="Unpaid" value={inr(totals.balance)} tone="sky" />
+          <span className="text-xl font-semibold text-gray-400">=</span>
+          <Tile label="Total" value={inr(totals.total)} tone="amber" />
+        </div>
+      ) : (
+      /* Totals card — Vyapar shows "Total Quotations" for estimates/proformas, "Total Sales Amount" otherwise */
       <div className="inline-flex flex-wrap gap-6 rounded-xl border border-gray-200 bg-white px-5 py-4">
         {NON_PAYMENT ? (
           <>
@@ -252,12 +341,26 @@ export function InvoiceWorkspace({
         ) : (
           <>
             <div>
-              <div className="text-xs text-gray-500">Total {docType === "PURCHASE" ? "Purchase" : "Sales"} Amount</div>
-              <div className="mt-1 text-2xl font-semibold text-gray-800">{inr(totals.total)}</div>
+              {/* Purchase has its own tile strip above, so this branch is always sale-side. */}
+              <div className="text-xs text-gray-500">Total Sales Amount</div>
+              <div className="mt-1 flex items-baseline gap-2">
+                <span className="text-2xl font-semibold text-gray-800">{inr(totals.total)}</span>
+                {/* Vyapar shows how the period compares with the one before it. */}
+                {totals.deltaPercent !== null && (
+                  <span
+                    className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+                      totals.deltaPercent >= 0 ? "bg-emerald-50 text-emerald-700" : "bg-rose-50 text-rose-700"
+                    }`}
+                    title="Compared with the previous period of the same length"
+                  >
+                    {totals.deltaPercent >= 0 ? "▲" : "▼"} {Math.abs(totals.deltaPercent).toFixed(2)}%
+                  </span>
+                )}
+              </div>
             </div>
             <div className="border-l border-gray-100 pl-6 text-sm">
               <div className="text-gray-500">
-                {docType === "PURCHASE" ? "Paid" : "Received"}: <span className="font-medium text-emerald-600">{inr(totals.received)}</span>
+                Received: <span className="font-medium text-emerald-600">{inr(totals.received)}</span>
               </div>
               <div className="mt-1 text-gray-500">
                 Balance: <span className="font-medium text-rose-600">{inr(totals.balance)}</span>
@@ -266,6 +369,7 @@ export function InvoiceWorkspace({
           </>
         )}
       </div>
+      )}
 
       {/* Filters */}
       <div className="flex flex-wrap items-center gap-2">
@@ -319,11 +423,13 @@ export function InvoiceWorkspace({
                 <FilterTh label="Date" sortKey="date" activeKey={sortKey} dir={sortDir} onSort={toggle} filterKey="date" type="text" filter={filters.date} onApply={setFilter} />
                 <FilterTh label={numberColLabel} sortKey="number" activeKey={sortKey} dir={sortDir} onSort={toggle} filterKey="number" type="text" filter={filters.number} onApply={setFilter} />
                 <FilterTh label="Party Name" sortKey="party" activeKey={sortKey} dir={sortDir} onSort={toggle} filterKey="party" type="text" filter={filters.party} onApply={setFilter} />
+                {/* Vyapar carries a Transaction column naming the document type on every list. */}
+                <th className="px-4 py-2 text-left font-medium">Transaction</th>
                 {!NON_PAYMENT && <FilterTh label="Payment Type" sortKey="paymentType" activeKey={sortKey} dir={sortDir} onSort={toggle} filterKey="paymentType" type="select" options={PAYMENT_TYPES} filter={filters.paymentType} onApply={setFilter} />}
                 <FilterTh label="Amount" sortKey="amount" activeKey={sortKey} dir={sortDir} onSort={toggle} align="right" filterKey="amount" type="number" filter={filters.amount} onApply={setFilter} />
                 {!NON_PAYMENT && <FilterTh label="Balance" sortKey="balance" activeKey={sortKey} dir={sortDir} onSort={toggle} align="right" filterKey="balance" type="number" filter={filters.balance} onApply={setFilter} />}
-                {!NON_PAYMENT && <FilterTh label="Status" sortKey="status" activeKey={sortKey} dir={sortDir} onSort={toggle} filterKey="status" type="select" options={["Paid", "Partial", "Unpaid"]} filter={filters.status} onApply={setFilter} />}
-                <th className="w-10 px-4 py-2" />
+                {!NON_PAYMENT && <FilterTh label="Status" sortKey="status" activeKey={sortKey} dir={sortDir} onSort={toggle} filterKey="status" type="select" options={["Paid", "Partial", "Unpaid", "Cancelled"]} filter={filters.status} onApply={setFilter} />}
+                <th className="w-32 px-4 py-2 text-left font-medium">Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -334,8 +440,11 @@ export function InvoiceWorkspace({
                   className="cursor-pointer border-b border-gray-50 transition-colors duration-150 last:border-b-0 even:bg-gray-50/40 hover:bg-cyan-50/40"
                 >
                   <td className="px-4 py-2.5 whitespace-nowrap text-gray-600">{bookDate(i.invoiceDate)}</td>
-                  <td className="px-4 py-2.5 font-medium text-gray-800">{i.invoiceNo}</td>
+                  <td className={`px-4 py-2.5 font-medium text-gray-800 ${i.cancelled ? "line-through decoration-rose-400" : ""}`}>
+                    {i.invoiceNo}
+                  </td>
                   <td className="px-4 py-2.5 text-gray-700">{i.partyName ?? "—"}</td>
+                  <td className="px-4 py-2.5 text-gray-600">{noun}</td>
                   {!NON_PAYMENT && <td className="px-4 py-2.5 text-gray-600">{i.paymentType}</td>}
                   <td className="px-4 py-2.5 text-right font-medium text-gray-800">{inr(i.total)}</td>
                   {!NON_PAYMENT && (
@@ -345,25 +454,30 @@ export function InvoiceWorkspace({
                   )}
                   {!NON_PAYMENT && (
                     <td className="px-4 py-2.5">
-                      <StatusPill status={i.status} />
+                      <StatusText status={i.status} />
                     </td>
                   )}
-                  <td className="px-4 py-2.5 text-right" onClick={(e) => e.stopPropagation()}>
-                    <div className="inline-flex">
-                      <RowMenu align="right" buttonLabel={`Actions for ${i.invoiceNo}`}>
-                        {(close) => (
-                          <>
-                            <RowMenuItem icon={FileText} label="Open / Edit" onClick={() => { close(); setEditing(i); }} />
-                            {!NON_PAYMENT && i.balance > 0 && (
-                              <RowMenuItem icon={Wallet} label="Record Payment" onClick={() => { close(); setPaying(i); }} />
-                            )}
-                            <RowMenuItem icon={Download} label="Download PDF" onClick={() => { close(); downloadInvoicePdf(i, parties.find((p) => p.id === i.partyId)); }} />
-                            <RowMenuDivider />
-                            <RowMenuItem icon={Trash2} label="Delete" tone="danger" onClick={() => { close(); remove(i); }} />
-                          </>
-                        )}
-                      </RowMenu>
-                    </div>
+                  <td className="px-4 py-2.5" onClick={(e) => e.stopPropagation()}>
+                    <TxnRowActions
+                      docType={docType}
+                      cancelled={i.cancelled}
+                      hasBalance={!NON_PAYMENT && i.balance > 0}
+                      label={i.invoiceNo}
+                      handlers={{
+                        onEdit: () => setEditing(i),
+                        onDelete: () => remove(i),
+                        onPreview: () => setEditing(i),
+                        onPrint: () => printOne(i),
+                        onShare: () => downloadInvoicePdf(i, partyOf(i), items),
+                        onHistory: () => setHistory(i),
+                        onDuplicate: () => duplicate(i),
+                        onCancel: () => cancel(i),
+                        onReopen: () => reopen(i),
+                        onConvertToReturn: () => convertToReturn(i),
+                        onReceivePayment: () => setPaying(i),
+                        onPreviewAsChallan: () => downloadInvoicePdf(i, partyOf(i), items),
+                      }}
+                    />
                   </td>
                 </tr>
               ))}
@@ -378,8 +492,19 @@ export function InvoiceWorkspace({
           existing={editing ?? undefined}
           parties={parties}
           items={items}
+          // An inline-created master joins the local lists immediately, so the picker shows it
+          // without waiting for a round trip.
+          onItemCreated={(item) => setItems((prev) => [item, ...prev])}
+          onPartyCreated={(party) => setParties((prev) => [party, ...prev])}
           onClose={() => { setCreating(false); setEditing(null); }}
-          onSaved={() => { setCreating(false); setEditing(null); load(); }}
+          onSaved={(again) => {
+            // Save & New keeps the builder open for the next document.
+            if (!again) {
+              setCreating(false);
+              setEditing(null);
+            }
+            load();
+          }}
         />
       )}
 
@@ -398,6 +523,8 @@ export function InvoiceWorkspace({
         />
       )}
 
+      {history && <InvoiceHistoryDialog invoice={history} onClose={() => setHistory(null)} />}
+
       {paying && (
         <PaymentDrawer
           invoice={paying}
@@ -410,12 +537,30 @@ export function InvoiceWorkspace({
   );
 }
 
-function StatusPill({ status }: { status: Invoice["status"] }) {
+/** One tile of Purchase Bills' `Paid + Unpaid = Total` strip. */
+function Tile({ label, value, tone }: { label: string; value: string; tone: "emerald" | "sky" | "amber" }) {
   const cls =
-    status === "Paid" ? "bg-emerald-50 text-emerald-700"
-      : status === "Partial" ? "bg-amber-50 text-amber-700"
-        : "bg-rose-50 text-rose-700";
-  return <span className={`rounded-md px-2 py-0.5 text-xs font-medium ${cls}`}>{status}</span>;
+    tone === "emerald"
+      ? "bg-emerald-50 text-emerald-900"
+      : tone === "sky"
+        ? "bg-sky-50 text-sky-900"
+        : "bg-amber-50 text-amber-900";
+  return (
+    <div className={`min-w-[150px] rounded-xl px-5 py-3.5 ${cls}`}>
+      <div className="text-xs opacity-70">{label}</div>
+      <div className="mt-0.5 text-xl font-semibold">{value}</div>
+    </div>
+  );
+}
+
+/** Vyapar renders status as coloured text, not a pill. */
+function StatusText({ status }: { status: Invoice["status"] }) {
+  const cls =
+    status === "Paid" ? "text-emerald-600"
+      : status === "Partial" ? "text-amber-600"
+        : status === "Cancelled" ? "text-gray-400 line-through"
+          : "text-rose-600";
+  return <span className={`text-sm font-medium ${cls}`}>{status}</span>;
 }
 
 function Row({ label, value }: { label: string; value: string }) {

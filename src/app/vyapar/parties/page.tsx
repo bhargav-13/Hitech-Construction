@@ -5,7 +5,7 @@ import Link from "next/link";
 import { VyaparShell, VyaparEmpty } from "@/components/vyapar/VyaparShell";
 import { PartyDialog } from "@/components/vyapar/PartyDialog";
 import { PartyImportDialog } from "@/components/vyapar/PartyImportDialog";
-import { SortTh } from "@/components/vyapar/SortTh";
+import { FilterTh, useColumnFilters } from "@/components/vyapar/ColumnFilter";
 import { RowMenu, RowMenuDivider, RowMenuItem } from "@/components/RowMenu";
 import { Spinner } from "@/components/Spinner";
 import { Select } from "@/components/Select";
@@ -30,6 +30,8 @@ import {
   Layers,
   Mail,
   MapPin,
+  MessageCircle,
+  MessageSquare,
   Pencil,
   Phone,
   Plus,
@@ -160,15 +162,35 @@ export default function PartiesPage() {
     return ledger.filter((r) => [r.type, r.number, r.date].some((f) => f?.toLowerCase().includes(q)));
   }, [ledger, ledgerSearch]);
 
+  // Vyapar puts a funnel on every ledger column, not just a sort arrow.
+  const ledgerColumns = useMemo(
+    () => ({
+      type: { get: (r: PartyLedgerRow) => r.type, type: "text" as const },
+      number: { get: (r: PartyLedgerRow) => r.number ?? "", type: "text" as const },
+      date: { get: (r: PartyLedgerRow) => r.date ?? "", type: "text" as const },
+      total: { get: (r: PartyLedgerRow) => r.total, type: "number" as const },
+      balance: { get: (r: PartyLedgerRow) => r.balance, type: "number" as const },
+      status: {
+        get: (r: PartyLedgerRow) => r.status ?? "",
+        type: "select" as const,
+        options: ["Paid", "Unpaid", "Cancelled", "Used", "Partially Used", "Unused"],
+      },
+    }),
+    []
+  );
+  const { filtered: ledgerFiltered, filters: ledgerFilters, setFilter: setLedgerFilter } =
+    useColumnFilters(ledgerRows, ledgerColumns);
+
   // Sortable ledger. Type/Number/Date sort as text; Total/Balance numerically.
   const { sorted: sortedLedger, sortKey, sortDir, toggle } = useTableSort<PartyLedgerRow>(
-    ledgerRows,
+    ledgerFiltered,
     {
       type: (r) => r.type,
       number: (r) => r.number,
       date: (r) => r.date,
       total: (r) => r.total,
       balance: (r) => r.balance,
+      status: (r) => r.status,
     },
   );
 
@@ -218,8 +240,15 @@ export default function PartiesPage() {
     setTab("details");
   }
 
-  const ledgerHead = ["Type", "Number", "Date", "Total", "Balance"];
-  const ledgerData = sortedLedger.map((r) => [r.type, r.number ?? "", r.date ?? "", r.total, r.balance]);
+  const ledgerHead = ["Type", "Number", "Date", "Total", "Balance/Unused", "Status"];
+  const ledgerData = sortedLedger.map((r) => [
+    r.type,
+    r.number ?? "",
+    r.date ?? "",
+    r.total,
+    r.balance,
+    r.status ?? "",
+  ]);
 
   return (
     <VyaparShell>
@@ -550,6 +579,7 @@ export default function PartiesPage() {
                     </div>
 
                     <div className="flex shrink-0 flex-col items-end gap-2">
+                      <ContactActions phone={selected.phone} name={selected.name} />
                       <div className="text-right">
                         <div className="text-[11px] tracking-wide text-gray-400 uppercase">
                           {selected.balance >= 0 ? "You'll Collect" : "You'll Pay"}
@@ -673,11 +703,14 @@ export default function PartiesPage() {
                       <table className="w-full min-w-[600px] border-collapse text-sm">
                         <thead>
                           <tr className="border-b border-gray-100 bg-gray-50 text-left text-gray-500">
-                            <SortTh label="Type" sortKey="type" activeKey={sortKey} dir={sortDir} onSort={toggle} />
-                            <SortTh label="Number" sortKey="number" activeKey={sortKey} dir={sortDir} onSort={toggle} />
-                            <SortTh label="Date" sortKey="date" activeKey={sortKey} dir={sortDir} onSort={toggle} />
-                            <SortTh label="Total" sortKey="total" activeKey={sortKey} dir={sortDir} onSort={toggle} align="right" />
-                            <SortTh label="Balance" sortKey="balance" activeKey={sortKey} dir={sortDir} onSort={toggle} align="right" />
+                            <FilterTh label="Type" sortKey="type" activeKey={sortKey} dir={sortDir} onSort={toggle} filterKey="type" type="text" filter={ledgerFilters.type} onApply={setLedgerFilter} />
+                            <FilterTh label="Number" sortKey="number" activeKey={sortKey} dir={sortDir} onSort={toggle} filterKey="number" type="text" filter={ledgerFilters.number} onApply={setLedgerFilter} />
+                            <FilterTh label="Date" sortKey="date" activeKey={sortKey} dir={sortDir} onSort={toggle} filterKey="date" type="text" filter={ledgerFilters.date} onApply={setLedgerFilter} />
+                            <FilterTh label="Total" sortKey="total" activeKey={sortKey} dir={sortDir} onSort={toggle} align="right" filterKey="total" type="number" filter={ledgerFilters.total} onApply={setLedgerFilter} />
+                            {/* Vyapar labels this "Balance/Unused": an invoice shows what's still
+                                owed, a payment shows how much of it hasn't been linked yet. */}
+                            <FilterTh label="Balance/Unused" sortKey="balance" activeKey={sortKey} dir={sortDir} onSort={toggle} align="right" filterKey="balance" type="number" filter={ledgerFilters.balance} onApply={setLedgerFilter} />
+                            <FilterTh label="Status" sortKey="status" activeKey={sortKey} dir={sortDir} onSort={toggle} filterKey="status" type="select" options={["Paid", "Unpaid", "Cancelled", "Used", "Partially Used", "Unused"]} filter={ledgerFilters.status} onApply={setLedgerFilter} />
                           </tr>
                         </thead>
                         <tbody>
@@ -710,6 +743,9 @@ export default function PartiesPage() {
                                 <td className="px-4 py-2.5 text-right text-gray-800">{inr(r.total)}</td>
                                 <td className={`px-4 py-2.5 text-right ${r.balance > 0 ? "text-rose-600" : "text-gray-400"}`}>
                                   {r.balance ? inr(r.balance) : "—"}
+                                </td>
+                                <td className="px-4 py-2.5">
+                                  <LedgerStatus status={r.status} />
                                 </td>
                               </tr>
                             );
@@ -756,6 +792,68 @@ export default function PartiesPage() {
       )}
     </VyaparShell>
   );
+}
+
+/**
+ * Vyapar's three round buttons on the party card: SMS, WhatsApp, Call.
+ *
+ * Each opens the relevant app with a pre-addressed, empty message — nothing is ever sent from
+ * here. Greyed out when the party has no phone number on file.
+ */
+function ContactActions({ phone, name }: { phone: string | null; name: string }) {
+  // wa.me needs bare digits; India numbers are stored locally, so default to +91 when there's no
+  // country code already.
+  const digits = (phone ?? "").replace(/\D/g, "");
+  const wa = digits.length === 10 ? `91${digits}` : digits;
+
+  if (!digits) {
+    return (
+      <span className="text-[11px] text-gray-300" title="No phone number on file">
+        No phone number
+      </span>
+    );
+  }
+
+  const btn =
+    "flex h-8 w-8 items-center justify-center rounded-full transition-all duration-150 active:scale-90";
+  return (
+    <div className="flex items-center gap-1.5">
+      <a href={`sms:${phone}`} title={`Message ${name}`} aria-label={`Message ${name}`} className={`${btn} bg-cyan-50 text-brand-accent hover:bg-cyan-100`}>
+        <MessageSquare size={14} />
+      </a>
+      <a
+        href={`https://wa.me/${wa}`}
+        target="_blank"
+        rel="noopener noreferrer"
+        title={`WhatsApp ${name}`}
+        aria-label={`WhatsApp ${name}`}
+        className={`${btn} bg-emerald-50 text-emerald-600 hover:bg-emerald-100`}
+      >
+        <MessageCircle size={14} />
+      </a>
+      <a href={`tel:${phone}`} title={`Call ${name}`} aria-label={`Call ${name}`} className={`${btn} bg-indigo-50 text-indigo-600 hover:bg-indigo-100`}>
+        <Phone size={14} />
+      </a>
+    </div>
+  );
+}
+
+/**
+ * Ledger status, coloured the way Vyapar colours it. Documents read Paid/Unpaid/Cancelled;
+ * payments read Used / Partially Used / Unused, where "Unused" means the receipt hasn't been
+ * linked to a bill yet.
+ */
+function LedgerStatus({ status }: { status?: string | null }) {
+  if (!status) return <span className="text-gray-300">—</span>;
+  const cls =
+    status === "Paid" || status === "Used"
+      ? "text-emerald-600"
+      : status === "Partially Used"
+        ? "text-amber-600"
+        : status === "Cancelled"
+          ? "text-gray-400 line-through"
+          : "text-rose-600";
+  return <span className={`text-sm font-medium ${cls}`}>{status}</span>;
 }
 
 function Meta({

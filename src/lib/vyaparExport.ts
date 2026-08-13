@@ -4,6 +4,7 @@
  */
 
 import { getFirmProfile, DOC_LABEL, type FirmProfile, type Invoice, type Party } from "./vyaparApi";
+import { getAmountDecimals } from "./format";
 
 type Cell = string | number | null | undefined;
 
@@ -247,21 +248,34 @@ function threeDigitWords(n: number): string {
   return twoDigitWords(n);
 }
 
-/** Indian numbering (lakh/crore) amount-in-words, for the invoice total. */
+/**
+ * Indian numbering (lakh/crore) amount-in-words, for the invoice total.
+ *
+ * Carries paise, as Vyapar does — it prints "… Rupees and Thirty Two Paisa only". Rounding the
+ * paise away made the words disagree with the figure beside them on any non-round total.
+ */
 function amountInWords(amount: number): string {
-  const n = Math.round(amount);
-  if (n === 0) return "Zero Rupees Only";
-  const crore = Math.floor(n / 1e7);
-  const lakh = Math.floor((n % 1e7) / 1e5);
-  const thousand = Math.floor((n % 1e5) / 1e3);
-  const rest = n % 1e3;
-  const parts = [
-    crore ? `${threeDigitWords(crore)} Crore` : "",
-    lakh ? `${threeDigitWords(lakh)} Lakh` : "",
-    thousand ? `${threeDigitWords(thousand)} Thousand` : "",
-    rest ? threeDigitWords(rest) : "",
-  ].filter(Boolean);
-  return `Rupees ${parts.join(" ")} Only`;
+  const negative = amount < 0;
+  const abs = Math.abs(amount);
+  const n = Math.floor(abs);
+  const paise = Math.round((abs - n) * 100);
+
+  const parts = [];
+  if (n === 0) {
+    parts.push("Zero");
+  } else {
+    const crore = Math.floor(n / 1e7);
+    const lakh = Math.floor((n % 1e7) / 1e5);
+    const thousand = Math.floor((n % 1e5) / 1e3);
+    const rest = n % 1e3;
+    if (crore) parts.push(`${threeDigitWords(crore)} Crore`);
+    if (lakh) parts.push(`${threeDigitWords(lakh)} Lakh`);
+    if (thousand) parts.push(`${threeDigitWords(thousand)} Thousand`);
+    if (rest) parts.push(threeDigitWords(rest));
+  }
+
+  const tail = paise > 0 ? ` and ${twoDigitWords(paise)} Paisa` : "";
+  return `${negative ? "Minus " : ""}Rupees ${parts.join(" ")}${tail} Only`;
 }
 
 /**
@@ -269,7 +283,7 @@ function amountInWords(amount: number): string {
  * bill-to panel, itemised table with tax split, a boxed totals summary and amount-in-words —
  * built to match how a real printed Vyapar invoice reads, not a plain export sheet.
  */
-export async function downloadInvoicePdf(invoice: Invoice, party?: Party | null) {
+export async function downloadInvoicePdf(invoice: Invoice, party?: Party | null, items?: { id: number; hsn: string | null }[]) {
   const [{ jsPDF }, autoTableMod, firm] = await Promise.all([
     import("jspdf"),
     import("jspdf-autotable"),
@@ -281,7 +295,15 @@ export async function downloadInvoicePdf(invoice: Invoice, party?: Party | null)
   const pageWidth = doc.internal.pageSize.getWidth();
   const margin = 40;
   const contentWidth = pageWidth - margin * 2;
-  const rs = (n: number) => `Rs. ${Math.round(n).toLocaleString("en-IN")}`;
+  // Match the books' configured precision rather than rounding to whole rupees — their Vyapar
+  // runs 3 decimals, and a printed invoice that disagrees with the ledger is a support call.
+  const places = getAmountDecimals();
+  // HSN lives on the item master, not on the invoice line, so it's resolved from whatever
+  // catalogue the caller had loaded. Absent catalogue simply prints "—".
+  const hsnOf = (itemId: number | null) =>
+    itemId == null ? null : (items?.find((i) => i.id === itemId)?.hsn ?? null);
+  const rs = (n: number) =>
+    `Rs. ${n.toLocaleString("en-IN", { minimumFractionDigits: places, maximumFractionDigits: places })}`;
   const gray = (n: number) => doc.setTextColor(n, n, n);
   const setFill = (c: readonly [number, number, number]) => doc.setFillColor(c[0], c[1], c[2]);
   const setText = (c: readonly [number, number, number]) => doc.setTextColor(c[0], c[1], c[2]);
@@ -411,7 +433,8 @@ export async function downloadInvoicePdf(invoice: Invoice, party?: Party | null)
   const sameState =
     !!invoice.stateOfSupply && !!firm?.state && invoice.stateOfSupply.trim().toLowerCase() === firm.state.trim().toLowerCase();
   autoTable(doc, {
-    head: [["#", "Item", "Qty", "Rate", "Taxable Value", "GST%", "GST Amt", "Amount"]],
+    // Vyapar's printed item table carries HSN/SAC — a GST invoice is not compliant without it.
+    head: [["#", "Item", "HSN/SAC", "Qty", "Rate", "Taxable Value", "GST%", "GST Amt", "Amount"]],
     body: invoice.lines.map((l, i) => {
       // Derive the split from the line's own amount/tax% rather than trust a stored per-line
       // taxAmount — it isn't always populated, and this stays exactly consistent with the total.
@@ -420,6 +443,7 @@ export async function downloadInvoicePdf(invoice: Invoice, party?: Party | null)
       return [
         String(i + 1),
         l.itemName + (l.description ? `\n${l.description}` : ""),
+        hsnOf(l.itemId) ?? "—",
         `${l.quantity}${l.unit ? " " + l.unit : ""}`,
         rs(l.rate),
         rs(taxable),
@@ -433,13 +457,14 @@ export async function downloadInvoicePdf(invoice: Invoice, party?: Party | null)
     headStyles: { fillColor: [...NAVY], textColor: [255, 255, 255], fontStyle: "bold" },
     alternateRowStyles: { fillColor: [246, 251, 253] },
     columnStyles: {
-      0: { cellWidth: 22, halign: "center" },
-      2: { halign: "right", cellWidth: 46 },
-      3: { halign: "right", cellWidth: 56 },
-      4: { halign: "right", cellWidth: 68 },
-      5: { halign: "right", cellWidth: 36 },
-      6: { halign: "right", cellWidth: 56 },
-      7: { halign: "right", cellWidth: 64 },
+      0: { cellWidth: 20, halign: "center" },
+      2: { cellWidth: 52, halign: "center" },
+      3: { halign: "right", cellWidth: 42 },
+      4: { halign: "right", cellWidth: 52 },
+      5: { halign: "right", cellWidth: 62 },
+      6: { halign: "right", cellWidth: 32 },
+      7: { halign: "right", cellWidth: 52 },
+      8: { halign: "right", cellWidth: 60 },
     },
     margin: { left: margin, right: margin },
     didDrawPage: () => {

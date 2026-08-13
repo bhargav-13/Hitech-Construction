@@ -7,8 +7,10 @@ import { Drawer, DrawerField } from "@/components/Drawer";
 import { Select } from "@/components/Select";
 import { Spinner } from "@/components/Spinner";
 import { DatePicker } from "@/components/DatePicker";
-import { RowMenu, RowMenuDivider, RowMenuItem } from "@/components/RowMenu";
 import { SortTh } from "@/components/vyapar/SortTh";
+import { DateRangeFilter, defaultRange, inRange, type DateRange } from "@/components/vyapar/DateRangeFilter";
+import { LinkPaymentDialog } from "@/components/vyapar/LinkPaymentDialog";
+import { TxnRowActions } from "@/components/vyapar/TxnRowActions";
 import { useTableSort } from "@/lib/useTableSort";
 import { inr } from "@/lib/format";
 import { usePaymentTypeOptions } from "@/lib/bankScope";
@@ -19,7 +21,7 @@ import { ImportDialog } from "@/components/vyapar/ImportDialog";
 import { paymentInImportConfig, paymentOutImportConfig } from "@/lib/vyaparImportConfigs";
 import * as vyapar from "@/lib/vyaparApi";
 import type { Party, Payment } from "@/lib/vyaparApi";
-import { Download, FileText, Plus, Search, Trash2, Upload, Wallet } from "lucide-react";
+import { Download, FileText, Link2, Plus, Search, Upload, Wallet } from "lucide-react";
 
 /**
  * Payment-In / Payment-Out workspace. Unlike an invoice, a payment moves money directly: a
@@ -44,6 +46,9 @@ export function PaymentWorkspace({
   const [search, setSearch] = useState("");
   const [creating, setCreating] = useState(false);
   const [importing, setImporting] = useState(false);
+  // Re-linking a payment that's already saved — Vyapar reopens the same dialog from the row menu.
+  const [relinking, setRelinking] = useState<Payment | null>(null);
+  const [range, setRange] = useState<DateRange>(() => defaultRange("This Year"));
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -78,10 +83,11 @@ export function PaymentWorkspace({
   const rows = useMemo(() => {
     const q = search.trim().toLowerCase();
     return payments.filter((p) => {
+      if (!inRange(p.paymentDate, range)) return false;
       if (!q) return true;
       return [p.partyName, p.reference, p.paymentDate, p.mode].some((f) => f?.toLowerCase().includes(q));
     });
-  }, [payments, search]);
+  }, [payments, search, range]);
 
   const { sorted, sortKey, sortDir, toggle } = useTableSort(
     rows,
@@ -91,6 +97,7 @@ export function PaymentWorkspace({
       mode: (p) => p.mode,
       reference: (p) => p.reference,
       amount: (p) => p.amount,
+      unused: (p) => p.unusedAmount,
     },
     { key: "date", dir: "desc" },
   );
@@ -110,6 +117,16 @@ export function PaymentWorkspace({
     } catch (err) {
       setError(err instanceof Error ? err.message : "Couldn't delete this payment.");
     }
+  }
+
+  /** Print one receipt, the same way the list's PDF renders a row. */
+  function printOne(p: Payment) {
+    downloadPdf(
+      `${title} · ${p.partyName ?? "—"}`,
+      ["Date", "Party", "Payment Type", "Reference", "Amount"],
+      [[formatDate(p.paymentDate), p.partyName ?? "", p.mode, p.reference ?? "", inr(p.amount)]],
+      { rightAlignFrom: 4 }
+    );
   }
 
   function exportCsv() {
@@ -164,6 +181,8 @@ export function PaymentWorkspace({
           </button>
         </div>
       </div>
+
+      <DateRangeFilter value={range} onChange={setRange} />
 
       {/* Summary — mirrors Vyapar's "Total Amount / Received" card */}
       <div className="inline-flex flex-wrap gap-6 rounded-xl border border-gray-200 bg-white px-5 py-4">
@@ -223,7 +242,9 @@ export function PaymentWorkspace({
                 <SortTh label="Payment Type" sortKey="mode" activeKey={sortKey} dir={sortDir} onSort={toggle} />
                 <SortTh label="Reference" sortKey="reference" activeKey={sortKey} dir={sortDir} onSort={toggle} />
                 <SortTh label="Amount" sortKey="amount" activeKey={sortKey} dir={sortDir} onSort={toggle} align="right" />
-                <th className="w-10 px-4 py-2" />
+                {/* What's still sitting unapplied against any bill. */}
+                <SortTh label="Unused" sortKey="unused" activeKey={sortKey} dir={sortDir} onSort={toggle} align="right" />
+                <th className="w-32 px-4 py-2 text-left font-medium">Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -245,17 +266,21 @@ export function PaymentWorkspace({
                   <td className={`px-4 py-2.5 text-right font-semibold ${isIn ? "text-emerald-600" : "text-rose-600"}`}>
                     {inr(p.amount)}
                   </td>
-                  <td className="px-4 py-2.5 text-right">
-                    <div className="inline-flex">
-                      <RowMenu align="right" buttonLabel="Payment actions">
-                        {(close) => (
-                          <>
-                            <RowMenuDivider />
-                            <RowMenuItem icon={Trash2} label="Delete" tone="danger" onClick={() => { close(); remove(p); }} />
-                          </>
-                        )}
-                      </RowMenu>
-                    </div>
+                  <td className={`px-4 py-2.5 text-right ${p.unusedAmount > 0 ? "font-medium text-amber-600" : "text-gray-400"}`}>
+                    {p.unusedAmount > 0 ? inr(p.unusedAmount) : "—"}
+                  </td>
+                  <td className="px-4 py-2.5">
+                    <TxnRowActions
+                      kind="PAYMENT"
+                      label={p.reference || `${title} ${p.id}`}
+                      handlers={{
+                        onEdit: () => setRelinking(p),
+                        onLink: () => setRelinking(p),
+                        onDelete: () => remove(p),
+                        onPrint: () => printOne(p),
+                        onShare: () => printOne(p),
+                      }}
+                    />
                   </td>
                 </tr>
                 );
@@ -280,6 +305,26 @@ export function PaymentWorkspace({
           config={isIn ? paymentInImportConfig : paymentOutImportConfig}
           onClose={() => setImporting(false)}
           onImported={() => { setImporting(false); load(); }}
+        />
+      )}
+
+      {relinking && relinking.partyId != null && (
+        <LinkPaymentDialog
+          partyId={relinking.partyId}
+          partyName={relinking.partyName ?? "—"}
+          received={relinking.amount}
+          paymentId={relinking.id}
+          onClose={() => setRelinking(null)}
+          onDone={async (links) => {
+            try {
+              await vyapar.relinkPayment(relinking.id, links);
+              setRelinking(null);
+              load();
+            } catch (err) {
+              setError(err instanceof Error ? err.message : "Couldn't update the links.");
+              setRelinking(null);
+            }
+          }}
         />
       )}
     </div>
@@ -311,8 +356,13 @@ function PaymentForm({
   const { projects } = useProjects();
   const [selectedProjectId, setSelectedProjectId] = useState(projectId != null ? String(projectId) : "");
   const paymentTypeOptions = usePaymentTypeOptions();
+  // Which bills this receipt settles. Empty = the whole amount sits as an advance ("Unused").
+  const [links, setLinks] = useState<{ invoiceId: number; amount: number }[]>([]);
+  const [linking, setLinking] = useState(false);
 
   const selectedParty = parties.find((p) => String(p.id) === partyId) ?? null;
+  const linkedTotal = links.reduce((s, l) => s + l.amount, 0);
+  const unused = Math.max(0, amount - linkedTotal);
 
   async function save() {
     if (!partyId) {
@@ -333,7 +383,10 @@ function PaymentForm({
       await vyapar.createPayment({
         direction,
         partyId: Number(partyId),
-        invoiceId: null, // party-level payment — keeps the balance effect single-counted
+        // Links replace the old single invoiceId. Whatever isn't linked stays as an advance, and
+        // the backend counts only that unlinked part against the party balance.
+        invoiceId: null,
+        links,
         amount: Number(amount) || 0,
         mode,
         reference: reference || null,
@@ -350,7 +403,13 @@ function PaymentForm({
   const isIn = direction === "IN";
 
   return (
-    <Drawer title={title} onClose={onClose} onSave={save} saveLabel={saving ? "Saving…" : "Save"}>
+    <Drawer
+      title={title}
+      onClose={onClose}
+      onSave={save}
+      saveLabel={saving ? "Saving…" : "Save"}
+      dirty={Boolean(partyId) || amount > 0 || Boolean(reference) || links.length > 0}
+    >
       <div className="space-y-4">
         {error && <div className="rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-600">{error}</div>}
 
@@ -397,6 +456,37 @@ function PaymentForm({
           </DrawerField>
         </div>
 
+        {/* Vyapar reveals LINK PAYMENT once a party is chosen — this is where a lump sum gets
+            spread across the bills it settles. */}
+        {selectedParty && (
+          <div className="rounded-xl border border-gray-200 p-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <div className="text-sm font-semibold text-gray-700">Link Payment</div>
+                <p className="mt-0.5 text-xs text-gray-400">
+                  {links.length === 0
+                    ? "Not linked — the full amount stays as an advance."
+                    : `Linked to ${links.length} transaction${links.length > 1 ? "s" : ""} · ${inr(linkedTotal)}`}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setLinking(true)}
+                disabled={!amount || amount <= 0}
+                className="flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-white transition-all duration-150 hover:bg-emerald-700 active:scale-95 disabled:opacity-40"
+              >
+                <Link2 size={14} /> Link Payment
+              </button>
+            </div>
+            {links.length > 0 && (
+              <div className="mt-3 flex items-center justify-between border-t border-gray-100 pt-2 text-sm">
+                <span className="text-gray-500">Unused Amount</span>
+                <span className={`font-medium ${unused > 0 ? "text-amber-600" : "text-emerald-600"}`}>{inr(unused)}</span>
+              </div>
+            )}
+          </div>
+        )}
+
         {selectedParty && amount > 0 && (
           <div className="rounded-xl border border-gray-200 bg-gray-50/60 p-4 text-sm">
             <div className="flex items-center justify-between">
@@ -408,6 +498,20 @@ function PaymentForm({
           </div>
         )}
       </div>
+
+      {linking && selectedParty && (
+        <LinkPaymentDialog
+          partyId={selectedParty.id}
+          partyName={selectedParty.name}
+          received={amount}
+          onClose={() => setLinking(false)}
+          onDone={(next, received) => {
+            setLinks(next);
+            setAmount(received);
+            setLinking(false);
+          }}
+        />
+      )}
     </Drawer>
   );
 }

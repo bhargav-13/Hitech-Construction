@@ -34,10 +34,17 @@ import {
   SlidersHorizontal,
   Trash2,
   Upload,
+  Share2,
 } from "lucide-react";
 
 const TABS = ["PRODUCTS", "SERVICES", "CATEGORY", "UNITS"] as const;
 type Tab = (typeof TABS)[number];
+
+/**
+ * Ledger movements that add stock. Everything else takes stock away, which is what the coloured
+ * pip at the start of each ledger row signals — the labels come from the backend's `docLabel`.
+ */
+const STOCK_IN_TYPES = new Set(["Purchase", "Credit Note", "Stock Added"]);
 
 /**
  * Items — Vyapar's four-tab module: Products and Services as master–detail lists with a per-item
@@ -467,7 +474,16 @@ export default function ItemsPage() {
               <div className="space-y-4">
                 <div className="rounded-xl border border-gray-200 bg-white p-4">
                   <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div className="min-w-0">
+                    <div className="flex min-w-0 gap-3">
+                      {selected.imageDataUrl && (
+                        // eslint-disable-next-line @next/next/no-img-element -- a data URL, not a remote asset
+                        <img
+                          src={selected.imageDataUrl}
+                          alt={selected.name}
+                          className="h-14 w-14 shrink-0 rounded-lg border border-gray-200 object-cover"
+                        />
+                      )}
+                      <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
                         <h3 className="truncate text-lg font-semibold text-gray-800">{selected.name}</h3>
                         <button
@@ -476,6 +492,21 @@ export default function ItemsPage() {
                           className="rounded-md p-1 text-gray-400 transition-colors duration-150 hover:bg-cyan-50 hover:text-brand-accent"
                         >
                           <Pencil size={14} />
+                        </button>
+                        {/* Vyapar puts a share arrow beside the item name. */}
+                        <button
+                          onClick={() =>
+                            printRows(
+                              `${selected.name} — Stock Ledger`,
+                              ["Type", "Invoice/Ref", "Name", "Date", "Quantity", "Price/Unit"],
+                              sortedLedger.map((r) => [r.type, r.ref ?? "", r.name ?? "", r.date ?? "", r.quantity, inr(r.pricePerUnit)])
+                            )
+                          }
+                          title="Share stock ledger"
+                          aria-label={`Share ${selected.name}`}
+                          className="rounded-md p-1 text-gray-400 transition-colors duration-150 hover:bg-cyan-50 hover:text-brand-accent"
+                        >
+                          <Share2 size={14} />
                         </button>
                         {selected.isService && (
                           <span className="rounded-md bg-violet-50 px-2 py-0.5 text-[11px] font-medium text-violet-600">Service</span>
@@ -495,6 +526,7 @@ export default function ItemsPage() {
                         {selected.location && <Meta label="Location" value={selected.location} />}
                       </div>
                       {selected.description && <p className="mt-2 text-sm text-gray-500">{selected.description}</p>}
+                      </div>
                     </div>
 
                     <div className="flex shrink-0 items-start gap-2">
@@ -619,7 +651,19 @@ export default function ItemsPage() {
                             const href = itemLedgerHref(r);
                             return (
                             <tr key={r.id} className="border-b border-gray-50 transition-colors duration-150 last:border-b-0 even:bg-gray-50/40 hover:bg-cyan-50/40">
-                              <td className="px-4 py-2.5 text-gray-700">{r.type}</td>
+                              {/* Vyapar marks each movement with a coloured pip — green for stock
+                                  coming in, red for stock going out. */}
+                              <td className="px-4 py-2.5 text-gray-700">
+                                <span className="flex items-center gap-2">
+                                  <span
+                                    aria-hidden
+                                    className={`h-1.5 w-1.5 shrink-0 rounded-full ${
+                                      STOCK_IN_TYPES.has(r.type) ? "bg-emerald-500" : "bg-rose-500"
+                                    }`}
+                                  />
+                                  {r.type}
+                                </span>
+                              </td>
                               <td className="px-4 py-2.5 font-mono text-xs">
                                 {href ? (
                                   <Link href={href} className="text-brand-accent underline-offset-2 hover:underline">{r.ref ?? "—"}</Link>

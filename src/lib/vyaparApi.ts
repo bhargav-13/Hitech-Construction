@@ -101,6 +101,8 @@ export interface Item {
   lowStockAlert: number;
   location: string | null;
   isService: boolean;
+  /** Item photo held inline as a downscaled data URL, or null. */
+  imageDataUrl: string | null;
   isActive: boolean;
   /** The bank/cash account this item belongs to (null = all accounts). */
   bankAccountId: number | null;
@@ -154,13 +156,20 @@ export interface Invoice {
   paidAmount: number;
   balance: number;
   paymentType: string;
+  /** Cheque / NEFT number for the amount received with the document. */
+  paymentReference: string | null;
+  /** Walk-in details for a cash bill with no saved party behind it. */
+  billingName: string | null;
+  billingAddress: string | null;
   isCash: boolean;
   stateOfSupply: string | null;
   invoicePrefix: string | null;
   terms: string | null;
   discountPercent: number;
   roundOff: number;
-  status: "Paid" | "Partial" | "Unpaid";
+  status: "Paid" | "Partial" | "Unpaid" | "Cancelled";
+  /** Cancelled documents keep their number but stop counting towards balances and stock. */
+  cancelled: boolean;
   notes: string | null;
   /** The bank/cash account used to settle this document (a payment method, not the scope). */
   bankAccountId: number | null;
@@ -184,6 +193,11 @@ export interface Payment {
   bankAccountId: number | null;
   /** The construction project this payment belongs to (null = unassigned / All Projects). */
   projectId: number | null;
+  /** How much of this receipt has been applied to documents. */
+  linkedAmount: number;
+  /** amount − linkedAmount: an advance sitting against the party, shown as "Unused". */
+  unusedAmount: number;
+  links: PaymentLink[];
 }
 
 export interface DashboardSummary {
@@ -257,6 +271,9 @@ export interface InvoiceInput {
   discountPercent?: number;
   paidAmount?: number;
   paymentType?: string;
+  paymentReference?: string | null;
+  billingName?: string | null;
+  billingAddress?: string | null;
   isCash?: boolean;
   stateOfSupply?: string | null;
   invoicePrefix?: string | null;
@@ -293,10 +310,104 @@ export const deleteInvoice = (id: number) =>
 // ---- Payments ----
 export const getPayments = (direction?: "IN" | "OUT", projectId?: number) =>
   apiRequest<Payment[]>(`${BASE}/payments${qs({ direction, projectId })}`);
-export const createPayment = (body: Partial<Payment> & { bankAccountId?: number | null; projectId?: number | null }) =>
-  apiRequest<Payment>(`${BASE}/payments`, { method: "POST", body });
+export const createPayment = (
+  // `links` is narrower on the way in than on the way out — the server fills in invoiceNo/docType.
+  body: Omit<Partial<Payment>, "links"> & {
+    bankAccountId?: number | null;
+    projectId?: number | null;
+    /** Spreads the receipt across open documents; anything unlinked stays as an advance. */
+    links?: Pick<PaymentLink, "invoiceId" | "amount">[];
+  }
+) => apiRequest<Payment>(`${BASE}/payments`, { method: "POST", body });
 export const deletePayment = (id: number) =>
   apiRequest<void>(`${BASE}/payments/${id}`, { method: "DELETE" });
+
+// ---- Document row actions (Vyapar's ⋮ menu) ----
+
+/** Keeps the document and its number, but takes it out of the balances. Not a delete. */
+export const cancelInvoice = (id: number) =>
+  apiRequest<Invoice>(`${BASE}/invoices/${id}/cancel`, { method: "POST" });
+export const reopenInvoice = (id: number) =>
+  apiRequest<Invoice>(`${BASE}/invoices/${id}/reopen`, { method: "POST" });
+/** Copies the document into a fresh, unpaid one with the next number. */
+export const duplicateInvoice = (id: number) =>
+  apiRequest<Invoice>(`${BASE}/invoices/${id}/duplicate`, { method: "POST" });
+/** Sale → credit note, purchase → debit note. */
+export const convertToReturn = (id: number) =>
+  apiRequest<Invoice>(`${BASE}/invoices/${id}/convert-to-return`, { method: "POST" });
+
+export interface InvoiceHistoryRow {
+  id: number;
+  action: string;
+  detail: string | null;
+  userId: number | null;
+  at: string | null;
+}
+
+export const getInvoiceHistory = (id: number) =>
+  apiRequest<InvoiceHistoryRow[]>(`${BASE}/invoices/${id}/history`);
+
+// ---- Link Payment to Txns ----
+
+/** How much of one payment is applied to one document. */
+export interface PaymentLink {
+  invoiceId: number;
+  invoiceNo: string | null;
+  docType: string | null;
+  amount: number;
+}
+
+/** A document offered in the Link Payment dialog. */
+export interface OpenTxnRow {
+  id: number;
+  docType: string;
+  type: string;
+  number: string | null;
+  date: string | null;
+  total: number;
+  /** Outstanding, with this payment's own existing links added back in. */
+  balance: number;
+  /** How much of this payment is currently linked to it. */
+  linkedAmount: number;
+}
+
+export const getOpenTransactions = (partyId: number, paymentId?: number) =>
+  apiRequest<OpenTxnRow[]>(`${BASE}/parties/${partyId}/open-transactions${qs({ paymentId })}`);
+export const getPaymentLinks = (paymentId: number) =>
+  apiRequest<PaymentLink[]>(`${BASE}/payments/${paymentId}/links`);
+export const relinkPayment = (paymentId: number, links: Pick<PaymentLink, "invoiceId" | "amount">[]) =>
+  apiRequest<Payment>(`${BASE}/payments/${paymentId}/links`, { method: "PUT", body: { links } });
+
+// ---- Settings ----
+
+/**
+ * Vyapar's Settings screen. These aren't cosmetic — the forms read them to decide decimals,
+ * round-off behaviour, whether Due Date exists, and which document types are available at all.
+ */
+export interface VyaparSettings {
+  amountDecimals: number;
+  quantityDecimals: number;
+  roundOffEnabled: boolean;
+  roundOffMode: "NEAREST" | "UP" | "DOWN";
+  roundOffTo: number;
+  dueDatesEnabled: boolean;
+  linkPaymentsEnabled: boolean;
+  itemWiseTax: boolean;
+  itemWiseDiscount: boolean;
+  displayPurchasePrice: boolean;
+  transactionWiseTax: boolean;
+  transactionWiseDiscount: boolean;
+  estimateEnabled: boolean;
+  proformaEnabled: boolean;
+  ordersEnabled: boolean;
+  deliveryChallanEnabled: boolean;
+  /** Per-document-type prefixes as a JSON string, e.g. {"SALE":"GJ/RA/26-27/"}. */
+  prefixes: string | null;
+}
+
+export const getVyaparSettings = () => apiRequest<VyaparSettings>(`${BASE}/settings`);
+export const updateVyaparSettings = (body: VyaparSettings) =>
+  apiRequest<VyaparSettings>(`${BASE}/settings`, { method: "PUT", body });
 
 /** Human labels for each document type — used in tabs, titles and number prefixes. */
 /** Indian states for the GST place-of-supply picker. */

@@ -7,6 +7,7 @@ import { AppShell } from "@/components/AppShell";
 import { VYAPAR_NAV, DOC_CONFIGS } from "@/lib/vyaparConfig";
 import type { NavNode } from "@/lib/vyaparConfig";
 import { useUiStore } from "@/lib/uiStore";
+import { useVyaparSettings } from "@/lib/useVyaparSettings";
 import {
   BarChart3,
   Boxes,
@@ -48,6 +49,9 @@ export function VyaparShell({ children }: { children: React.ReactNode }) {
   // Persisted alongside the main sidebar so both survive route changes.
   const railCollapsed = useUiStore((s) => s.vyaparRailCollapsed);
   const toggleRail = useUiStore((s) => s.toggleVyaparRail);
+  // Loaded once for the whole module. Reading it here is what pushes the decimal-places setting
+  // into `inr`/`qty`, so every amount below the shell renders the way the books are configured.
+  useVyaparSettings();
 
   // Open the section containing the current route by default.
   const [open, setOpen] = useState<Record<string, boolean>>(() => {

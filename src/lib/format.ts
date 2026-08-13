@@ -6,20 +6,58 @@
  * Only chart axis ticks fall back to a short form, where a full number physically won't fit.
  */
 
+/**
+ * How many decimal places amounts and quantities render with.
+ *
+ * Vyapar exposes this as Settings → General → "Amount (upto Decimal Places)", and this client runs
+ * it at 3 — their books read `₹ 21,42,149.000`. We used to round to whole rupees, which quietly
+ * dropped paise off every screen. Held as module state rather than a hook because `inr` is called
+ * from render paths, formatters and export helpers alike; `useVyaparSettings` pushes the real
+ * value in once, at startup.
+ */
+let amountDecimals = 3;
+let quantityDecimals = 3;
+
+export function setAmountDecimals(places: number): void {
+  amountDecimals = Math.max(0, Math.min(3, Math.trunc(places)));
+}
+
+export function setQuantityDecimals(places: number): void {
+  quantityDecimals = Math.max(0, Math.min(3, Math.trunc(places)));
+}
+
+export function getAmountDecimals(): number {
+  return amountDecimals;
+}
+
+function grouped(n: number, places: number): string {
+  return n.toLocaleString("en-IN", {
+    minimumFractionDigits: places,
+    maximumFractionDigits: places,
+  });
+}
+
 /** Indian grouping with the rupee symbol — the default for any displayed amount. */
 export function inr(value: number | null | undefined): string {
   const n = Number(value);
-  if (!Number.isFinite(n) || n === 0) return "₹0";
+  if (!Number.isFinite(n)) return `₹${grouped(0, amountDecimals)}`;
   const sign = n < 0 ? "-" : "";
-  return `${sign}₹${Math.round(Math.abs(n)).toLocaleString("en-IN")}`;
+  return `${sign}₹${grouped(Math.abs(n), amountDecimals)}`;
 }
 
 /** Indian grouping without the symbol — for places that render ₹ separately. */
 export function inrNumber(value: number | null | undefined): string {
   const n = Number(value);
-  if (!Number.isFinite(n)) return "0";
+  if (!Number.isFinite(n)) return grouped(0, amountDecimals);
   const sign = n < 0 ? "-" : "";
-  return `${sign}${Math.round(Math.abs(n)).toLocaleString("en-IN")}`;
+  return `${sign}${grouped(Math.abs(n), amountDecimals)}`;
+}
+
+/** Stock and line quantities, which carry their own decimal setting in Vyapar. */
+export function qty(value: number | null | undefined): string {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return grouped(0, quantityDecimals);
+  return grouped(n, quantityDecimals);
 }
 
 /**

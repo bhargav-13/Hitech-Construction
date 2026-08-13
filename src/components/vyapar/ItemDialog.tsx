@@ -13,20 +13,52 @@ import { Barcode, ImagePlus, Plus, Search, X } from "lucide-react";
 type Tab = "Pricing" | "Stock";
 
 /**
+ * Shrink a picked image to fit `max` on its longest side and return it as a JPEG data URL.
+ *
+ * A phone photo is several megabytes; storing that inline would bloat every item fetch. 256px is
+ * plenty for a catalogue thumbnail.
+ */
+function downscaleImage(file: File, max: number): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("read failed"));
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = () => reject(new Error("decode failed"));
+      img.onload = () => {
+        const scale = Math.min(1, max / Math.max(img.width, img.height));
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.round(img.width * scale);
+        canvas.height = Math.round(img.height * scale);
+        const ctx = canvas.getContext("2d");
+        if (!ctx) return reject(new Error("no canvas"));
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL("image/jpeg", 0.82));
+      };
+      img.src = String(reader.result);
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+/**
  * Add / edit an item — Vyapar's own layout: a Product↔Service toggle, the identity row
  * (name, HSN, code, unit), then Pricing and Stock tabs.
  */
 export function ItemDialog({
   existing,
-  categories,
+  categories = [],
   units = DEFAULT_UNITS,
+  initialName,
   onClose,
   onSaved,
 }: {
   existing?: Item;
-  categories: string[];
+  categories?: string[];
   /** Managed unit master — falls back to Vyapar's built-in list. */
   units?: ManagedUnit[];
+  /** Seeds the name when opened from an invoice line's "⊕ Add Item" with text already typed. */
+  initialName?: string;
   onClose: () => void;
   onSaved: (saved: Item, again: boolean) => void;
 }) {
@@ -34,7 +66,8 @@ export function ItemDialog({
   const [tab, setTab] = useState<Tab>("Pricing");
 
   const [isService, setIsService] = useState(existing?.isService ?? false);
-  const [name, setName] = useState(existing?.name ?? "");
+  const [name, setName] = useState(existing?.name ?? initialName ?? "");
+  const [imageDataUrl, setImageDataUrl] = useState<string | null>(existing?.imageDataUrl ?? null);
   const [hsn, setHsn] = useState(existing?.hsn ?? "");
   const [itemCode, setItemCode] = useState(existing?.itemCode ?? "");
   const [unit, setUnit] = useState(existing?.unit ?? settings.defaultUnit);
@@ -89,6 +122,8 @@ export function ItemDialog({
       purchasePriceWithTax,
       taxPercent: Number(taxPercent) || 0,
       isService,
+      // "" clears a stored photo; the server leaves it alone on null.
+      imageDataUrl: imageDataUrl ?? "",
       openingQty: showStock ? Number(openingQty) || 0 : 0,
       openingPrice: showStock ? Number(openingPrice) || 0 : 0,
       openingDate: showStock ? openingDate : null,
@@ -116,6 +151,7 @@ export function ItemDialog({
       onClose={onClose}
       onSave={() => submit(false)}
       saveLabel={saving ? "Saving…" : "Save"}
+      dirty={Boolean(name.trim()) && name.trim() !== (existing?.name ?? "")}
       width="max-w-4xl"
     >
       <div className="space-y-5">
@@ -193,13 +229,45 @@ export function ItemDialog({
           )}
         </div>
 
-        <button
-          type="button"
-          className="flex items-center gap-1.5 text-sm font-medium text-brand-accent transition-colors duration-150 hover:underline"
-          onClick={() => setError("Item images arrive with the file-upload service.")}
-        >
-          <ImagePlus size={15} /> Add Item Image
-        </button>
+        {/* Item photo. Downscaled in the browser and stored inline as a data URL, the same way
+            the firm logo already is — no file service needed for a thumbnail. */}
+        <div className="flex items-center gap-3">
+          {imageDataUrl ? (
+            <>
+              {/* eslint-disable-next-line @next/next/no-img-element -- a data URL, not a remote asset */}
+              <img
+                src={imageDataUrl}
+                alt={name || "Item"}
+                className="h-16 w-16 rounded-lg border border-gray-200 object-cover"
+              />
+              <button
+                type="button"
+                onClick={() => setImageDataUrl(null)}
+                className="flex items-center gap-1.5 text-sm font-medium text-rose-600 transition-colors duration-150 hover:underline"
+              >
+                <X size={14} /> Remove Image
+              </button>
+            </>
+          ) : (
+            <label className="flex cursor-pointer items-center gap-1.5 text-sm font-medium text-brand-accent transition-colors duration-150 hover:underline">
+              <ImagePlus size={15} /> Add Item Image
+              <input
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={async (e) => {
+                  const file = e.target.files?.[0];
+                  if (!file) return;
+                  try {
+                    setImageDataUrl(await downscaleImage(file, 256));
+                  } catch {
+                    setError("Couldn't read that image.");
+                  }
+                }}
+              />
+            </label>
+          )}
+        </div>
 
         {/* Tabs */}
         <div className="flex gap-5 border-b border-gray-200">
