@@ -197,17 +197,41 @@ async function main() {
   }
   console.log(`  accounts   ${accountIdByVyapar.size}`);
 
-  // Parties. `amount` is Vyapar's running balance, used as our opening balance; `name_type` 1 is
-  // a party the books transact with (2 is an expense category, which is not a party here).
+  // Parties. Vyapar's `amount` is the *running* balance — kb_names has no opening_balance column.
+  // The ERP derives balance as openingBalance + sum(posted docs + payments). Some parties had an
+  // opening balance set in Vyapar before any transactions; the `amount` field embeds that:
+  //     amount = true_opening_balance + net_of_all_transactions
+  // So:  true_opening_balance = amount - net_of_all_transactions
+  //
+  // We compute the net transaction effect per party from kb_transactions using the same sign
+  // conventions the ERP will apply when deriving balances, then set openingBalance to the residual.
+  const netByParty = new Map();
+  for (const t of live) {
+    const docType = TXN_TYPE[t.txn_type];
+    const pid = t.txn_name_id;
+    if (pid == null) continue;
+    const total = num(t.txn_cash_amount) + num(t.txn_balance_amount);
+    const outstanding = num(t.txn_balance_amount); // = total - paidAmount
+    let delta = 0;
+    if (docType === "SALE") delta = outstanding;
+    else if (docType === "PURCHASE") delta = -outstanding;
+    else if (docType === "SALE_RETURN") delta = -outstanding;
+    else if (docType === "PURCHASE_RETURN") delta = outstanding;
+    else if (docType === "PAYMENT_IN") delta = -total;
+    else if (docType === "PAYMENT_OUT") delta = total;
+    // EXPENSE does not affect party balances in the ERP (not in POSTED).
+    netByParty.set(pid, (netByParty.get(pid) ?? 0) + delta);
+  }
+
   const partyIdByVyapar = new Map();
   for (const p of vParties) {
     if (p.name_type != null && p.name_type !== 1) continue;
+    const netTxn = netByParty.get(p.name_id) ?? 0;
+    const trueOB = num(p.amount) - netTxn;
     const saved = await api("/api/v1/vyapar/parties", {
       method: "POST",
       body: {
         name: p.full_name.trim(),
-        // Vyapar has no customer/supplier field; ours keeps one for grouping, so seed it from the
-        // sign of the balance and let transactions tell the real story.
         partyType: num(p.amount) >= 0 ? "CUSTOMER" : "SUPPLIER",
         phone: p.phone_number ?? null,
         email: p.email ?? null,
@@ -215,11 +239,14 @@ async function main() {
         state: p.name_state ?? null,
         billingAddress: p.address ?? null,
         shippingAddress: p.name_shipping_address ?? null,
-        openingBalance: num(p.amount),
+        openingBalance: trueOB,
         creditLimit: p.credit_limit_enabled ? num(p.credit_limit) : null,
       },
     });
     partyIdByVyapar.set(p.name_id, saved.id);
+    if (Math.abs(trueOB) > 0.01) {
+      console.log(`    ${p.full_name.trim()}: opening balance ₹${trueOB.toLocaleString("en-IN")}`);
+    }
   }
   console.log(`  parties    ${partyIdByVyapar.size}`);
 
@@ -321,7 +348,10 @@ async function main() {
             invoiceDate: day(t.txn_date),
             dueDate: day(t.txn_due_date),
             discount: num(t.txn_discount_amount),
-            discountPercent: num(t.txn_discount_percent),
+            // Vyapar computes discount% on the tax-inclusive subtotal; the ERP computes it on the
+            // pre-tax subtotal. Sending the percentage would make the ERP re-derive a different
+            // discount amount, so we send the flat amount only and zero the percentage.
+            discountPercent: 0,
             roundOff: num(t.txn_round_off_amount),
             paidAmount: num(t.txn_cash_amount),
             isCash: num(t.txn_balance_amount) === 0,
