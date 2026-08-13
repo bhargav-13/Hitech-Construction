@@ -227,7 +227,8 @@ async function main() {
   for (const p of vParties) {
     if (p.name_type != null && p.name_type !== 1) continue;
     const netTxn = netByParty.get(p.name_id) ?? 0;
-    const trueOB = num(p.amount) - netTxn;
+    // Round to 2 dp — floating-point line-item arithmetic can leave sub-rupee residuals otherwise.
+    const trueOB = Math.round((num(p.amount) - netTxn) * 100) / 100;
     const saved = await api("/api/v1/vyapar/parties", {
       method: "POST",
       body: {
@@ -250,8 +251,60 @@ async function main() {
   }
   console.log(`  parties    ${partyIdByVyapar.size}`);
 
+  // Item stock, the same trap as the party opening balance.
+  //
+  // `item_stock_quantity` is Vyapar's CURRENT stock, not an opening figure. Posting it as the
+  // opening quantity and then replaying every purchase through the API doubles the shelf — the
+  // ERP re-derives stock from the documents we're about to send. So back the transactions out
+  // and seed only what was on hand before the first one.
+  //
+  // Signs match VyaparService.applyStock: purchases and sale returns add, sales and purchase
+  // returns remove. Expenses carry lines but never move stock.
+  const netStockByItem = new Map();
+  // Weighted average purchase cost, net of line discounts.
+  //
+  // The ERP values a shelf as stockQty × purchasePrice, but Vyapar's master purchase price is
+  // just the default rate for a new bill and can be wildly off what was actually paid — "Metal"
+  // carries ₹6,100 against a real cost of ₹0.45, which alone inflated the books by ₹484 crore.
+  // Valuing at what the item actually cost reproduces Vyapar's own Stock Summary to ~0.5%.
+  const buyQtyByItem = new Map();
+  const buyValByItem = new Map();
+
+  for (const t of live) {
+    const docType = TXN_TYPE[t.txn_type];
+    for (const l of linesByTxn.get(t.txn_id) ?? []) {
+      if (l.item_id == null) continue;
+      const qty = num(l.quantity);
+      if (qty === 0) continue;
+
+      let delta = 0;
+      if (docType === "PURCHASE") delta = qty;
+      else if (docType === "SALE") delta = -qty;
+      else if (docType === "SALE_RETURN") delta = qty;
+      else if (docType === "PURCHASE_RETURN") delta = -qty;
+      if (delta !== 0) netStockByItem.set(l.item_id, (netStockByItem.get(l.item_id) ?? 0) + delta);
+
+      if (docType === "PURCHASE") {
+        const gross = qty * num(l.priceperunit);
+        const dPct = num(l.lineitem_discount_percent);
+        const disc = dPct > 0 ? (gross * dPct) / 100 : num(l.lineitem_discount_amount);
+        buyQtyByItem.set(l.item_id, (buyQtyByItem.get(l.item_id) ?? 0) + qty);
+        buyValByItem.set(l.item_id, (buyValByItem.get(l.item_id) ?? 0) + (gross - disc));
+      }
+    }
+  }
+
   const itemIdByVyapar = new Map();
+  let repriced = 0;
   for (const it of vItems) {
+    const openingStock = num(it.item_stock_quantity) - (netStockByItem.get(it.item_id) ?? 0);
+
+    // Fall back to the master price for anything never purchased — there's nothing better to use.
+    const boughtQty = buyQtyByItem.get(it.item_id) ?? 0;
+    const avgCost = boughtQty > 0 ? buyValByItem.get(it.item_id) / boughtQty : null;
+    const purchasePrice = avgCost ?? num(it.item_purchase_unit_price);
+    if (avgCost != null && Math.abs(avgCost - num(it.item_purchase_unit_price)) > 0.01) repriced += 1;
+
     const saved = await api("/api/v1/vyapar/items", {
       method: "POST",
       body: {
@@ -261,9 +314,9 @@ async function main() {
         description: it.item_description ?? null,
         unit: vUnits.get(it.base_unit_id)?.unit_short_name ?? "NONE",
         salePrice: num(it.item_sale_unit_price),
-        purchasePrice: num(it.item_purchase_unit_price),
+        purchasePrice,
         taxPercent: vTaxes.get(it.item_tax_id) ?? 0,
-        stockQty: num(it.item_stock_quantity),
+        stockQty: openingStock,
         lowStockAlert: num(it.item_min_stock_quantity),
         location: it.item_location ?? null,
         wholesalePrice: num(it.item_wholesale_price) || null,
@@ -274,7 +327,7 @@ async function main() {
     });
     itemIdByVyapar.set(it.item_id, saved.id);
   }
-  console.log(`  items      ${itemIdByVyapar.size}`);
+  console.log(`  items      ${itemIdByVyapar.size} (${repriced} valued at actual cost)`);
 
   // Documents, oldest first so balances build in the order they really happened.
   const invoiceIdByVyapar = new Map();
@@ -300,6 +353,7 @@ async function main() {
           quantity: num(l.quantity) || 1,
           rate: num(l.priceperunit),
           discountPercent: num(l.lineitem_discount_percent),
+          discountAmount: num(l.lineitem_discount_percent) > 0 ? 0 : num(l.lineitem_discount_amount),
           taxPercent: vTaxes.get(l.lineitem_tax_id) ?? 0,
         }));
 
@@ -338,6 +392,26 @@ async function main() {
             taxPercent: 0,
           });
         }
+        // Replicate ERP's line-item computation to find rounding drift, then absorb
+        // it into roundOff so the stored total matches Vyapar's exactly.
+        // The ERP calls money(rate) which rounds to 2dp — we must match that.
+        let erpSub = 0, erpTax = 0;
+        for (const ln of lines) {
+          const erpRate = Math.round(ln.rate * 100) / 100;
+          const gross = (ln.quantity || 1) * erpRate;
+          const lineDisc = ln.discountPercent > 0
+            ? Math.round(gross * ln.discountPercent) / 100
+            : Math.round((ln.discountAmount ?? 0) * 100) / 100;
+          const taxable = gross - lineDisc;
+          const lineTax = Math.round(taxable * (ln.taxPercent ?? 0)) / 100;
+          erpSub += taxable;
+          erpTax += lineTax;
+        }
+        const headerDisc = num(t.txn_discount_amount);
+        const origRoundOff = num(t.txn_round_off_amount);
+        const erpTotal = erpSub + erpTax - headerDisc + origRoundOff;
+        const adjustedRoundOff = origRoundOff + (total - erpTotal);
+
         const saved = await api("/api/v1/vyapar/invoices", {
           method: "POST",
           body: {
@@ -347,12 +421,12 @@ async function main() {
             partyId,
             invoiceDate: day(t.txn_date),
             dueDate: day(t.txn_due_date),
-            discount: num(t.txn_discount_amount),
+            discount: headerDisc,
             // Vyapar computes discount% on the tax-inclusive subtotal; the ERP computes it on the
             // pre-tax subtotal. Sending the percentage would make the ERP re-derive a different
             // discount amount, so we send the flat amount only and zero the percentage.
             discountPercent: 0,
-            roundOff: num(t.txn_round_off_amount),
+            roundOff: adjustedRoundOff,
             paidAmount: num(t.txn_cash_amount),
             isCash: num(t.txn_balance_amount) === 0,
             paymentType: accountIdByVyapar.has(t.txn_payment_type_id) ? "Bank" : "Cash",
