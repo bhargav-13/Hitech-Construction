@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Check, ChevronDown } from "lucide-react";
 
 export interface SelectOption {
@@ -13,6 +14,12 @@ export interface SelectOption {
  * Themed, animated replacement for a native <select>. The native option list can't be styled or
  * transitioned, so this renders a custom listbox: rounded panel, cyan hover/selected states, a
  * rotating chevron and a fade/scale drop-in. Keyboard accessible (↑/↓, Enter, Esc, type-ahead).
+ *
+ * The open list is rendered through a portal at the document root with fixed positioning, and
+ * flips above the field when there isn't room below. That matters because these sit inside
+ * `overflow-x-auto` tables — the GST picker in the invoice grid, for one — and an absolutely
+ * positioned panel gets sliced by the scroll container's edges, which is exactly what made the
+ * tax dropdown unreadable. Same fix, and same reasoning, as RowMenu.
  */
 export function Select({
   value,
@@ -44,17 +51,54 @@ export function Select({
   const rootRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const typed = useRef<{ str: string; at: number }>({ str: "", at: 0 });
+  // Start off-screen so the panel can be measured before it's painted in its final spot.
+  const [pos, setPos] = useState({ top: -9999, left: -9999, width: 0, openUp: false });
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => setMounted(true), []);
 
   const selected = useMemo(() => options.find((o) => o.value === value), [options, value]);
+
+  /** Put the panel under the field, or above it when the field is near the bottom of the window. */
+  const place = useCallback(() => {
+    const b = rootRef.current?.getBoundingClientRect();
+    if (!b) return;
+    const panelH = listRef.current?.offsetHeight ?? 0;
+    const spaceBelow = window.innerHeight - b.bottom;
+    const openUp = panelH > 0 && spaceBelow < panelH + 8 && b.top > spaceBelow;
+    // The panel is at least as wide as the field, but never wider than the window allows —
+    // "Ineligible as Per Section 17(5)" needs more room than the cell it sits in.
+    const width = Math.max(b.width, 160);
+    // `align="right"` hangs the panel off the field's right edge, for selects that sit against the
+    // right side of a toolbar and would otherwise push the panel off-screen.
+    const wanted = align === "right" ? b.right - width : b.left;
+    const left = Math.min(Math.max(8, wanted), Math.max(8, window.innerWidth - width - 8));
+    setPos({ top: openUp ? b.top - panelH - 4 : b.bottom + 4, left, width, openUp });
+  }, [align]);
+
+  useLayoutEffect(() => {
+    if (open) place();
+  }, [open, place]);
 
   useEffect(() => {
     if (!open) return;
     const onDown = (e: MouseEvent) => {
-      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false);
+      const t = e.target as Node;
+      if (rootRef.current?.contains(t) || listRef.current?.contains(t)) return;
+      setOpen(false);
     };
+    // The panel is positioned against the viewport, so it has to follow the field on scroll —
+    // `true` catches scrolling in any ancestor, not just the window.
+    const reposition = () => place();
     window.addEventListener("mousedown", onDown);
-    return () => window.removeEventListener("mousedown", onDown);
-  }, [open]);
+    window.addEventListener("scroll", reposition, true);
+    window.addEventListener("resize", reposition);
+    return () => {
+      window.removeEventListener("mousedown", onDown);
+      window.removeEventListener("scroll", reposition, true);
+      window.removeEventListener("resize", reposition);
+    };
+  }, [open, place]);
 
   useEffect(() => {
     if (open) {
@@ -142,12 +186,13 @@ export function Select({
         />
       </button>
 
-      {open && (
+      {open && mounted && createPortal(
         <div
           ref={listRef}
           role="listbox"
-          className={`animate-fade-in-scale absolute z-50 mt-1 max-h-64 min-w-full overflow-auto rounded-lg border border-gray-200 bg-white py-1 shadow-lg ${
-            align === "right" ? "right-0 origin-top-right" : "left-0 origin-top-left"
+          style={{ top: pos.top, left: pos.left, minWidth: pos.width }}
+          className={`animate-fade-in-scale fixed z-[60] max-h-72 overflow-auto rounded-lg border border-gray-200 bg-white py-1 shadow-lg ${
+            pos.openUp ? "origin-bottom-left" : "origin-top-left"
           }`}
         >
           {options.length === 0 ? (
@@ -176,7 +221,8 @@ export function Select({
               );
             })
           )}
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );
