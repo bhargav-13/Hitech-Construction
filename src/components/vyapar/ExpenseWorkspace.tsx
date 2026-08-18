@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { VyaparEmpty } from "@/components/vyapar/VyaparShell";
 import { Drawer, DrawerField } from "@/components/Drawer";
 import { Select } from "@/components/Select";
@@ -20,7 +20,7 @@ import { ImportDialog } from "@/components/vyapar/ImportDialog";
 import { documentImportConfig } from "@/lib/vyaparImportConfigs";
 import * as vyapar from "@/lib/vyaparApi";
 import type { Invoice, Party } from "@/lib/vyaparApi";
-import { FileText, Plus, Receipt, Search, Trash2, Upload, X } from "lucide-react";
+import { FileText, Pencil, Plus, Receipt, Search, Trash2, Upload, X } from "lucide-react";
 const UNCATEGORISED = "Uncategorised";
 
 /**
@@ -30,6 +30,8 @@ const UNCATEGORISED = "Uncategorised";
  */
 export function ExpenseWorkspace() {
   const params = useSearchParams();
+  const router = useRouter();
+  const pathname = usePathname();
   const projectId = useVyaparProjectId();
   const [expenses, setExpenses] = useState<Invoice[]>([]);
   const [parties, setParties] = useState<Party[]>([]);
@@ -38,6 +40,7 @@ export function ExpenseWorkspace() {
   const [search, setSearch] = useState("");
   const [selectedCat, setSelectedCat] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  const [editing, setEditing] = useState<Invoice | null>(null);
   const [importing, setImporting] = useState(false);
 
   const load = useCallback(async () => {
@@ -61,11 +64,21 @@ export function ExpenseWorkspace() {
     load();
   }, [load]);
 
+  // ?new= opens the create form. The flag is stripped from the URL as soon as it's consumed:
+  // leaving it there means the next Alt+<key> press (or another click on "Add Sale") pushes an
+  // identical URL, `params` never changes, this effect never re-runs, and the shortcut looks dead.
   useEffect(() => {
-    if (params?.get("new") === "1") setCreating(true);
-  }, [params]);
+    if (!params?.get("new")) return;
+    setCreating(true);
+    const rest = new URLSearchParams(params.toString());
+    rest.delete("new");
+    const qs = rest.toString();
+    router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+  }, [params, router, pathname]);
 
-  // ?open=<id> — an expense has no editor, so we jump to its category and highlight the row.
+  // ?open=<id> — jump to the expense's category and highlight its row. Deep links land on the
+  // list rather than straight in the editor, because the row's context (which category, what else
+  // is in it) is usually why you followed the link.
   const openId = params?.get("open");
   const highlightRef = useRef<HTMLTableRowElement>(null);
 
@@ -266,7 +279,8 @@ export function ExpenseWorkspace() {
                     <tr
                       key={e.id}
                       ref={highlighted ? highlightRef : undefined}
-                      className={`border-b border-gray-50 transition-colors duration-150 last:border-b-0 even:bg-gray-50/40 hover:bg-cyan-50/40 ${
+                      onClick={() => setEditing(e)}
+                      className={`cursor-pointer border-b border-gray-50 transition-colors duration-150 last:border-b-0 even:bg-gray-50/40 hover:bg-cyan-50/40 ${
                         highlighted ? "bg-amber-50 ring-2 ring-inset ring-amber-300" : ""
                       }`}
                     >
@@ -280,10 +294,11 @@ export function ExpenseWorkspace() {
                       <td className="px-4 py-2.5">
                         <span className={`rounded-md px-2 py-0.5 text-xs font-medium ${e.status === "Paid" ? "bg-emerald-50 text-emerald-700" : e.status === "Partial" ? "bg-amber-50 text-amber-700" : "bg-rose-50 text-rose-700"}`}>{e.status}</span>
                       </td>
-                      <td className="px-4 py-2.5 text-right">
+                      <td className="px-4 py-2.5 text-right" onClick={(ev) => ev.stopPropagation()}>
                         <RowMenu align="right" buttonLabel="Expense actions">
                           {(close) => (
                             <>
+                              <RowMenuItem icon={Pencil} label="View/Edit" onClick={() => { close(); setEditing(e); }} />
                               <RowMenuDivider />
                               <RowMenuItem icon={Trash2} label="Delete" tone="danger" onClick={() => { close(); remove(e); }} />
                             </>
@@ -305,12 +320,13 @@ export function ExpenseWorkspace() {
         </div>
       )}
 
-      {creating && (
+      {(creating || editing) && (
         <ExpenseForm
           parties={parties}
           categories={catNames.filter((c) => c !== UNCATEGORISED)}
-          onClose={() => setCreating(false)}
-          onSaved={() => { setCreating(false); load(); }}
+          existing={editing ?? undefined}
+          onClose={() => { setCreating(false); setEditing(null); }}
+          onSaved={() => { setCreating(false); setEditing(null); load(); }}
         />
       )}
 
@@ -328,34 +344,61 @@ export function ExpenseWorkspace() {
 type LineDraft = { itemName: string; description: string; qty: number; rate: number; taxPercent: number };
 const emptyLine = (): LineDraft => ({ itemName: "", description: "", qty: 1, rate: 0, taxPercent: 0 });
 
-/** Add an expense — Vyapar's category-first form with a GST toggle that reveals the party & state. */
+/**
+ * Add or edit an expense — Vyapar's category-first form with a GST toggle that reveals the party
+ * and state of supply.
+ *
+ * Editing was the gap: an expense could be created and deleted but never corrected, so a wrong
+ * amount meant deleting the record and re-keying it, which loses its number. With `existing` set
+ * the same form prefills and saves through `updateInvoice` instead.
+ */
 function ExpenseForm({
   parties,
   categories,
+  existing,
   onClose,
   onSaved,
 }: {
   parties: Party[];
   categories: string[];
+  existing?: Invoice;
   onClose: () => void;
   onSaved: () => void;
 }) {
-  const [gst, setGst] = useState(false);
-  const [category, setCategory] = useState("");
-  const [partyId, setPartyId] = useState("");
-  const [expenseNo, setExpenseNo] = useState("");
-  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
-  const [stateOfSupply, setStateOfSupply] = useState("");
-  const [lines, setLines] = useState<LineDraft[]>([emptyLine()]);
-  const [paymentMode, setPaymentMode] = useState("Cash");
-  const [reference, setReference] = useState("");
-  const [paidTouched, setPaidTouched] = useState(false);
-  const [paid, setPaid] = useState(0);
+  // An expense counts as GST-bearing if it was booked against a party or carries tax — that's the
+  // only trace the toggle leaves on the saved record.
+  const [gst, setGst] = useState(
+    existing != null && (existing.partyId != null || existing.taxAmount > 0)
+  );
+  const [category, setCategory] = useState(existing?.notes?.trim() ?? "");
+  const [partyId, setPartyId] = useState(existing?.partyId ? String(existing.partyId) : "");
+  const [expenseNo, setExpenseNo] = useState(existing?.invoiceNo ?? "");
+  const [date, setDate] = useState(existing?.invoiceDate ?? new Date().toISOString().slice(0, 10));
+  const [stateOfSupply, setStateOfSupply] = useState(existing?.stateOfSupply ?? "");
+  const [lines, setLines] = useState<LineDraft[]>(
+    existing?.lines.length
+      ? existing.lines.map((l) => ({
+          itemName: l.itemName,
+          description: l.description ?? "",
+          qty: l.quantity,
+          rate: l.rate,
+          taxPercent: l.taxPercent,
+        }))
+      : [emptyLine()]
+  );
+  const [paymentMode, setPaymentMode] = useState(
+    existing?.paymentType && existing.paymentType !== "Credit" ? existing.paymentType : "Cash"
+  );
+  const [reference, setReference] = useState(existing?.paymentReference ?? "");
+  const [paidTouched, setPaidTouched] = useState(existing != null);
+  const [paid, setPaid] = useState(existing?.paidAmount ?? 0);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const projectId = useVyaparProjectId();
   const { projects } = useProjects();
-  const [selectedProjectId, setSelectedProjectId] = useState(projectId != null ? String(projectId) : "");
+  const [selectedProjectId, setSelectedProjectId] = useState(
+    existing?.projectId != null ? String(existing.projectId) : projectId != null ? String(projectId) : ""
+  );
   const paymentTypeOptions = usePaymentTypeOptions();
 
   const calc = useMemo(() => {
@@ -392,7 +435,7 @@ function ExpenseForm({
     setSaving(true);
     setError("");
     try {
-      await vyapar.createInvoice({
+      const body: vyapar.InvoiceInput = {
         docType: "EXPENSE",
         projectId: selectedProjectId ? Number(selectedProjectId) : null,
         invoiceNo: expenseNo || undefined,
@@ -413,7 +456,9 @@ function ExpenseForm({
           discountPercent: 0,
           taxPercent: gst ? Number(l.taxPercent) || 0 : 0,
         })),
-      });
+      };
+      if (existing) await vyapar.updateInvoice(existing.id, body);
+      else await vyapar.createInvoice(body);
       onSaved();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Couldn't save this expense.");
@@ -422,7 +467,13 @@ function ExpenseForm({
   }
 
   return (
-    <Drawer title="Expense" onClose={onClose} onSave={save} saveLabel={saving ? "Saving…" : "Save"} width="max-w-4xl">
+    <Drawer
+      title={existing ? `Edit ${existing.invoiceNo || "Expense"}` : "Expense"}
+      onClose={onClose}
+      onSave={save}
+      saveLabel={saving ? "Saving…" : "Save"}
+      width="max-w-4xl"
+    >
       <div className="space-y-5">
         {error && <div className="rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-600">{error}</div>}
 
