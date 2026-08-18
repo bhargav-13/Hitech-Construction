@@ -33,7 +33,10 @@ import type { ProjectResponse, ProjectSummary } from "@/lib/api";
 import { projectInitials } from "@/lib/projectHelpers";
 import { inr } from "@/lib/format";
 
-export const runtime = "edge";
+// Deliberately NOT `runtime = "edge"`. This page is a client component, so edge bought nothing —
+// it only governs the server-rendered shell — while capping the bundle at Vercel's 1 MB edge
+// limit, which the project workspace tabs exceeded (1.02 MB). It also disabled static generation
+// for the route. On the default Node runtime the limit is orders of magnitude higher.
 
 /**
  * The project workspace.
