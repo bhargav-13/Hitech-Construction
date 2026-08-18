@@ -25,8 +25,6 @@ export interface DocConfig {
   title: string;
   /** Route segment under /vyapar. */
   slug: string;
-  /** Keyboard shortcut, matching Vyapar's own (Alt + key). */
-  shortcut: string;
   group: "SALE" | "PURCHASE" | "OTHERS";
   /** Invoice-number prefix used when auto-numbering. */
   prefix: string;
@@ -40,21 +38,21 @@ export interface DocConfig {
 
 export const DOC_CONFIGS: DocConfig[] = [
   // ---- Sale ----
-  { type: "SALE", label: "Sale Invoice", title: "Sale Invoices", slug: "sale", shortcut: "S", group: "SALE", prefix: "INV", flow: "in", posts: true, hasLines: true },
-  { type: "PAYMENT_IN", label: "Payment-In", title: "Payment-In", slug: "payment-in", shortcut: "I", group: "SALE", prefix: "PI", flow: "in", posts: true, hasLines: false },
-  { type: "SALE_RETURN", label: "Sale Return / Cr Note", title: "Sale Return / Credit Note", slug: "sale-return", shortcut: "R", group: "SALE", prefix: "CN", flow: "out", posts: true, hasLines: true },
-  { type: "SALE_ORDER", label: "Sale Order", title: "Sale Orders", slug: "sale-order", shortcut: "F", group: "SALE", prefix: "SO", flow: "in", posts: false, hasLines: true },
-  { type: "ESTIMATE", label: "Estimate / Quotation", title: "Estimate / Quotation", slug: "estimate", shortcut: "M", group: "SALE", prefix: "EST", flow: "in", posts: false, hasLines: true },
-  { type: "PROFORMA", label: "Proforma Invoice", title: "Proforma Invoices", slug: "proforma", shortcut: "K", group: "SALE", prefix: "PRO", flow: "in", posts: false, hasLines: true },
-  { type: "DELIVERY_CHALLAN", label: "Delivery Challan", title: "Delivery Challans", slug: "delivery-challan", shortcut: "D", group: "SALE", prefix: "DC", flow: "in", posts: false, hasLines: true },
+  { type: "SALE", label: "Sale Invoice", title: "Sale Invoices", slug: "sale", group: "SALE", prefix: "INV", flow: "in", posts: true, hasLines: true },
+  { type: "PAYMENT_IN", label: "Payment-In", title: "Payment-In", slug: "payment-in", group: "SALE", prefix: "PI", flow: "in", posts: true, hasLines: false },
+  { type: "SALE_RETURN", label: "Sale Return / Cr Note", title: "Sale Return / Credit Note", slug: "sale-return", group: "SALE", prefix: "CN", flow: "out", posts: true, hasLines: true },
+  { type: "SALE_ORDER", label: "Sale Order", title: "Sale Orders", slug: "sale-order", group: "SALE", prefix: "SO", flow: "in", posts: false, hasLines: true },
+  { type: "ESTIMATE", label: "Estimate / Quotation", title: "Estimate / Quotation", slug: "estimate", group: "SALE", prefix: "EST", flow: "in", posts: false, hasLines: true },
+  { type: "PROFORMA", label: "Proforma Invoice", title: "Proforma Invoices", slug: "proforma", group: "SALE", prefix: "PRO", flow: "in", posts: false, hasLines: true },
+  { type: "DELIVERY_CHALLAN", label: "Delivery Challan", title: "Delivery Challans", slug: "delivery-challan", group: "SALE", prefix: "DC", flow: "in", posts: false, hasLines: true },
   // ---- Purchase ----
-  { type: "PURCHASE", label: "Purchase Bill", title: "Purchase Bills", slug: "purchase", shortcut: "P", group: "PURCHASE", prefix: "PUR", flow: "out", posts: true, hasLines: true },
-  { type: "PAYMENT_OUT", label: "Payment-Out", title: "Payment-Out", slug: "payment-out", shortcut: "O", group: "PURCHASE", prefix: "PO", flow: "out", posts: true, hasLines: false },
-  { type: "PURCHASE_RETURN", label: "Purchase Return / Dr Note", title: "Purchase Return / Debit Note", slug: "purchase-return", shortcut: "L", group: "PURCHASE", prefix: "DN", flow: "in", posts: true, hasLines: true },
-  { type: "PURCHASE_ORDER", label: "Purchase Order", title: "Purchase Orders", slug: "purchase-order", shortcut: "G", group: "PURCHASE", prefix: "PO", flow: "out", posts: false, hasLines: true },
+  { type: "PURCHASE", label: "Purchase Bill", title: "Purchase Bills", slug: "purchase", group: "PURCHASE", prefix: "PUR", flow: "out", posts: true, hasLines: true },
+  { type: "PAYMENT_OUT", label: "Payment-Out", title: "Payment-Out", slug: "payment-out", group: "PURCHASE", prefix: "PO", flow: "out", posts: true, hasLines: false },
+  { type: "PURCHASE_RETURN", label: "Purchase Return / Dr Note", title: "Purchase Return / Debit Note", slug: "purchase-return", group: "PURCHASE", prefix: "DN", flow: "in", posts: true, hasLines: true },
+  { type: "PURCHASE_ORDER", label: "Purchase Order", title: "Purchase Orders", slug: "purchase-order", group: "PURCHASE", prefix: "PO", flow: "out", posts: false, hasLines: true },
   // ---- Others ----
-  { type: "EXPENSE", label: "Expenses", title: "Expenses", slug: "expenses", shortcut: "E", group: "OTHERS", prefix: "EXP", flow: "out", posts: true, hasLines: true },
-  { type: "PARTY_TRANSFER", label: "Party To Party Transfer", title: "Party To Party Transfer", slug: "party-transfer", shortcut: "J", group: "OTHERS", prefix: "PTP", flow: "out", posts: true, hasLines: false },
+  { type: "EXPENSE", label: "Expenses", title: "Expenses", slug: "expenses", group: "OTHERS", prefix: "EXP", flow: "out", posts: true, hasLines: true },
+  { type: "PARTY_TRANSFER", label: "Party To Party Transfer", title: "Party To Party Transfer", slug: "party-transfer", group: "OTHERS", prefix: "PTP", flow: "out", posts: true, hasLines: false },
 ];
 
 export const docBySlug = (slug: string) => DOC_CONFIGS.find((d) => d.slug === slug);

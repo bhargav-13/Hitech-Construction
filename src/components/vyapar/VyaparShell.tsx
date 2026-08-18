@@ -8,10 +8,12 @@ import { VYAPAR_NAV, DOC_CONFIGS } from "@/lib/vyaparConfig";
 import type { NavNode } from "@/lib/vyaparConfig";
 import { useUiStore } from "@/lib/uiStore";
 import { useVyaparSettings } from "@/lib/useVyaparSettings";
+import { CalculatorPanel } from "@/components/vyapar/CalculatorPanel";
 import {
   BarChart3,
   Boxes,
   Building2,
+  Calculator,
   ChevronDown,
   ChevronRight,
   FileText,
@@ -46,6 +48,7 @@ export function VyaparShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const [addOpen, setAddOpen] = useState(false);
+  const [calcOpen, setCalcOpen] = useState(false);
   // Persisted alongside the main sidebar so both survive route changes.
   const railCollapsed = useUiStore((s) => s.vyaparRailCollapsed);
   const toggleRail = useUiStore((s) => s.toggleVyaparRail);
@@ -126,6 +129,23 @@ export function VyaparShell({ children }: { children: React.ReactNode }) {
               <Plus size={14} /> Add Purchase
             </Link>
 
+            {/* Vyapar puts a calculator in its title bar. Theirs launches the Windows Calculator;
+                a web app can't, so this is our own — see CalculatorPanel. */}
+            <div className="relative">
+              <button
+                onClick={() => setCalcOpen((o) => !o)}
+                title="Calculator"
+                aria-label="Calculator"
+                aria-expanded={calcOpen}
+                className={`flex items-center rounded-lg px-2.5 py-1.5 transition-all duration-150 active:scale-95 ${
+                  calcOpen ? "bg-brand-accent text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                }`}
+              >
+                <Calculator size={15} />
+              </button>
+              {calcOpen && <CalculatorPanel onClose={() => setCalcOpen(false)} />}
+            </div>
+
             {/* Add More — the full quick-create menu, mirroring Vyapar's Ctrl+Enter panel */}
             <div className="relative">
               <button
@@ -152,12 +172,9 @@ export function VyaparShell({ children }: { children: React.ReactNode }) {
                                 key={d.type}
                                 href={`/vyapar/${d.slug}?new=1`}
                                 onClick={() => setAddOpen(false)}
-                                className="flex items-center justify-between rounded-lg px-2 py-1.5 text-sm text-gray-700 transition-colors duration-150 hover:bg-cyan-50 hover:text-brand-accent"
+                                className="flex items-center rounded-lg px-2 py-1.5 text-sm text-gray-700 transition-colors duration-150 hover:bg-cyan-50 hover:text-brand-accent"
                               >
                                 <span className="truncate">{d.label}</span>
-                                <span className="ml-2 shrink-0 rounded bg-gray-100 px-1 text-[10px] text-gray-400">
-                                  Alt+{d.shortcut}
-                                </span>
                               </Link>
                             ))}
                           </div>
