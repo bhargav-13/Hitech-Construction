@@ -46,3 +46,6 @@ next-env.d.ts
 # local reference screenshots, not part of the app
 /screenshot_onsite/
 /docs
+
+# Generated bank-relink SQL — regenerate with scripts/relink-vyapar-bank-accounts.mjs
+fix-banks*.sql
