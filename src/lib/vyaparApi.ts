@@ -508,15 +508,24 @@ export interface LoanAccount {
 }
 
 const CB = `${BASE}`;
-export const getBankAccounts = () => apiRequest<BankAccount[]>(`${CB}/bank-accounts`);
+/**
+ * Bank accounts, with each balance scoped to the selected project when one is set.
+ *
+ * The account *list* never shrinks — an account is a payment method shared across every site — but
+ * the money attributed to it does, so a project shows only what moved through that account on that
+ * project. Unscoped, the figure also includes the account's opening balance and any manual
+ * deposits, neither of which belongs to a single site.
+ */
+export const getBankAccounts = (projectId?: number) =>
+  apiRequest<BankAccount[]>(`${CB}/bank-accounts${qs({ projectId })}`);
 export const createBankAccount = (body: Partial<BankAccount>) =>
   apiRequest<BankAccount>(`${CB}/bank-accounts`, { method: "POST", body });
 export const updateBankAccount = (id: number, body: Partial<BankAccount>) =>
   apiRequest<BankAccount>(`${CB}/bank-accounts/${id}`, { method: "PUT", body });
 export const deleteBankAccount = (id: number) =>
   apiRequest<void>(`${CB}/bank-accounts/${id}`, { method: "DELETE" });
-export const getAccountTxns = (id: number) =>
-  apiRequest<CashBankTxn[]>(`${CB}/bank-accounts/${id}/transactions`);
+export const getAccountTxns = (id: number, projectId?: number) =>
+  apiRequest<CashBankTxn[]>(`${CB}/bank-accounts/${id}/transactions${qs({ projectId })}`);
 
 /** Bank↔cash, bank↔bank transfers and manual balance adjustments. */
 export const postCashBankEntry = (body: {

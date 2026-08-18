@@ -8,6 +8,7 @@ import { SortTh } from "@/components/vyapar/SortTh";
 import { Spinner } from "@/components/Spinner";
 import { useTableSort } from "@/lib/useTableSort";
 import { txnHref } from "@/lib/vyaparLinks";
+import { useVyaparProjectId } from "@/lib/projectScope";
 import { LinkedRow } from "@/components/vyapar/LinkedRow";
 import { inr } from "@/lib/format";
 import { exportRowsToCsv, printRows, downloadPdf } from "@/lib/vyaparExport";
@@ -40,6 +41,10 @@ const ENTRY_LABELS: { kind: EntryKind; label: string }[] = [
 
 /** Bank Accounts — Vyapar's master–detail with the Deposit/Withdraw menu. */
 export default function BankAccountsPage() {
+  // Balances and ledgers follow the header's project scope: on a project you see only the money
+  // that moved through each account on that project. Unscoped adds the opening balance and any
+  // manual deposits, which belong to the account rather than to any one site.
+  const projectId = useVyaparProjectId();
   const [accounts, setAccounts] = useState<BankAccount[]>([]);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [txns, setTxns] = useState<CashBankTxn[]>([]);
@@ -58,7 +63,7 @@ export default function BankAccountsPage() {
     setLoading(true);
     setError("");
     try {
-      const list = await vyapar.getBankAccounts();
+      const list = await vyapar.getBankAccounts(projectId);
       setAccounts(list);
       setSelectedId((cur) => (list.some((a) => a.id === cur) ? cur : list[0]?.id ?? null));
     } catch {
@@ -67,7 +72,7 @@ export default function BankAccountsPage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [projectId]);
 
   useEffect(() => {
     load();
@@ -78,14 +83,14 @@ export default function BankAccountsPage() {
     let cancelled = false;
     setTxnLoading(true);
     vyapar
-      .getAccountTxns(selectedId)
+      .getAccountTxns(selectedId, projectId)
       .then((r) => !cancelled && setTxns(r))
       .catch(() => !cancelled && setTxns([]))
       .finally(() => !cancelled && setTxnLoading(false));
     return () => {
       cancelled = true;
     };
-  }, [selectedId]);
+  }, [selectedId, projectId]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
