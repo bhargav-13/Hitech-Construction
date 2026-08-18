@@ -47,3 +47,13 @@ export function itemLedgerHref(row: Pick<ItemLedgerRow, "type" | "id">): string 
   const slug = LABEL_TO_SLUG[row.type];
   return slug ? `/vyapar/${slug}?open=${row.id}` : null;
 }
+
+/**
+ * The same mapping for any ledger row that carries a document label and an id — the bank and cash
+ * ledgers, for instance. Rows whose type isn't a document ("Bank Adj Increase", "Bank to Bank")
+ * return null and stay inert, which is correct: there is nothing to open.
+ */
+export function txnHref(type: string, id: number): string | null {
+  const slug = LABEL_TO_SLUG[type];
+  return slug ? `/vyapar/${slug}?open=${id}` : null;
+}

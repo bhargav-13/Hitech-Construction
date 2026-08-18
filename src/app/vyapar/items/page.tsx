@@ -13,6 +13,7 @@ import { Spinner } from "@/components/Spinner";
 import { Select } from "@/components/Select";
 import { useTableSort } from "@/lib/useTableSort";
 import { itemLedgerHref } from "@/lib/vyaparLinks";
+import { LinkedRow } from "@/components/vyapar/LinkedRow";
 import { inr } from "@/lib/format";
 import { exportRowsToCsv, printRows, downloadPdf } from "@/lib/vyaparExport";
 import { useItemSettings } from "@/lib/useItemSettings";
@@ -650,7 +651,12 @@ export default function ItemsPage() {
                           {sortedLedger.map((r) => {
                             const href = itemLedgerHref(r);
                             return (
-                            <tr key={r.id} className="border-b border-gray-50 transition-colors duration-150 last:border-b-0 even:bg-gray-50/40 hover:bg-cyan-50/40">
+                            <LinkedRow
+                              key={r.id}
+                              href={href}
+                              title={href ? `Open ${r.type} ${r.ref ?? ""}`.trim() : undefined}
+                              className="border-b border-gray-50 transition-colors duration-150 last:border-b-0 even:bg-gray-50/40 hover:bg-cyan-50/40"
+                            >
                               {/* Vyapar marks each movement with a coloured pip — green for stock
                                   coming in, red for stock going out. */}
                               <td className="px-4 py-2.5 text-gray-700">
@@ -676,7 +682,7 @@ export default function ItemsPage() {
                               <td className="px-4 py-2.5 text-right text-gray-800">{r.quantity}</td>
                               <td className="px-4 py-2.5 text-right text-gray-600">{inr(r.pricePerUnit)}</td>
                               <td className="px-4 py-2.5 text-right text-gray-500">{r.status ?? "—"}</td>
-                            </tr>
+                            </LinkedRow>
                             );
                           })}
                         </tbody>

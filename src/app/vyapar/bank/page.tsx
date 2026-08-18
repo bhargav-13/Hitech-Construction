@@ -7,6 +7,8 @@ import { RowMenu, RowMenuDivider, RowMenuItem } from "@/components/RowMenu";
 import { SortTh } from "@/components/vyapar/SortTh";
 import { Spinner } from "@/components/Spinner";
 import { useTableSort } from "@/lib/useTableSort";
+import { txnHref } from "@/lib/vyaparLinks";
+import { LinkedRow } from "@/components/vyapar/LinkedRow";
 import { inr } from "@/lib/format";
 import { exportRowsToCsv, printRows, downloadPdf } from "@/lib/vyaparExport";
 import { ImportDialog } from "@/components/vyapar/ImportDialog";
@@ -403,14 +405,24 @@ export function TxnTable({
             </thead>
             <tbody>
               {sorted.map((t) => (
-                <tr key={t.id} className="border-b border-gray-50 transition-colors duration-150 last:border-b-0 even:bg-gray-50/40 hover:bg-cyan-50/40">
+                <LinkedRow
+                  // The ledger merges three tables — manual entries, payments and documents — and
+                  // each keeps its own id so the row can still deep-link to the record behind it.
+                  // That means ids collide across sources (payment 378 and sale 378 are different
+                  // rows), so the row's identity is the pair, not the number. Same pair `txnHref`
+                  // uses below.
+                  key={`${t.type}-${t.id}`}
+                  href={txnHref(t.type, t.id)}
+                  title={`Open ${t.type}`}
+                  className="border-b border-gray-50 transition-colors duration-150 last:border-b-0 even:bg-gray-50/40 hover:bg-cyan-50/40"
+                >
                   <td className="px-4 py-2.5 font-medium text-gray-700">{t.type}</td>
                   <td className="px-4 py-2.5 text-gray-600">{t.name ?? "—"}</td>
                   <td className="px-4 py-2.5 text-gray-600">{t.date ?? "—"}</td>
                   <td className={`px-4 py-2.5 text-right font-medium ${t.direction === "in" ? "text-emerald-600" : "text-rose-600"}`}>
                     {inr(t.amount)}
                   </td>
-                </tr>
+                </LinkedRow>
               ))}
             </tbody>
           </table>

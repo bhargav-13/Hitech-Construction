@@ -12,6 +12,7 @@ import { Select } from "@/components/Select";
 import { inr } from "@/lib/format";
 import { useTableSort } from "@/lib/useTableSort";
 import { partyLedgerHref } from "@/lib/vyaparLinks";
+import { LinkedRow } from "@/components/vyapar/LinkedRow";
 import { exportRowsToCsv, printRows, downloadPdf } from "@/lib/vyaparExport";
 import * as vyapar from "@/lib/vyaparApi";
 import type { Party, PartyLedgerRow } from "@/lib/vyaparApi";
@@ -732,8 +733,10 @@ export default function PartiesPage() {
                           {sortedLedger.map((r) => {
                             const href = partyLedgerHref(r);
                             return (
-                              <tr
+                              <LinkedRow
                                 key={`${r.kind}-${r.id}`}
+                                href={href}
+                                title={href ? `Open ${r.type} ${r.number ?? ""}`.trim() : undefined}
                                 className="border-b border-gray-50 transition-colors duration-150 last:border-b-0 even:bg-gray-50/40 hover:bg-cyan-50/40"
                               >
                                 <td className="px-4 py-2.5">
@@ -762,7 +765,7 @@ export default function PartiesPage() {
                                 <td className="px-4 py-2.5">
                                   <LedgerStatus status={r.status} />
                                 </td>
-                              </tr>
+                              </LinkedRow>
                             );
                           })}
                         </tbody>

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { VyaparEmpty } from "@/components/vyapar/VyaparShell";
 import { Drawer, DrawerField } from "@/components/Drawer";
 import { Select } from "@/components/Select";
@@ -32,12 +32,17 @@ import { Download, FileText, Link2, Plus, Search, Upload, Wallet } from "lucide-
 export function PaymentWorkspace({
   direction,
   title,
+  projectId: projectOverride,
 }: {
   direction: "IN" | "OUT";
   title: string;
+  /** Pin to one project — set by the Project workspace, which embeds this surface. */
+  projectId?: number;
 }) {
   const params = useSearchParams();
-  const projectId = useVyaparProjectId();
+  const router = useRouter();
+  const pathname = usePathname();
+  const projectId = useVyaparProjectId(projectOverride);
   const isIn = direction === "IN";
   const [payments, setPayments] = useState<Payment[]>([]);
   const [parties, setParties] = useState<Party[]>([]);
@@ -71,9 +76,17 @@ export function PaymentWorkspace({
     load();
   }, [load]);
 
+  // ?new= opens the create form. The flag is stripped from the URL as soon as it's consumed:
+  // leaving it there means the next Alt+<key> press (or another click on "Add Sale") pushes an
+  // identical URL, `params` never changes, this effect never re-runs, and the shortcut looks dead.
   useEffect(() => {
-    if (params?.get("new") === "1") setCreating(true);
-  }, [params]);
+    if (!params?.get("new")) return;
+    setCreating(true);
+    const rest = new URLSearchParams(params.toString());
+    rest.delete("new");
+    const qs = rest.toString();
+    router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+  }, [params, router, pathname]);
 
   // ?open=<id> — payments have no editor, so we highlight and scroll to the row instead. This is
   // how a party ledger's Payment-In/Out row links back here.
@@ -250,11 +263,14 @@ export function PaymentWorkspace({
             <tbody>
               {sorted.map((p) => {
                 const highlighted = openId != null && String(p.id) === openId;
+                // The whole row opens the receipt, as it does on the document lists — only the
+                // actions cell is carved out so its menu doesn't also navigate.
                 return (
                 <tr
                   key={p.id}
                   ref={highlighted ? highlightRef : undefined}
-                  className={`border-b border-gray-50 transition-colors duration-150 last:border-b-0 even:bg-gray-50/40 hover:bg-cyan-50/40 ${
+                  onClick={() => setRelinking(p)}
+                  className={`cursor-pointer border-b border-gray-50 transition-colors duration-150 last:border-b-0 even:bg-gray-50/40 hover:bg-cyan-50/40 ${
                     highlighted ? "bg-amber-50 ring-2 ring-inset ring-amber-300" : ""
                   }`}
                 >
@@ -269,7 +285,7 @@ export function PaymentWorkspace({
                   <td className={`px-4 py-2.5 text-right ${p.unusedAmount > 0 ? "font-medium text-amber-600" : "text-gray-400"}`}>
                     {p.unusedAmount > 0 ? inr(p.unusedAmount) : "—"}
                   </td>
-                  <td className="px-4 py-2.5">
+                  <td className="px-4 py-2.5" onClick={(ev) => ev.stopPropagation()}>
                     <TxnRowActions
                       kind="PAYMENT"
                       label={p.reference || `${title} ${p.id}`}
