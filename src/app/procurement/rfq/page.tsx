@@ -3,7 +3,8 @@
 import Link from "next/link";
 import { Plus, Scale, Send } from "lucide-react";
 import { ProcurementShell, ProcurementEmpty, ProcurementHeader } from "@/components/procurement/ProcurementShell";
-import { useProcurementStore } from "@/lib/procurementStore";
+import { useRfqs } from "@/lib/useRfqs";
+import { Spinner } from "@/components/Spinner";
 import { RFQ_STATUS_CLS } from "@/lib/procurementConfig";
 import { inr } from "@/lib/format";
 
@@ -15,7 +16,7 @@ import { inr } from "@/lib/format";
  * showing one would invite a decision the comparison screen exists to make properly.
  */
 export default function RfqPage() {
-  const rfqs = useProcurementStore((s) => s.rfqs);
+  const { rfqs, loading, error } = useRfqs();
 
   return (
     <ProcurementShell>
@@ -29,20 +30,28 @@ export default function RfqPage() {
         }
       />
 
-      {rfqs.length === 0 ? (
+      {error && <div className="mb-3 rounded-lg bg-rose-50 px-4 py-2 text-sm text-rose-600">{error}</div>}
+
+      {loading ? (
+        <div className="flex min-h-[240px] items-center justify-center gap-2 rounded-xl border border-dashed border-gray-300 bg-white text-sm text-gray-400">
+          <Spinner size={16} className="text-brand-accent" /> Loading enquiries…
+        </div>
+      ) : rfqs.length === 0 ? (
         <ProcurementEmpty icon={Send} title="No enquiries yet" hint="Raise an RFQ to ask suppliers for a price." />
       ) : (
         <div className="space-y-3">
           {rfqs.map((r) => {
-            const decided = r.lines.filter((l) => l.awardedTo).length;
+            const decided = r.lines.filter((l) => l.awardedVendorPartyId != null).length;
             // The cheapest and dearest way to buy the whole enquiry, line by line.
             const range = r.lines.reduce(
-              (acc, line, i) => {
-                const rates = r.quotes.map((q) => q.lines[i]?.rate).filter((x): x is number => x != null);
+              (acc, line) => {
+                const rates = r.quotes
+                  .map((q) => q.lines.find((c) => c.rfqLineId === line.id)?.rate)
+                  .filter((x): x is number => x != null);
                 if (!rates.length) return acc;
                 return {
-                  low: acc.low + Math.min(...rates) * line.qty,
-                  high: acc.high + Math.max(...rates) * line.qty,
+                  low: acc.low + Math.min(...rates) * line.quantity,
+                  high: acc.high + Math.max(...rates) * line.quantity,
                 };
               },
               { low: 0, high: 0 },
@@ -53,14 +62,14 @@ export default function RfqPage() {
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
-                      <span className="text-sm font-semibold text-gray-800">{r.number}</span>
+                      <span className="text-sm font-semibold text-gray-800">{r.rfqNo}</span>
                       <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ring-1 ring-inset ${RFQ_STATUS_CLS[r.status]}`}>
                         {r.status}
                       </span>
                     </div>
                     <div className="mt-0.5 text-sm text-gray-600">{r.title}</div>
                     <div className="mt-0.5 text-xs text-gray-400">
-                      {r.project} · raised {r.date}
+                      raised {r.rfqDate}
                       {r.dueBy && <> · replies due {r.dueBy}</>}
                     </div>
                   </div>

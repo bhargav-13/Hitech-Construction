@@ -4,7 +4,7 @@ import { useMemo } from "react";
 import Link from "next/link";
 import { ArrowRight, FileText, Send, Users } from "lucide-react";
 import { ProcurementShell } from "@/components/procurement/ProcurementShell";
-import { useProcurementStore } from "@/lib/procurementStore";
+import { useRfqs } from "@/lib/useRfqs";
 import { RFQ_STATUS_CLS } from "@/lib/procurementConfig";
 import { inr } from "@/lib/format";
 
@@ -18,24 +18,26 @@ import { inr } from "@/lib/format";
  * disagreeing.
  */
 export default function ProcurementDashboard() {
-  const rfqs = useProcurementStore((s) => s.rfqs);
+  const { rfqs, error } = useRfqs();
 
   const m = useMemo(() => {
     const awaiting = rfqs.filter((r) => r.status === "Sent").length;
     const toDecide = rfqs.filter((r) => r.status === "Responses In");
     // Lines with quotes in but no vendor chosen — the actual work sitting on someone's desk.
     const undecidedLines = toDecide.reduce(
-      (s, r) => s + r.lines.filter((l) => !l.awardedTo).length,
+      (s, r) => s + r.lines.filter((l) => l.awardedVendorPartyId == null).length,
       0,
     );
     // Value at stake on those lines, costed at the cheapest quote each.
     const atStake = toDecide.reduce((s, r) => {
       return (
         s +
-        r.lines.reduce((ls, line, i) => {
-          if (line.awardedTo) return ls;
-          const rates = r.quotes.map((q) => q.lines[i]?.rate).filter((x): x is number => x != null);
-          return ls + (rates.length ? Math.min(...rates) * line.qty : 0);
+        r.lines.reduce((ls, line) => {
+          if (line.awardedVendorPartyId != null) return ls;
+          const rates = r.quotes
+            .map((q) => q.lines.find((c) => c.rfqLineId === line.id)?.rate)
+            .filter((x): x is number => x != null);
+          return ls + (rates.length ? Math.min(...rates) * line.quantity : 0);
         }, 0)
       );
     }, 0);
@@ -60,6 +62,8 @@ export default function ProcurementDashboard() {
           <Tile label="Value at stake" value={inr(m.atStake)} hint="Undecided lines, at the cheapest quote" />
         </div>
 
+        {error && <div className="rounded-lg bg-rose-50 px-4 py-2 text-sm text-rose-600">{error}</div>}
+
         {/* What needs a decision, and nothing else */}
         <div className="rounded-xl border border-gray-200 bg-white">
           <div className="flex items-center justify-between border-b border-gray-100 px-4 py-3">
@@ -73,7 +77,7 @@ export default function ProcurementDashboard() {
           ) : (
             <div className="divide-y divide-gray-50">
               {m.toDecide.map((r) => {
-                const undecided = r.lines.filter((l) => !l.awardedTo).length;
+                const undecided = r.lines.filter((l) => l.awardedVendorPartyId == null).length;
                 return (
                   <Link
                     key={r.id}
@@ -82,13 +86,13 @@ export default function ProcurementDashboard() {
                   >
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
-                        <span className="text-sm font-medium text-gray-800">{r.number}</span>
+                        <span className="text-sm font-medium text-gray-800">{r.rfqNo}</span>
                         <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ring-1 ring-inset ${RFQ_STATUS_CLS[r.status]}`}>
                           {r.status}
                         </span>
                       </div>
                       <div className="mt-0.5 truncate text-xs text-gray-400">
-                        {r.title} · {r.project}
+                        {r.title}
                       </div>
                     </div>
                     <div className="text-right text-xs text-gray-500">

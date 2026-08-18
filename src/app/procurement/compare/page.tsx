@@ -4,11 +4,12 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { AlertTriangle, ArrowRight, Check, FileDown, Scale, Zap } from "lucide-react";
 import { ProcurementShell, ProcurementEmpty, ProcurementHeader } from "@/components/procurement/ProcurementShell";
+import { Spinner } from "@/components/Spinner";
 import { Select } from "@/components/Select";
-import { useProcurementStore } from "@/lib/procurementStore";
+import { useRfqs } from "@/lib/useRfqs";
 import { downloadPdf } from "@/lib/vyaparExport";
 import { inr } from "@/lib/format";
-import type { Rfq, VendorQuote } from "@/lib/procurementTypes";
+import type { Rfq, Quote } from "@/lib/procurementApi";
 
 /**
  * Comparative statement — the screen the whole module exists for.
@@ -36,17 +37,28 @@ import type { Rfq, VendorQuote } from "@/lib/procurementTypes";
 const LEVEL_BAND = 0.02;
 
 export default function ComparePage() {
-  const rfqs = useProcurementStore((s) => s.rfqs);
-  const awardLine = useProcurementStore((s) => s.awardLine);
+  const { rfqs, loading, error, award } = useRfqs();
 
   const comparable = useMemo(() => rfqs.filter((r) => r.quotes.length > 0), [rfqs]);
-  const [selectedId, setSelectedId] = useState(comparable[0]?.id ?? "");
+  const [selectedId, setSelectedId] = useState<number | null>(null);
   const rfq = comparable.find((r) => r.id === selectedId) ?? comparable[0];
+
+  if (loading) {
+    return (
+      <ProcurementShell>
+        <ProcurementHeader title="Comparison" subtitle="Compare what each supplier quoted, line by line." />
+        <div className="flex min-h-[240px] items-center justify-center gap-2 rounded-xl border border-dashed border-gray-300 bg-white text-sm text-gray-400">
+          <Spinner size={16} className="text-brand-accent" /> Loading quotes…
+        </div>
+      </ProcurementShell>
+    );
+  }
 
   if (!rfq) {
     return (
       <ProcurementShell>
         <ProcurementHeader title="Comparison" subtitle="Compare what each supplier quoted, line by line." />
+        {error && <div className="mb-3 rounded-lg bg-rose-50 px-4 py-2 text-sm text-rose-600">{error}</div>}
         <ProcurementEmpty icon={Scale} title="Nothing to compare yet" hint="Quotes received against an RFQ show here." />
       </ProcurementShell>
     );
@@ -60,15 +72,15 @@ export default function ComparePage() {
         right={
           <div className="flex items-center gap-2">
             <Select
-              value={rfq.id}
-              onChange={setSelectedId}
+              value={String(rfq.id)}
+              onChange={(v) => setSelectedId(Number(v))}
               className="min-w-[240px]"
-              options={comparable.map((r) => ({ value: r.id, label: `${r.number} · ${r.title}` }))}
+              options={comparable.map((r) => ({ value: String(r.id), label: `${r.rfqNo} · ${r.title}` }))}
             />
           </div>
         }
       />
-      <Matrix key={rfq.id} rfq={rfq} onAward={awardLine} />
+      <Matrix key={rfq.id} rfq={rfq} onAward={award} />
     </ProcurementShell>
   );
 }
@@ -76,12 +88,11 @@ export default function ComparePage() {
 // =====================================================================================
 
 /** One vendor's priced total for the whole enquiry, and per line. */
-function quoteTotals(rfq: Rfq, q: VendorQuote) {
-  const lineTotals = rfq.lines.map((l, i) => {
-    const rate = q.lines[i]?.rate;
-    if (rate == null) return null;
-    const qty = q.lines[i]?.qty ?? l.qty;
-    return rate * qty;
+function quoteTotals(rfq: Rfq, q: Quote) {
+  const lineTotals = rfq.lines.map((l) => {
+    const cell = q.lines.find((c) => c.rfqLineId === l.id);
+    if (cell?.rate == null) return null;
+    return cell.rate * (cell.quantity ?? l.quantity);
   });
   const subtotal = lineTotals.reduce<number>((s, t) => s + (t ?? 0), 0);
   const afterDiscount = subtotal - (q.discount ?? 0) + (q.charges ?? 0);
@@ -94,17 +105,27 @@ function Matrix({
   onAward,
 }: {
   rfq: Rfq;
-  onAward: (rfqId: string, lineIndex: number, vendor: string | null, reason?: string) => void;
+  onAward: (rfqId: number, lineId: number, vendorPartyId: number | null, reason?: string) => void;
 }) {
   const totals = useMemo(() => rfq.quotes.map((q) => quoteTotals(rfq, q)), [rfq]);
 
   /** Per line: the best rate offered, and which vendors are within the tolerance band of it. */
   const perLine = useMemo(
     () =>
-      rfq.lines.map((line, i) => {
+      rfq.lines.map((line) => {
         const offers = rfq.quotes
-          .map((q, qi) => ({ qi, vendor: q.vendor, rate: q.lines[i]?.rate ?? null }))
-          .filter((o) => o.rate != null) as { qi: number; vendor: string; rate: number }[];
+          .map((q, qi) => ({
+            qi,
+            vendorPartyId: q.vendorPartyId,
+            vendorName: q.vendorName,
+            rate: q.lines.find((c) => c.rfqLineId === line.id)?.rate ?? null,
+          }))
+          .filter((o) => o.rate != null) as {
+          qi: number;
+          vendorPartyId: number;
+          vendorName: string;
+          rate: number;
+        }[];
         const best = offers.length ? Math.min(...offers.map((o) => o.rate)) : null;
         const level = new Set(
           best == null ? [] : offers.filter((o) => o.rate <= best * (1 + LEVEL_BAND)).map((o) => o.qi),
@@ -124,18 +145,18 @@ function Matrix({
     for (let i = 0; i < rfq.lines.length; i++) {
       const line = rfq.lines[i];
       const { best, cheapest: cheapestOffer } = perLine[i];
-      if (best != null) cheapest += best * line.qty;
-      if (line.budgetRate != null) budget += line.budgetRate * line.qty;
-      const chosen = line.awardedTo;
-      if (chosen) {
+      if (best != null) cheapest += best * line.quantity;
+      if (line.budgetRate != null) budget += line.budgetRate * line.quantity;
+      const chosen = line.awardedVendorPartyId;
+      if (chosen != null) {
         decided += 1;
-        const qi = rfq.quotes.findIndex((q) => q.vendor === chosen);
-        const rate = qi >= 0 ? rfq.quotes[qi].lines[i]?.rate : null;
-        selected += (rate ?? 0) * line.qty;
+        const q = rfq.quotes.find((x) => x.vendorPartyId === chosen);
+        const rate = q?.lines.find((c) => c.rfqLineId === line.id)?.rate ?? null;
+        selected += (rate ?? 0) * line.quantity;
       } else if (cheapestOffer) {
         // Undecided lines are costed at the cheapest offer, so the running total means something
         // before every row has been settled.
-        selected += cheapestOffer.rate * line.qty;
+        selected += cheapestOffer.rate * line.quantity;
       }
     }
     return { selected, cheapest, budget, decided, of: rfq.lines.length };
@@ -144,39 +165,40 @@ function Matrix({
   /** Awarding produces one purchase order per winning vendor. */
   const byVendor = useMemo(() => {
     const map = new Map<string, { lines: string[]; value: number }>();
-    rfq.lines.forEach((line, i) => {
-      if (!line.awardedTo) return;
-      const qi = rfq.quotes.findIndex((q) => q.vendor === line.awardedTo);
-      const rate = qi >= 0 ? rfq.quotes[qi].lines[i]?.rate ?? 0 : 0;
-      const cur = map.get(line.awardedTo) ?? { lines: [], value: 0 };
+    rfq.lines.forEach((line) => {
+      if (line.awardedVendorPartyId == null) return;
+      const q = rfq.quotes.find((x) => x.vendorPartyId === line.awardedVendorPartyId);
+      const rate = q?.lines.find((c) => c.rfqLineId === line.id)?.rate ?? 0;
+      const name = line.awardedVendorName ?? q?.vendorName ?? "Vendor";
+      const cur = map.get(name) ?? { lines: [], value: 0 };
       cur.lines.push(line.itemName);
-      cur.value += rate * line.qty;
-      map.set(line.awardedTo, cur);
+      cur.value += rate * line.quantity;
+      map.set(name, cur);
     });
     return [...map.entries()];
   }, [rfq]);
 
   function awardAllCheapest() {
     perLine.forEach((p, i) => {
-      if (p.cheapest) onAward(rfq.id, i, p.cheapest.vendor, "Lowest quote");
+      if (p.cheapest) onAward(rfq.id, rfq.lines[i].id, p.cheapest.vendorPartyId, "Lowest quote");
     });
   }
 
   function exportPdf() {
-    const head = ["Item", "Qty", ...rfq.quotes.map((q) => q.vendor)];
-    const rows = rfq.lines.map((line, i) => [
+    const head = ["Item", "Qty", ...rfq.quotes.map((q) => q.vendorName)];
+    const rows = rfq.lines.map((line) => [
       line.itemName,
-      `${line.qty} ${line.unit}`,
+      `${line.quantity} ${line.unit ?? ""}`.trim(),
       ...rfq.quotes.map((q) => {
-        const r = q.lines[i]?.rate;
+        const r = q.lines.find((c) => c.rfqLineId === line.id)?.rate;
         return r == null ? "No quote" : inr(r);
       }),
     ]);
     rows.push(["Total", "", ...totals.map((t) => inr(t.total))]);
     rows.push(["Awarded to", "", ...rfq.quotes.map((q) =>
-      rfq.lines.some((l) => l.awardedTo === q.vendor) ? "Yes" : "—")]);
-    downloadPdf(`Comparative Statement — ${rfq.number}`, head, rows, {
-      subtitle: `${rfq.title} · ${rfq.project}`,
+      rfq.lines.some((l) => l.awardedVendorPartyId === q.vendorPartyId) ? "Yes" : "—")]);
+    downloadPdf(`Comparative Statement — ${rfq.rfqNo}`, head, rows, {
+      subtitle: rfq.title,
       rightAlignFrom: 2,
     });
   }
@@ -214,8 +236,8 @@ function Matrix({
                 Item
               </th>
               {rfq.quotes.map((q, qi) => (
-                <th key={q.vendor} className="min-w-[190px] border-l border-gray-200 px-4 py-3 text-left align-top">
-                  <div className="font-semibold text-gray-800">{q.vendor}</div>
+                <th key={q.id} className="min-w-[190px] border-l border-gray-200 px-4 py-3 text-left align-top">
+                  <div className="font-semibold text-gray-800">{q.vendorName}</div>
                   <div className="mt-0.5 text-[11px] font-normal text-gray-400">
                     Quote {q.version}
                     {q.receivedOn && <> · {q.receivedOn}</>}
@@ -224,8 +246,8 @@ function Matrix({
                     {q.deliveryDays != null && (
                       <span className="rounded bg-gray-100 px-1.5 py-0.5 text-gray-600">{q.deliveryDays}d delivery</span>
                     )}
-                    {q.rating != null && (
-                      <span className="rounded bg-gray-100 px-1.5 py-0.5 text-gray-600">★ {q.rating}/5</span>
+                    {!!q.discount && (
+                      <span className="rounded bg-gray-100 px-1.5 py-0.5 text-gray-600">disc {inr(q.discount)}</span>
                     )}
                   </div>
                   <div className="mt-1.5 text-xs font-semibold text-gray-700">{inr(totals[qi].total)}</div>
@@ -243,26 +265,26 @@ function Matrix({
                   <td className="sticky left-0 z-10 bg-white px-4 py-3">
                     <div className="font-medium text-gray-800">{line.itemName}</div>
                     <div className="mt-0.5 text-xs text-gray-400">
-                      {line.qty} {line.unit}
-                      {line.budgetRate != null && <> · budget {inr(line.budgetRate)}/{line.unit}</>}
+                      {line.quantity} {line.unit ?? ""}
+                      {line.budgetRate != null && <> · budget {inr(line.budgetRate)}</>}
                     </div>
                     <div className="mt-2">
                       <Select
-                        value={line.awardedTo ?? ""}
-                        onChange={(v) => onAward(rfq.id, i, v || null)}
+                        value={line.awardedVendorPartyId != null ? String(line.awardedVendorPartyId) : ""}
+                        onChange={(v) => onAward(rfq.id, line.id, v ? Number(v) : null)}
                         size="sm"
                         placeholder="Not decided"
                         className="w-full"
                         options={[
                           { value: "", label: "Not decided" },
-                          ...offers.map((o) => ({ value: o.vendor, label: o.vendor })),
+                          ...offers.map((o) => ({ value: String(o.vendorPartyId), label: o.vendorName })),
                         ]}
                       />
                     </div>
-                    {line.awardedTo && (
+                    {line.awardedVendorPartyId != null && (
                       <input
-                        value={line.awardReason ?? ""}
-                        onChange={(e) => onAward(rfq.id, i, line.awardedTo ?? null, e.target.value)}
+                        defaultValue={line.awardReason ?? ""}
+                        onBlur={(e) => onAward(rfq.id, line.id, line.awardedVendorPartyId, e.target.value)}
                         placeholder="Reason (optional)"
                         className="mt-1.5 w-full rounded-md border border-gray-200 px-2 py-1 text-xs outline-none focus:border-cyan-500"
                       />
@@ -271,13 +293,13 @@ function Matrix({
 
                   {/* One cell per vendor */}
                   {rfq.quotes.map((q, qi) => {
-                    const cell = q.lines[i];
+                    const cell = q.lines.find((c) => c.rfqLineId === line.id);
                     const rate = cell?.rate ?? null;
-                    const won = line.awardedTo === q.vendor;
+                    const won = line.awardedVendorPartyId === q.vendorPartyId;
 
                     if (rate == null) {
                       return (
-                        <td key={q.vendor} className="border-l border-gray-100 px-4 py-3">
+                        <td key={q.id} className="border-l border-gray-100 px-4 py-3">
                           <span className="text-xs text-gray-400 italic">No quote</span>
                           {cell?.note && <div className="mt-0.5 text-[11px] text-gray-400">{cell.note}</div>}
                         </td>
@@ -291,16 +313,16 @@ function Matrix({
 
                     return (
                       <td
-                        key={q.vendor}
+                        key={q.id}
                         className={`border-l border-gray-100 px-4 py-3 transition-colors duration-150 ${
                           won ? "bg-emerald-50/70 ring-1 ring-inset ring-emerald-500/30" : isBest ? "bg-emerald-50/30" : ""
                         }`}
                       >
                         <div className={`tabular-nums ${isBest ? "font-semibold text-gray-900" : "text-gray-700"}`}>
                           {inr(rate)}
-                          <span className="text-xs font-normal text-gray-400">/{line.unit}</span>
+                          {line.unit && <span className="text-xs font-normal text-gray-400">/{line.unit}</span>}
                         </div>
-                        <div className="mt-0.5 text-xs text-gray-500 tabular-nums">{inr(rate * line.qty)}</div>
+                        <div className="mt-0.5 text-xs text-gray-500 tabular-nums">{inr(rate * line.quantity)}</div>
 
                         {/* Signals: always a word, never colour alone. */}
                         <div className="mt-1.5 flex flex-wrap gap-1">
@@ -347,7 +369,7 @@ function Matrix({
                 Discount · Charges · Tax
               </td>
               {rfq.quotes.map((q, qi) => (
-                <td key={q.vendor} className="border-l border-gray-100 px-4 py-3 text-gray-600 tabular-nums">
+                <td key={q.id} className="border-l border-gray-100 px-4 py-3 text-gray-600 tabular-nums">
                   <div>Sub {inr(totals[qi].subtotal)}</div>
                   {!!q.discount && <div className="text-emerald-700">− {inr(q.discount)} discount</div>}
                   {!!q.charges && <div>+ {inr(q.charges)} charges</div>}

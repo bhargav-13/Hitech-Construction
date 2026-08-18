@@ -5,7 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { AppShell } from "@/components/AppShell";
 import { useUiStore } from "@/lib/uiStore";
-import { useProcurementStore } from "@/lib/procurementStore";
+import { useRfqs } from "@/lib/useRfqs";
 import { PROCUREMENT_NAV } from "@/lib/procurementConfig";
 import type { ProcNavNode } from "@/lib/procurementConfig";
 import {
@@ -42,7 +42,7 @@ export function ProcurementShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const railCollapsed = useUiStore((s) => s.procurementRailCollapsed);
   const toggleRail = useUiStore((s) => s.toggleProcurementRail);
-  const rfqs = useProcurementStore((s) => s.rfqs);
+  const { rfqs } = useRfqs();
 
   // One counter left: enquiries sent with nothing back. The others counted purchase orders and
   // receipts, which this module no longer holds.
