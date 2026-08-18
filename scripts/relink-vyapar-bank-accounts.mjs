@@ -42,6 +42,9 @@ const FILE = fileArg >= 0 ? args[fileArg + 1] : null;
 const WRITE = args.includes("--write");
 const sqlOutArg = args.indexOf("--sql-out");
 const SQL_OUT = sqlOutArg >= 0 ? args[sqlOutArg + 1] : null;
+/** Same SQL, shaped as a Flyway migration: no transaction control, no report queries. */
+const flywayArg = args.indexOf("--flyway-out");
+const FLYWAY_OUT = flywayArg >= 0 ? args[flywayArg + 1] : null;
 /**
  * How to reach Postgres. Defaults to the local Docker container; override for any other
  * environment, e.g. on UAT:
@@ -178,8 +181,8 @@ function main() {
   }
 
   // ---- Portable SQL, for a psql prompt on another environment ----
-  if (SQL_OUT) {
-    writeSqlScript(vyaparRows);
+  if (SQL_OUT || FLYWAY_OUT) {
+    writeSqlScript(vyaparRows, { flyway: !!FLYWAY_OUT, out: FLYWAY_OUT ?? SQL_OUT });
     return;
   }
 
@@ -211,16 +214,21 @@ function main() {
 
 main();
 
+
 /**
- * Emit a SQL script that carries Vyapar's account-per-transaction facts and does the matching
- * itself, against whatever database it is run on.
+ * Emit SQL that carries Vyapar's account-per-transaction facts and does the matching itself,
+ * against whatever database it is run on.
  *
  * The matching rule is identical to the JavaScript above — pair on (type, date, party, amount),
  * and where a tuple repeats, pair them off in order — expressed as ROW_NUMBER on both sides. That
- * is what makes the file safe to carry between environments: it never names a row id, so it cannot
- * mislink records whose ids differ from the machine that generated it.
+ * is what makes the output safe to carry between environments: it never names a row id, so it
+ * cannot mislink records whose ids differ from the machine that generated it.
+ *
+ * Two shapes. `--sql-out` is standalone: wrapped in a transaction, ends in ROLLBACK, and prints a
+ * report, for pasting into a psql prompt. `--flyway-out` drops the transaction control (Flyway
+ * supplies its own) and the report queries, for committing as a migration.
  */
-function writeSqlScript(vyaparRows) {
+function writeSqlScript(vyaparRows, { flyway = false, out = SQL_OUT } = {}) {
   const q = (v) => (v === null || v === undefined ? "NULL" : `'${String(v).replace(/'/g, "''")}'`);
   const values = [];
   let seq = 0;
@@ -229,8 +237,9 @@ function writeSqlScript(vyaparRows) {
   for (const t of vyaparRows) {
     const docType = DOC_TYPE[t.txn_type];
     const payDir = PAY_TYPE[t.txn_type];
-    if ((!docType && !payDir) || !t.account) {
-      if (docType || payDir) skipped += 1;
+    if (!docType && !payDir) continue;
+    if (!t.account) {
+      skipped += 1;
       continue;
     }
     const amount = docType
@@ -242,29 +251,39 @@ function writeSqlScript(vyaparRows) {
     );
   }
 
-  const sql = `-- Repair the bank account on every migrated document and receipt.
---
--- Generated from Vyapar's own backup by scripts/relink-vyapar-bank-accounts.mjs.
--- Safe to run on any environment: it matches rows by (type, date, party, amount), never by id.
---
--- Paste the whole file into a psql prompt. It ends in ROLLBACK, so the first run only prints the
--- report. Read that, then change the last line to COMMIT and run it again.
---
--- ${seq} transactions carried${skipped ? `, ${skipped} skipped (no payment account in Vyapar)` : ""}.
+  const carried = `-- ${seq} transactions carried` + (skipped ? `, ${skipped} skipped (no payment account in Vyapar).` : ".");
 
-BEGIN;
+  const why = [
+    "-- Repair the bank account on every migrated document and receipt.",
+    "--",
+    "-- Why this is needed: migrate-from-vyapar.mjs read the payment account from",
+    "-- kb_transactions.txn_payment_type_id, which is NULL on every row. Vyapar keeps the account in",
+    "-- txn_payment_mapping, because one transaction can be split across payment types. Every receipt",
+    "-- therefore landed with no account, and the Banks screen showed 0.000 against accounts holding",
+    "-- crores.",
+    "--",
+    "-- Generated from Vyapar's own backup by scripts/relink-vyapar-bank-accounts.mjs.",
+    "-- Safe on any environment: rows are matched on (type, date, party, amount) with ROW_NUMBER on",
+    "-- both sides, never by id. On a database with no Vyapar books it matches nothing and does nothing.",
+    "--",
+    carried,
+  ].join("\n");
 
+  const flywayNote = [
+    "--",
+    "-- This is a data repair, not a schema change. It lives as a migration because the facts it",
+    "-- carries exist only in Vyapar's backup file, which no server has a copy of.",
+    "--",
+    "-- Flyway wraps each migration in its own transaction, so there is no BEGIN/COMMIT here.",
+  ].join("\n");
+
+  const body = `
 CREATE TEMP TABLE vy_src (
   seq int, kind text, kind_type text, day text, amt bigint, party text, account text
 ) ON COMMIT DROP;
 
 INSERT INTO vy_src (seq, kind, kind_type, day, amt, party, account) VALUES
 ${values.join(",\n")};
-
--- Any account name Vyapar used that this database has never heard of. Should be empty.
-SELECT DISTINCT s.account AS unknown_account_in_erp
-  FROM vy_src s
- WHERE NOT EXISTS (SELECT 1 FROM vyapar_bank_accounts a WHERE lower(btrim(a.name)) = s.account);
 
 -- ---- Documents ----
 WITH src AS (
@@ -313,7 +332,9 @@ UPDATE vyapar_payments y
             AND t.party = s.party AND t.rn = s.rn
   JOIN vyapar_bank_accounts a ON lower(btrim(a.name)) = s.account
  WHERE y.id = t.id;
+`;
 
+  const report = `
 -- ---- Report: read this before committing ----
 SELECT (SELECT count(*) FROM vyapar_payments WHERE bank_account_id IS NULL) AS payments_still_unlinked,
        (SELECT count(*) FROM vyapar_invoices WHERE bank_account_id IS NULL) AS documents_still_unlinked;
@@ -333,8 +354,11 @@ SELECT a.name,
 ROLLBACK;
 `;
 
-  fs.writeFileSync(SQL_OUT, sql, "utf8");
-  console.log(`\nWrote ${SQL_OUT}`);
+  const sql = flyway
+    ? `${why}\n${flywayNote}\n${body}`
+    : `${why}\n--\n-- Paste the whole file into a psql prompt. It ends in ROLLBACK, so the first run only prints\n-- the report. Read that, then change the last line to COMMIT and run it again.\n\nBEGIN;\n${body}${report}`;
+
+  fs.writeFileSync(out, sql, "utf8");
+  console.log(`\nWrote ${out}`);
   console.log(`  ${seq} transactions carried${skipped ? `, ${skipped} skipped (no account in Vyapar)` : ""}.`);
-  console.log("  Paste it into a psql prompt. It ends in ROLLBACK — read the report, then change it to COMMIT.");
 }
