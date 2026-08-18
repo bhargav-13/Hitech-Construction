@@ -3,37 +3,29 @@
 import { useState } from "react";
 import { AppShell } from "@/components/AppShell";
 import { Select } from "@/components/Select";
-import { MasterLibrary } from "@/components/library/MasterLibrary";
 import { MaterialCategoryLibrary } from "@/components/library/MaterialCategoryLibrary";
 import { MaterialLibrary } from "@/components/library/MaterialLibrary";
 import { PartyLibrary } from "@/components/library/PartyLibrary";
-import { MASTER_LIBRARIES, type MasterLibraryId } from "@/lib/masterLibraries";
 
 /**
  * Library — the hub for shared master data, with the sub-library picked from the dropdown at the top.
  *
- * Three kinds sit behind that one dropdown:
- *  - "party" and "material" read records that already exist elsewhere (members + Vyapar parties,
- *    Vyapar items) rather than keeping a second copy;
- *  - "material-category" edits the category master the Vyapar item form shares;
- *  - everything else is schema-driven — see lib/masterLibraries.ts.
+ * Only libraries backed by real records are listed. There were nine more (cost codes, rates,
+ * retention policies and so on) built as schema-driven tables over browser storage; they looked
+ * finished but held seeded sample rows that lived on one machine and were never on the server, so
+ * they have been removed rather than left to be mistaken for real data. They come back when they
+ * have tables behind them.
+ *
+ * What remains reads records that already exist elsewhere instead of keeping a second copy:
+ * parties from Members and Vyapar, materials from the Vyapar item catalogue, and the material
+ * categories the Vyapar item form itself offers.
  */
-type LibKey = MasterLibraryId | "party" | "material" | "material-category";
+type LibKey = "party" | "material" | "material-category";
 
-/** Dropdown order follows the reference list, not the code's grouping. */
 const OPTIONS: { value: LibKey; label: string }[] = [
-  { value: "asset-type", label: "Asset Type Library" },
-  { value: "cost-code", label: "Cost Code Library" },
-  { value: "deduction", label: "Deduction Library" },
-  { value: "material-category", label: "Material Category Library" },
-  { value: "material", label: "Material Library" },
   { value: "party", label: "Party Library" },
-  { value: "progress", label: "Progress Library" },
-  { value: "rate", label: "Rate Library" },
-  { value: "subcontractor-rate", label: "Subcontractor Rate Library" },
-  { value: "retention", label: "Retention Library" },
-  { value: "todo", label: "Todo Library" },
-  { value: "workforce", label: "Workforce Library" },
+  { value: "material", label: "Material Library" },
+  { value: "material-category", label: "Material Category Library" },
 ];
 
 export default function LibraryPage() {
@@ -42,21 +34,14 @@ export default function LibraryPage() {
   return (
     <AppShell title="Library">
       <div className="space-y-4">
-        <Select
-          value={lib}
-          onChange={(v) => setLib(v as LibKey)}
-          className="w-full sm:w-72"
-          options={OPTIONS}
-        />
+        <Select value={lib} onChange={(v) => setLib(v as LibKey)} className="w-full sm:w-72" options={OPTIONS} />
 
         {lib === "party" ? (
           <PartyLibrary />
         ) : lib === "material" ? (
           <MaterialLibrary />
-        ) : lib === "material-category" ? (
-          <MaterialCategoryLibrary />
         ) : (
-          <MasterLibrary key={lib} spec={MASTER_LIBRARIES[lib]} />
+          <MaterialCategoryLibrary />
         )}
       </div>
     </AppShell>
