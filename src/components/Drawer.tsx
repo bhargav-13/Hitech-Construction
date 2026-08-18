@@ -16,6 +16,7 @@ export function Drawer({
   saveAndNewLabel = "Save & New",
   dirty = false,
   width = "max-w-xl",
+  footer,
   children,
 }: {
   title: string;
@@ -32,6 +33,12 @@ export function Drawer({
    */
   dirty?: boolean;
   width?: string;
+  /**
+   * Optional sticky action bar pinned to the bottom of the drawer. Vyapar's document forms carry a
+   * second row of actions down there (LINK PAYMENT on the left, Print ▾ on the right) separate from
+   * the primary Save; this is where those go.
+   */
+  footer?: React.ReactNode;
   children: React.ReactNode;
 }) {
   const { closing, requestClose } = useDrawerDismiss(onClose);
@@ -85,6 +92,11 @@ export function Drawer({
           </div>
         </div>
         <div className="flex-1 overflow-y-auto px-6 py-5">{children}</div>
+        {footer && (
+          <div className="flex flex-wrap items-center justify-between gap-2 border-t border-gray-200 bg-gray-50 px-6 py-3">
+            {footer}
+          </div>
+        )}
       </div>
     </div>
   );

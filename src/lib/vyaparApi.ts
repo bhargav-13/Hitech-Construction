@@ -137,6 +137,10 @@ export interface InvoiceLine {
   discountPercent: number;
   discountAmount: number;
   taxPercent: number;
+  /** The GST code picked in the Tax column ("GST@18%", "IGST@18%", "EXEMPTED", "NONE"). */
+  taxCode: string | null;
+  /** Purchase lines only — the input-tax-credit claim. See lib/gstRates.ts. */
+  itcEligibility: string | null;
   taxAmount: number;
   amount: number;
 }
@@ -171,6 +175,12 @@ export interface Invoice {
   /** Cancelled documents keep their number but stop counting towards balances and stock. */
   cancelled: boolean;
   notes: string | null;
+  /** Vyapar's ADD DESCRIPTION — free text carried with the document. */
+  description: string | null;
+  /** ADD IMAGE / ADD DOCUMENT, held inline as data URLs (same approach as the firm logo). */
+  imageDataUrl: string | null;
+  documentName: string | null;
+  documentDataUrl: string | null;
   /** The bank/cash account used to settle this document (a payment method, not the scope). */
   bankAccountId: number | null;
   /** The construction project this document belongs to (null = unassigned / All Projects). */
@@ -280,6 +290,10 @@ export interface InvoiceInput {
   terms?: string | null;
   roundOff?: number;
   notes?: string | null;
+  description?: string | null;
+  imageDataUrl?: string | null;
+  documentName?: string | null;
+  documentDataUrl?: string | null;
   /** The bank/cash account used to settle this document (a payment method, not the scope). */
   bankAccountId?: number | null;
   /** The construction project this document belongs to (undefined/null = All Projects). */
@@ -294,6 +308,8 @@ export interface InvoiceInput {
     discountPercent?: number;
     discountAmount?: number;
     taxPercent: number;
+    taxCode?: string | null;
+    itcEligibility?: string | null;
   }[];
 }
 

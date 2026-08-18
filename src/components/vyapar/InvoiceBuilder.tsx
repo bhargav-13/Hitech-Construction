@@ -11,22 +11,67 @@ import { LinkPaymentDialog } from "@/components/vyapar/LinkPaymentDialog";
 // Aliased: `calc` below uses a local `qty` accumulator, and shadowing the formatter would be a trap.
 import { inr, qty as formatQty } from "@/lib/format";
 import { usePaymentTypeOptions } from "@/lib/bankScope";
+import { GST_RATE_OPTIONS, ITC_ELIGIBILITY, ITC_DEFAULT, gstCodeForPercent, gstPercent } from "@/lib/gstRates";
+import { downloadInvoicePdf } from "@/lib/vyaparExport";
+import { shareInvoice } from "@/components/vyapar/TxnRowActions";
 import { useVyaparSettings } from "@/lib/useVyaparSettings";
 import { useVyaparProjectId } from "@/lib/projectScope";
 import { useProjects } from "@/lib/useProjects";
 import * as vyapar from "@/lib/vyaparApi";
 import { STATES_OF_SUPPLY } from "@/lib/vyaparApi";
 import type { DocType, Invoice, Item, Party } from "@/lib/vyaparApi";
-import { GripVertical, Link2, Plus, X } from "lucide-react";
+import {
+  ChevronDown,
+  Download,
+  FileText,
+  GripVertical,
+  ImageIcon,
+  Link2,
+  Plus,
+  Printer,
+  Share2,
+  Trash2,
+  X,
+} from "lucide-react";
 
 const UNITS = ["NONE", "PCS", "NOS", "KG", "TON", "MTR", "SQM", "CUM", "BAG", "BOX", "LTR", "HOUR"];
 
-/**
- * The GST slabs Vyapar offers in the Tax column. It's a picker there, not a free number box —
- * typing an arbitrary rate is how you end up with a 17% line that no return will accept.
- */
-const TAX_RATES = [0, 0.25, 3, 5, 12, 18, 28];
-const taxLabel = (rate: number) => (rate === 0 ? "None" : `GST@${rate}%`);
+/** Downscale an image in the browser and hand back a data URL — same helper shape as ItemDialog. */
+function readImageAsDataUrl(file: File, maxPx = 900): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("Couldn't read that image."));
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = () => reject(new Error("That file isn't a readable image."));
+      img.onload = () => {
+        const scale = Math.min(1, maxPx / Math.max(img.width, img.height));
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.round(img.width * scale);
+        canvas.height = Math.round(img.height * scale);
+        const ctx = canvas.getContext("2d");
+        if (!ctx) return reject(new Error("Couldn't process that image."));
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL("image/jpeg", 0.8));
+      };
+      img.src = String(reader.result);
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+/** A supporting file (supplier's PDF, signed challan) read straight through as a data URL. */
+function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("Couldn't read that file."));
+    reader.onload = () => resolve(String(reader.result));
+    reader.readAsDataURL(file);
+  });
+}
+
+/** Attachments live inside the row the API sends, so keep them small enough to post. */
+const MAX_DOC_BYTES = 4 * 1024 * 1024;
 
 /** The heading printed above the terms block — Vyapar's "Title" dropdown. */
 const TERMS_TITLES = ["Terms and Conditions", "Sale Invoice", "Purchase Bill", "Note", "Declaration"];
@@ -56,10 +101,13 @@ type LineDraft = {
   quantity: number;
   rate: number;
   discountPercent: number;
-  taxPercent: number;
+  /** The GST code from the Tax picker; the rate is derived from it, never typed. */
+  taxCode: string;
+  /** Purchase lines only. */
+  itcEligibility: string;
 };
 
-const emptyLine = (): LineDraft => ({
+const emptyLine = (isPurchase: boolean): LineDraft => ({
   itemId: null,
   itemName: "",
   description: "",
@@ -67,7 +115,8 @@ const emptyLine = (): LineDraft => ({
   quantity: 1,
   rate: 0,
   discountPercent: 0,
-  taxPercent: 0,
+  taxCode: "NONE",
+  itcEligibility: isPurchase ? ITC_DEFAULT : "",
 });
 
 /**
@@ -84,6 +133,8 @@ export function InvoiceBuilder({
   onSaved,
   onItemCreated,
   onPartyCreated,
+  projectId: projectOverride,
+  initialAttachment,
 }: {
   docType: DocType;
   existing?: Invoice;
@@ -95,8 +146,15 @@ export function InvoiceBuilder({
   /** Lets the parent fold an inline-created master into its own list without a full reload. */
   onItemCreated?: (item: Item) => void;
   onPartyCreated?: (party: Party) => void;
+  /** Pre-selects (and effectively fixes) the project when opened inside a project workspace. */
+  projectId?: number;
+  /**
+   * A bill picked in Upload Bill, pre-attached to this document. Only meaningful on a new
+   * document — an existing one already carries whatever was filed against it.
+   */
+  initialAttachment?: { imageDataUrl: string | null; documentName: string | null; documentDataUrl: string | null };
 }) {
-  const projectId = useVyaparProjectId();
+  const projectId = useVyaparProjectId(projectOverride);
   const { projects } = useProjects();
   const paymentTypeOptions = usePaymentTypeOptions();
   // The form's shape follows Settings, as it does in Vyapar: due dates, round-off behaviour and
@@ -196,6 +254,13 @@ export function InvoiceBuilder({
   const [paymentMode, setPaymentMode] = useState(
     existing?.paymentType && existing.paymentType !== "Credit" ? existing.paymentType : "Cash"
   );
+  /**
+   * Vyapar's "+ Add Payment type": the money can arrive split across accounts (part cash, part
+   * bank). The first line stays on the document itself as its `paidAmount`; each extra line is
+   * posted as a real payment linked to this document, which is the same machinery the Link Payment
+   * path already uses — so the server, not the form, recomputes what the document is left owing.
+   */
+  const [extraPayments, setExtraPayments] = useState<{ mode: string; reference: string; amount: number }[]>([]);
   const [lines, setLines] = useState<LineDraft[]>(
     existing?.lines.length
       ? existing.lines.map((l) => ({
@@ -206,9 +271,24 @@ export function InvoiceBuilder({
           quantity: l.quantity,
           rate: l.rate,
           discountPercent: l.discountPercent,
-          taxPercent: l.taxPercent,
+          // Rows saved before the Tax column became a code carry only a percent; read it as
+          // intra-state GST, which is what the old picker meant.
+          taxCode: l.taxCode ?? gstCodeForPercent(l.taxPercent),
+          itcEligibility: l.itcEligibility ?? (isPurchase ? ITC_DEFAULT : ""),
         }))
-      : [emptyLine(), emptyLine()]
+      : [emptyLine(isPurchase), emptyLine(isPurchase)]
+  );
+  /** Vyapar's ADD DESCRIPTION / ADD IMAGE / ADD DOCUMENT, carried with the document. */
+  const [description, setDescription] = useState(existing?.description ?? "");
+  const [showDescription, setShowDescription] = useState(!!existing?.description);
+  const [imageDataUrl, setImageDataUrl] = useState<string | null>(
+    existing?.imageDataUrl ?? initialAttachment?.imageDataUrl ?? null
+  );
+  const [documentName, setDocumentName] = useState<string | null>(
+    existing?.documentName ?? initialAttachment?.documentName ?? null
+  );
+  const [documentDataUrl, setDocumentDataUrl] = useState<string | null>(
+    existing?.documentDataUrl ?? initialAttachment?.documentDataUrl ?? null
   );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -223,6 +303,7 @@ export function InvoiceBuilder({
     partyId, selectedProjectId, invoicePrefix, invoiceNo, invoiceDate, dueDate, stateOfSupply,
     terms, notes, discountPercent, discountAmount, roundOffOn, priceHasTax, received, isCash,
     paymentMode, paymentReference, receiveOn, partyText, lines,
+    description, imageDataUrl, documentName, documentDataUrl,
   });
   // Captured on the first render only — state, not a ref, so nothing is read during render.
   const [initialSignature] = useState(signature);
@@ -235,7 +316,7 @@ export function InvoiceBuilder({
     let taxTotal = 0;
     let net = 0;
     const rows = lines.map((l) => {
-      const taxPct = Number(l.taxPercent) || 0;
+      const taxPct = gstPercent(l.taxCode);
       const rawRate = Number(l.rate) || 0;
       // When the price is entered "with tax", strip the tax back out to get the taxable base.
       const baseRate = priceHasTax ? rawRate / (1 + taxPct / 100) : rawRate;
@@ -303,30 +384,33 @@ export function InvoiceBuilder({
       itemName: item.name,
       unit: item.unit || "NONE",
       rate: isPurchase ? item.purchasePrice : item.salePrice,
-      taxPercent: item.taxPercent,
+      // The catalogue stores a bare rate, so read it as intra-state GST — the picker can be
+      // switched to the IGST twin on the line if this supply crosses a state border.
+      taxCode: gstCodeForPercent(item.taxPercent),
     });
   }
 
-  async function save(again = false) {
+  /** Returns the saved document so the Print / Share actions can act on it, or null if it failed. */
+  async function save(again = false): Promise<Invoice | null> {
     const clean = lines.filter((l) => l.itemName.trim());
     if (clean.length === 0) {
       setError("Add at least one item.");
-      return;
+      return null;
     }
     // A credit bill must be tied to a party so the outstanding balance has an owner.
     if (!isCash && !partyId && !noToggle) {
       setError(`Select a ${isPurchase ? "supplier" : "customer"} for a credit bill.`);
-      return;
+      return null;
     }
     // Planning docs and returns always need a party.
     if (partyRequired && !partyId) {
       setError("Select a party.");
-      return;
+      return null;
     }
     // Every document must be booked against a project.
     if (!selectedProjectId) {
       setError("Select a project.");
-      return;
+      return null;
     }
     setSaving(true);
     setError("");
@@ -352,8 +436,12 @@ export function InvoiceBuilder({
         stateOfSupply: stateOfSupply || null,
         terms: terms || null,
         notes: notes || null,
+        description: description.trim() || null,
+        imageDataUrl,
+        documentName,
+        documentDataUrl,
         lines: clean.map((l) => {
-          const taxPct = Number(l.taxPercent) || 0;
+          const taxPct = gstPercent(l.taxCode);
           const rawRate = Number(l.rate) || 0;
           // Persist the tax-exclusive base rate; the server re-applies tax on top.
           const rate = priceHasTax ? Number((rawRate / (1 + taxPct / 100)).toFixed(2)) : rawRate;
@@ -366,6 +454,9 @@ export function InvoiceBuilder({
             rate,
             discountPercent: Number(l.discountPercent) || 0,
             taxPercent: taxPct,
+            taxCode: l.taxCode,
+            // ITC is a claim on what you buy — a sale line has no such concept.
+            itcEligibility: isPurchase ? l.itcEligibility || null : null,
           };
         }),
       };
@@ -396,11 +487,33 @@ export function InvoiceBuilder({
           ],
         });
       }
+
+      // Split payment: each extra "Payment type" line is its own receipt against this document.
+      // Posting them rather than folding them into paidAmount keeps the account each portion
+      // landed in visible — which is the whole point of splitting it.
+      for (const p of extraPayments) {
+        if (p.amount <= 0 || !partyId) continue;
+        await vyapar.createPayment({
+          direction: isPurchase ? "OUT" : "IN",
+          partyId: Number(partyId),
+          amount: p.amount,
+          mode: p.mode,
+          reference: p.reference || null,
+          paymentDate: invoiceDate,
+          projectId: selectedProjectId ? Number(selectedProjectId) : null,
+          links: [{ invoiceId: saved.id, amount: p.amount }],
+        });
+      }
       if (again) {
         // Vyapar's "Save & New": keep the form open with a clean slate and the party retained, so
         // a run of documents for the same customer can be entered without reopening the form.
         setInvoiceNo("");
-        setLines([emptyLine(), emptyLine()]);
+        setLines([emptyLine(isPurchase), emptyLine(isPurchase)]);
+        setDescription("");
+        setShowDescription(false);
+        setImageDataUrl(null);
+        setDocumentName(null);
+        setDocumentDataUrl(null);
         setReceived(0);
         setReceivedTouched(false);
         setNotes("");
@@ -409,10 +522,23 @@ export function InvoiceBuilder({
         setSaving(false);
       }
       onSaved(again);
+      return saved;
     } catch (err) {
       setError(err instanceof Error ? err.message : "Couldn't save this document.");
       setSaving(false);
+      return null;
     }
+  }
+
+  /**
+   * Vyapar's Print / Share act on a real document, so an unsaved form is saved first — the same
+   * order Vyapar uses. The drawer stays open afterwards so the user can keep editing.
+   */
+  async function saveThen(action: "print" | "share") {
+    const saved = await save(false);
+    if (!saved) return;
+    if (action === "print") await downloadInvoicePdf(saved, selectedParty, items);
+    else shareInvoice(saved, parties);
   }
 
   /**
@@ -455,6 +581,37 @@ export function InvoiceBuilder({
       saveLabel={saving ? "Saving…" : "Save"}
       dirty={dirty}
       width="max-w-6xl"
+      footer={
+        <>
+          {/* Vyapar keeps LINK PAYMENT permanently in the bottom-left of a document form: the
+              money received with this bill can settle *other* open bills for the same party.
+              We used to hide it until an amount had been typed, so it looked missing. */}
+          <button
+            type="button"
+            disabled={noPayment || !partyId}
+            title={
+              noPayment
+                ? "This document type doesn't carry a payment."
+                : !partyId
+                  ? "Pick a party first — a receipt has to belong to someone."
+                  : "Settle other open bills for this party with this receipt"
+            }
+            onClick={() => setLinkingPayment(true)}
+            className="flex items-center gap-1.5 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold tracking-wide text-white uppercase transition-all duration-150 hover:bg-emerald-700 active:scale-95 disabled:cursor-not-allowed disabled:bg-gray-300"
+          >
+            <Link2 size={14} /> Link Payment
+            {paymentLinks.length > 0 && (
+              <span className="rounded bg-white/25 px-1.5 text-xs">{paymentLinks.length}</span>
+            )}
+          </button>
+          <SaveMenu
+            onPrint={() => saveThen("print")}
+            onShare={() => saveThen("share")}
+            onSaveAndNew={existing ? undefined : () => save(true)}
+            busy={saving}
+          />
+        </>
+      }
     >
       <div className="space-y-5">
         {error && <div className="rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-600">{error}</div>}
@@ -594,7 +751,7 @@ export function InvoiceBuilder({
 
         {/* Line grid */}
         <div className="overflow-x-auto rounded-xl border border-gray-200">
-          <table className="w-full min-w-[980px] border-collapse text-sm">
+          <table className={`w-full ${isPurchase ? "min-w-[1120px]" : "min-w-[1000px]"} border-collapse text-sm`}>
             <thead>
               {/* Vyapar groups the grid header: DISCOUNT and TAX each span a % and an Amount
                   column, so the two pairs read as one concept rather than four loose columns. */}
@@ -625,7 +782,8 @@ export function InvoiceBuilder({
                 </th>
                 <th className="w-20 px-2 py-1 text-right">%</th>
                 <th className="w-24 px-2 py-1 text-right">Amount</th>
-                <th className="w-28 px-2 py-1 text-right">%</th>
+                {/* Wide enough for "Ineligible as Per Section 17(5)" — the longest ITC label. */}
+                <th className={`${isPurchase ? "w-56" : "w-32"} px-2 py-1 text-right`}>%</th>
                 <th className="w-24 px-2 py-1 text-right">Amount</th>
                 <th className="w-28 px-2 py-2 text-right">Amount</th>
                 <th className="w-8 px-1 py-2" />
@@ -633,7 +791,7 @@ export function InvoiceBuilder({
             </thead>
             <tbody>
               {lines.map((l, idx) => (
-                <tr key={idx} className="group/row border-b border-gray-50 last:border-b-0 hover:bg-cyan-50/20">
+                <tr key={idx} className="group/row border-b border-gray-50 align-top last:border-b-0 hover:bg-cyan-50/20">
                   {/* Vyapar reveals a move handle and a delete on hover at the row start. */}
                   <td className="group/num px-1 py-1.5 text-center text-xs text-gray-400">
                     <span className="inline-flex items-center gap-0.5">
@@ -700,13 +858,29 @@ export function InvoiceBuilder({
                       className="w-full rounded-md border border-gray-200 px-2 py-1 text-right text-sm outline-none focus:border-cyan-500"
                     />
                   </td>
-                  <td className="px-2 py-1.5">
+                  {/* Vyapar's Tax cell: the GST code, plus (on a purchase) the ITC claim beneath
+                      it. Both are pickers — an arbitrary typed rate is how you end up with a 17%
+                      line that no return will accept. */}
+                  <td className="px-2 py-1.5 align-top">
                     <Select
-                      value={String(l.taxPercent)}
-                      onChange={(v) => setLine(idx, { taxPercent: Number(v) })}
+                      value={l.taxCode}
+                      onChange={(v) => setLine(idx, { taxCode: v })}
                       size="sm"
-                      options={TAX_RATES.map((r) => ({ value: String(r), label: taxLabel(r) }))}
+                      placeholder="Select"
+                      options={GST_RATE_OPTIONS}
                     />
+                    {isPurchase && (
+                      <div className="mt-1">
+                        <Select
+                          value={l.itcEligibility}
+                          onChange={(v) => setLine(idx, { itcEligibility: v })}
+                          size="sm"
+                          placeholder="ITC eligibility"
+                          title="Input tax credit eligibility"
+                          options={ITC_ELIGIBILITY.map((o) => ({ value: o, label: o }))}
+                        />
+                      </div>
+                    )}
                   </td>
                   <td className="px-2 py-1.5 text-right text-gray-500">{calc.rows[idx] ? inr(calc.rows[idx].tax) : "—"}</td>
                   <td className="px-2 py-1.5 text-right font-medium text-gray-800">{calc.rows[idx] ? inr(calc.rows[idx].amount) : "—"}</td>
@@ -727,7 +901,7 @@ export function InvoiceBuilder({
                 <td className="px-2 py-2" />
                 <td className="px-2 py-2">
                   <button
-                    onClick={() => setLines((p) => [...p, emptyLine()])}
+                    onClick={() => setLines((p) => [...p, emptyLine(isPurchase)])}
                     className="flex items-center gap-1 rounded-lg border border-gray-300 bg-white px-2.5 py-1 text-xs font-medium text-gray-600 transition-all duration-150 hover:border-brand-accent hover:text-brand-accent active:scale-95"
                   >
                     <Plus size={12} /> Add Row
@@ -748,8 +922,8 @@ export function InvoiceBuilder({
           </table>
         </div>
 
-        {/* Terms on the left, totals on the right */}
-        <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+        {/* Vyapar's three columns under the grid: terms, then payment + attachments, then totals. */}
+        <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
           <div className="rounded-xl border border-gray-200 p-4">
             <div className="mb-2 text-sm font-semibold text-gray-700">Terms &amp; Conditions</div>
             {/* Vyapar titles the block, and the title prints on the document. */}
@@ -773,6 +947,169 @@ export function InvoiceBuilder({
               <Field label="Notes">
                 <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} className="input resize-none" />
               </Field>
+            </div>
+          </div>
+
+          {/* Middle column — Payment Type / Reference No. / + Add Payment type, then the three
+              attachment buttons. Vyapar shows all of this whether or not money has been received;
+              hiding it until a Received amount was typed was our own invention. */}
+          <div className="space-y-3 rounded-xl border border-gray-200 p-4">
+            {!noPayment && (
+              <>
+                <Field label="Payment Type">
+                  <Select value={paymentMode} onChange={setPaymentMode} options={paymentTypeOptions} />
+                </Field>
+                <Field label="Reference No.">
+                  <input
+                    value={paymentReference}
+                    onChange={(e) => setPaymentReference(e.target.value)}
+                    placeholder="NEFT / cheque no"
+                    className="input"
+                  />
+                </Field>
+
+                {extraPayments.map((p, i) => (
+                  <div key={i} className="space-y-2 rounded-lg border border-dashed border-gray-200 p-2.5">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] font-medium tracking-wide text-gray-400 uppercase">
+                        Payment Type {i + 2}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setExtraPayments((prev) => prev.filter((_, j) => j !== i))}
+                        className="rounded p-0.5 text-gray-300 transition-colors duration-150 hover:bg-rose-50 hover:text-rose-600"
+                        aria-label={`Remove payment type ${i + 2}`}
+                      >
+                        <X size={13} />
+                      </button>
+                    </div>
+                    <Select
+                      value={p.mode}
+                      onChange={(v) =>
+                        setExtraPayments((prev) => prev.map((x, j) => (j === i ? { ...x, mode: v } : x)))
+                      }
+                      size="sm"
+                      options={paymentTypeOptions}
+                    />
+                    <div className="flex items-center gap-2">
+                      <input
+                        value={p.reference}
+                        onChange={(e) =>
+                          setExtraPayments((prev) => prev.map((x, j) => (j === i ? { ...x, reference: e.target.value } : x)))
+                        }
+                        placeholder="Reference"
+                        className="w-full rounded-md border border-gray-200 px-2 py-1 text-sm outline-none focus:border-cyan-500"
+                      />
+                      <input
+                        type="number"
+                        value={p.amount}
+                        onChange={(e) =>
+                          setExtraPayments((prev) =>
+                            prev.map((x, j) => (j === i ? { ...x, amount: Number(e.target.value) || 0 } : x))
+                          )
+                        }
+                        placeholder="Amount"
+                        className="w-28 rounded-md border border-gray-200 px-2 py-1 text-right text-sm outline-none focus:border-cyan-500"
+                      />
+                    </div>
+                  </div>
+                ))}
+
+                <button
+                  type="button"
+                  onClick={() => setExtraPayments((prev) => [...prev, { mode: "Cash", reference: "", amount: 0 }])}
+                  className="flex items-center gap-1 text-sm font-medium text-brand-accent transition-opacity duration-150 hover:opacity-80"
+                >
+                  <Plus size={13} /> Add Payment type
+                </button>
+              </>
+            )}
+
+            {/* ADD DESCRIPTION / ADD IMAGE / ADD DOCUMENT */}
+            <div className={`space-y-2 ${!noPayment ? "border-t border-gray-100 pt-3" : ""}`}>
+              {showDescription ? (
+                <Field label="Description">
+                  <textarea
+                    value={description}
+                    onChange={(e) => setDescription(e.target.value)}
+                    rows={3}
+                    autoFocus
+                    className="input resize-none"
+                    placeholder="Description"
+                  />
+                </Field>
+              ) : (
+                <AttachButton icon={FileText} label="Add Description" onClick={() => setShowDescription(true)} />
+              )}
+
+              {imageDataUrl ? (
+                <div className="flex items-center gap-2 rounded-lg border border-gray-200 p-2">
+                  {/* Data-URL preview — a plain img is correct (next/image can't optimize these). */}
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={imageDataUrl} alt="Attached" className="h-12 w-12 rounded object-cover" />
+                  <span className="flex-1 truncate text-xs text-gray-500">Image attached</span>
+                  <button
+                    type="button"
+                    onClick={() => setImageDataUrl(null)}
+                    className="rounded p-1 text-gray-400 transition-colors duration-150 hover:bg-rose-50 hover:text-rose-600"
+                    aria-label="Remove image"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </div>
+              ) : (
+                <AttachButton icon={ImageIcon} label="Add Image" accept="image/*" onFile={async (file) => {
+                  try {
+                    setImageDataUrl(await readImageAsDataUrl(file));
+                  } catch (err) {
+                    setError(err instanceof Error ? err.message : "Couldn't attach that image.");
+                  }
+                }} />
+              )}
+
+              {documentDataUrl ? (
+                <div className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50/60 p-2">
+                  <FileText size={16} className="shrink-0 text-emerald-600" />
+                  <span className="flex-1 truncate text-xs text-emerald-700">{documentName ?? "Document"} added</span>
+                  <a
+                    href={documentDataUrl}
+                    download={documentName ?? "document"}
+                    className="rounded p-1 text-emerald-600 transition-colors duration-150 hover:bg-emerald-100"
+                    aria-label="Download attached document"
+                  >
+                    <Download size={14} />
+                  </a>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDocumentDataUrl(null);
+                      setDocumentName(null);
+                    }}
+                    className="rounded p-1 text-gray-400 transition-colors duration-150 hover:bg-rose-50 hover:text-rose-600"
+                    aria-label="Remove document"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </div>
+              ) : (
+                <AttachButton
+                  icon={FileText}
+                  label="Add Document"
+                  accept=".pdf,.doc,.docx,.xls,.xlsx,image/*"
+                  onFile={async (file) => {
+                    if (file.size > MAX_DOC_BYTES) {
+                      setError(`"${file.name}" is larger than 4 MB. Attach a smaller file.`);
+                      return;
+                    }
+                    try {
+                      setDocumentDataUrl(await readFileAsDataUrl(file));
+                      setDocumentName(file.name);
+                    } catch (err) {
+                      setError(err instanceof Error ? err.message : "Couldn't attach that file.");
+                    }
+                  }}
+                />
+              )}
             </div>
           </div>
 
@@ -858,29 +1195,6 @@ export function InvoiceBuilder({
                 </div>
               </div>
             )}
-            {!noPayment && receiveOn && displayReceived > 0 && (
-              <>
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-gray-500">Payment Type</span>
-                  <Select
-                    value={paymentMode}
-                    onChange={setPaymentMode}
-                    size="sm"
-                    className="w-44"
-                    options={paymentTypeOptions}
-                  />
-                </div>
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-gray-500">Reference No.</span>
-                  <input
-                    value={paymentReference}
-                    onChange={(e) => setPaymentReference(e.target.value)}
-                    placeholder="NEFT / cheque no"
-                    className="w-44 rounded-md border border-gray-200 px-2 py-1 text-sm outline-none focus:border-cyan-500"
-                  />
-                </div>
-              </>
-            )}
             {!noPayment && (
               <div className="flex items-center justify-between">
                 <span className="text-gray-500">Balance Due</span>
@@ -895,26 +1209,11 @@ export function InvoiceBuilder({
           </div>
         </div>
 
-        {/* Vyapar puts LINK PAYMENT on the document form too, not just on Payment-In: the money
-            received with this bill can settle *other* open bills for the same party. */}
-        {!noPayment && partyId && receiveOn && displayReceived > 0 && (
-          <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-gray-200 p-4">
-            <div>
-              <div className="text-sm font-semibold text-gray-700">Link Payment</div>
-              <p className="mt-0.5 text-xs text-gray-400">
-                {paymentLinks.length === 0
-                  ? "Settles this document only."
-                  : `Also settling ${paymentLinks.length} other transaction${paymentLinks.length > 1 ? "s" : ""}.`}
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={() => setLinkingPayment(true)}
-              className="flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3.5 py-2 text-sm font-semibold text-white transition-all duration-150 hover:bg-emerald-700 active:scale-95"
-            >
-              <Link2 size={14} /> Link Payment
-            </button>
-          </div>
+        {paymentLinks.length > 0 && (
+          <p className="text-xs text-gray-500">
+            This receipt also settles {paymentLinks.length} other transaction
+            {paymentLinks.length > 1 ? "s" : ""}.
+          </p>
         )}
       </div>
 
@@ -959,6 +1258,149 @@ export function InvoiceBuilder({
         />
       )}
     </Drawer>
+  );
+}
+
+/**
+ * Vyapar's `Print ▾` split button at the bottom-right of a document form. The caret menu carries
+ * Share, Print and Save & New — the same set the desktop app offers, minus Generate e-Invoice,
+ * which needs an IRP connection we don't have.
+ */
+function SaveMenu({
+  onPrint,
+  onShare,
+  onSaveAndNew,
+  busy,
+}: {
+  onPrint: () => void;
+  onShare: () => void;
+  onSaveAndNew?: () => void;
+  busy: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="relative flex items-center">
+      <button
+        type="button"
+        disabled={busy}
+        onClick={onPrint}
+        className="flex items-center gap-1.5 rounded-l-lg border border-r-0 border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition-colors duration-150 hover:border-brand-accent hover:text-brand-accent disabled:opacity-60"
+      >
+        <Printer size={14} /> Print
+      </button>
+      <button
+        type="button"
+        aria-label="More save actions"
+        aria-expanded={open}
+        onClick={() => setOpen((o) => !o)}
+        className="rounded-r-lg border border-gray-300 bg-white px-2 py-2 text-gray-500 transition-colors duration-150 hover:border-brand-accent hover:text-brand-accent"
+      >
+        <ChevronDown size={14} className={`transition-transform duration-200 ${open ? "rotate-180" : ""}`} />
+      </button>
+      {open && (
+        <>
+          {/* Click-away catcher — the menu opens upward, out of the drawer's scroll area. */}
+          <button type="button" aria-hidden className="fixed inset-0 z-40 cursor-default" onClick={() => setOpen(false)} />
+          <div className="animate-fade-in-scale absolute right-0 bottom-full z-50 mb-1 w-48 origin-bottom-right rounded-lg border border-gray-200 bg-white py-1 shadow-lg">
+            <MenuItem
+              icon={Share2}
+              label="Share"
+              onClick={() => {
+                setOpen(false);
+                onShare();
+              }}
+            />
+            <MenuItem
+              icon={Printer}
+              label="Print"
+              onClick={() => {
+                setOpen(false);
+                onPrint();
+              }}
+            />
+            {onSaveAndNew && (
+              <MenuItem
+                icon={Plus}
+                label="Save & New"
+                onClick={() => {
+                  setOpen(false);
+                  onSaveAndNew();
+                }}
+              />
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function MenuItem({
+  icon: Icon,
+  label,
+  onClick,
+}: {
+  icon: React.ComponentType<{ size?: number; className?: string }>;
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm text-gray-700 transition-colors duration-150 hover:bg-gray-50"
+    >
+      <Icon size={14} className="text-gray-400" />
+      {label}
+    </button>
+  );
+}
+
+/**
+ * One of Vyapar's three attachment buttons. With `onFile` it opens a hidden file input; without,
+ * it's a plain button (Add Description just reveals a textarea — there's nothing to pick).
+ */
+function AttachButton({
+  icon: Icon,
+  label,
+  accept,
+  onClick,
+  onFile,
+}: {
+  icon: React.ComponentType<{ size?: number; className?: string }>;
+  label: string;
+  accept?: string;
+  onClick?: () => void;
+  onFile?: (file: File) => void;
+}) {
+  const body = (
+    <span className="flex items-center justify-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-xs font-medium tracking-wide text-gray-500 uppercase transition-colors duration-150 hover:border-brand-accent hover:text-brand-accent">
+      <Icon size={14} />
+      {label}
+    </span>
+  );
+  if (!onFile) {
+    return (
+      <button type="button" onClick={onClick} className="block w-full cursor-pointer">
+        {body}
+      </button>
+    );
+  }
+  return (
+    <label className="block w-full cursor-pointer">
+      <input
+        type="file"
+        accept={accept}
+        className="hidden"
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          // Clear the input so re-picking the same file still fires a change event.
+          e.target.value = "";
+          if (file) onFile(file);
+        }}
+      />
+      {body}
+    </label>
   );
 }
 
