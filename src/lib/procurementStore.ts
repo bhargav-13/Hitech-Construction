@@ -1,49 +1,42 @@
 "use client";
 
 import { create } from "zustand";
-import type { Grn, Indent, PurchaseOrder, Rfq } from "./procurementTypes";
-import { GRN_SEED, INDENT_SEED, PO_SEED, RFQ_SEED } from "./procurementTypes";
+import type { Rfq } from "./procurementTypes";
+import { RFQ_SEED } from "./procurementTypes";
 
 /**
- * UI-first store for the Procurement module (backend comes later, same as Tender/Payroll). Seeded
- * with demo data so the whole chain — Indent → RFQ → Comparison → PO → GRN — is walkable today.
- * Kept in-memory (no persist) while the module is a "Soon" demo: the seed is the story we tell, and
- * a reload should return to it. Swap the seeds for `hydrateFromBackend()` when procurement-service
- * lands, exactly like tenderStore did.
+ * UI-first store for RFQ and Comparison, still seeded (see the header of procurementTypes).
+ *
+ * Everything else the module used to hold — indents, purchase orders, goods receipts, vendors — has
+ * been removed: it was demo data shadowing records that already exist for real in Vyapar. What is
+ * left is the one part of the buying chain nothing else models, and it is the next thing to get a
+ * real backend.
  */
 interface ProcurementState {
-  indents: Indent[];
   rfqs: Rfq[];
-  pos: PurchaseOrder[];
-  grns: Grn[];
 
-  /** Award an RFQ to a vendor (Comparison screen) — marks it Awarded and stamps the winner. */
-  awardRfq: (rfqId: string, vendor: string) => void;
-  /** Approve or reject a Purchase Order (Orders screen). */
-  setPoApproval: (poId: string, decision: "Approved" | "Rejected") => void;
+  /**
+   * Award an RFQ line to a vendor. Awarding is per line, not per RFQ: a five-line enquiry can end
+   * up split across three suppliers, which is how buying actually works and what the comparison
+   * screen has to be able to express.
+   */
+  awardLine: (rfqId: string, lineIndex: number, vendor: string | null, reason?: string) => void;
 }
 
 export const useProcurementStore = create<ProcurementState>((set) => ({
-  indents: INDENT_SEED,
   rfqs: RFQ_SEED,
-  pos: PO_SEED,
-  grns: GRN_SEED,
 
-  awardRfq: (rfqId, vendor) =>
+  awardLine: (rfqId, lineIndex, vendor, reason) =>
     set((s) => ({
-      rfqs: s.rfqs.map((r) => (r.id === rfqId ? { ...r, status: "Awarded", awardedVendor: vendor } : r)),
-    })),
-
-  setPoApproval: (poId, decision) =>
-    set((s) => ({
-      pos: s.pos.map((p) =>
-        p.id === poId
+      rfqs: s.rfqs.map((r) =>
+        r.id === rfqId
           ? {
-              ...p,
-              approval: decision,
-              status: decision === "Approved" ? "Approved" : "Rejected",
+              ...r,
+              lines: r.lines.map((l, i) =>
+                i === lineIndex ? { ...l, awardedTo: vendor, awardReason: reason ?? l.awardReason } : l,
+              ),
             }
-          : p,
+          : r,
       ),
     })),
 }));

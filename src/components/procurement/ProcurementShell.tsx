@@ -42,18 +42,13 @@ export function ProcurementShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const railCollapsed = useUiStore((s) => s.procurementRailCollapsed);
   const toggleRail = useUiStore((s) => s.toggleProcurementRail);
-  const indents = useProcurementStore((s) => s.indents);
   const rfqs = useProcurementStore((s) => s.rfqs);
-  const pos = useProcurementStore((s) => s.pos);
 
+  // One counter left: enquiries sent with nothing back. The others counted purchase orders and
+  // receipts, which this module no longer holds.
   const badges = useMemo(
-    () => ({
-      indents: indents.filter((i) => i.status === "Open").length,
-      rfq: rfqs.filter((r) => r.status === "Sent").length,
-      approvals: pos.filter((p) => p.approval === "Pending").length,
-      receiving: pos.filter((p) => p.status === "Partially Received").length,
-    }),
-    [indents, rfqs, pos],
+    () => ({ rfq: rfqs.filter((r) => r.status === "Sent").length }),
+    [rfqs],
   );
 
   const isActive = (href?: string) =>
@@ -126,8 +121,7 @@ function NavItem({
   count: number;
 }) {
   const Icon = ICONS[node.icon ?? ""] ?? FileText;
-  // PO approvals hold up money; everything else is merely a queue.
-  const tone = node.badge === "approvals" ? "bg-rose-100 text-rose-700" : "bg-amber-100 text-amber-700";
+  const tone = "bg-amber-100 text-amber-700";
 
   if (collapsed) {
     return (
@@ -142,9 +136,7 @@ function NavItem({
         <Icon size={17} />
         {count > 0 && (
           <span
-            className={`absolute top-1 right-1 h-1.5 w-1.5 rounded-full ${
-              node.badge === "approvals" ? "bg-rose-500" : "bg-amber-500"
-            }`}
+            className="absolute top-1 right-1 h-1.5 w-1.5 rounded-full bg-amber-500"
           />
         )}
       </Link>
