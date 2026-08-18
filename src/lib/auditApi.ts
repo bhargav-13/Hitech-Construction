@@ -12,6 +12,8 @@ export interface AuditLog {
   action: AuditActionApi;
   entityType: string | null;
   entityId: string | null;
+  /** The project this action concerned, when it concerned one. Null on rows written before V43. */
+  projectId: number | null;
   summary: string | null;
   httpMethod: string | null;
   path: string | null;
@@ -50,6 +52,8 @@ export interface AuditQuery {
   from?: string; // ISO date (inclusive), e.g. 2026-07-01
   to?: string; // ISO date (inclusive)
   q?: string; // free text over summary, path and actor
+  /** Only actions that concerned this project — backs the project workspace timeline. */
+  projectId?: number;
 }
 
 export function getAuditLogs(query: AuditQuery = {}) {

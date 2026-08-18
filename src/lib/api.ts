@@ -67,7 +67,8 @@ export interface RoleRequest {
 
 export interface UserResponse {
   id: number;
-  email: string;
+  /** Null for members who don't sign in — site labour on the payroll with no app access. */
+  email: string | null;
   fullName: string;
   phoneNumber: string | null;
   isActive: boolean;
@@ -76,6 +77,8 @@ export interface UserResponse {
   departmentName: string | null;
   staffType: "OFFICE" | "SITE" | null;
   onPayroll: boolean;
+  /** False = payroll/directory entry only; no credentials are held for this member. */
+  isLoginUser: boolean;
   /** Profile photo as a data URL (or hosted URL); null until one is uploaded. */
   photoUrl: string | null;
 }
@@ -89,8 +92,11 @@ export interface UserPageResponse {
 }
 
 export interface UserCreateRequest {
-  email: string;
-  password: string;
+  /** Required only when isLoginUser is true (the default). */
+  email?: string;
+  /** Required only when isLoginUser is true (the default). */
+  password?: string;
+  isLoginUser?: boolean;
   fullName: string;
   phoneNumber?: string;
   roleId: number;
@@ -101,6 +107,8 @@ export interface UserCreateRequest {
 }
 
 export interface UserUpdateRequest {
+  email?: string | null;
+  isLoginUser?: boolean;
   fullName?: string;
   phoneNumber?: string;
   roleId?: number;
@@ -326,8 +334,16 @@ export interface ProjectResponse {
   orientation: string | null;
   dimension: string | null;
   scopeOfWork: string | null;
+  /**
+   * @deprecated Stale cache columns. These were editable fields on the settings modal, which meant
+   * the project dashboard could never disagree with whatever someone last typed. The backend now
+   * ignores them on update — read `getProjectSummary(id).finance` and `.tasks` instead, which are
+   * derived from the documents and tasks actually filed against the project.
+   */
   inAmount: number;
+  /** @deprecated See {@link ProjectResponse.inAmount}. */
   outAmount: number;
+  /** @deprecated See {@link ProjectResponse.inAmount}. */
   todoCount: number;
 }
 
@@ -370,6 +386,134 @@ export function updateProject(id: number, body: ProjectUpdateRequest) {
 
 export function deleteProject(id: number) {
   return request<void>(`/api/v1/projects/${id}`, { method: "DELETE" });
+}
+
+// ---- Project workspace rollups (web-app/ProjectWorkspaceController) ----
+// Every figure below is DERIVED from the module that owns the underlying records. Nothing here is
+// typed in by a human, which is exactly the point: the old dashboard read projects.in_amount and
+// friends, which were free-text fields on the settings modal.
+
+export interface ProjectFinance {
+  billed: number;
+  received: number;
+  outstanding: number;
+  spent: number;
+  payable: number;
+  paidOut: number;
+  saleCount: number;
+  purchaseCount: number;
+  paymentCount: number;
+  partyCount: number;
+}
+
+export interface ProjectWorkload {
+  total: number;
+  open: number;
+  inProgress: number;
+  completed: number;
+  overdue: number;
+  dueThisWeek: number;
+  awaitingApproval: number;
+  completionPercent: number;
+}
+
+export interface ProjectManpowerDay {
+  date: string;
+  workers: number;
+  manDays: number;
+}
+
+export interface ProjectManpower {
+  assignedMembers: number;
+  activeMembers: number;
+  presentToday: number;
+  manDays: number;
+  overtimeHours: number;
+  labourCost: number;
+  /** True when someone who worked has no payroll profile, so labourCost understates the real bill. */
+  costIncomplete: boolean;
+  trend: ProjectManpowerDay[];
+}
+
+export interface ProjectStaffRow {
+  userId: number;
+  name: string;
+  email: string | null;
+  phone: string | null;
+  staffType: string | null;
+  department: string | null;
+  roleName: string | null;
+  photoUrl: string | null;
+  designation: string | null;
+  category: string | null;
+  workType: string | null;
+  /** null unless the caller holds PAYROLL:VIEW. */
+  dailyRate: number | null;
+  presentDays: number;
+  absentDays: number;
+  manDays: number;
+  overtimeHours: number;
+  /** null unless the caller holds PAYROLL:VIEW. */
+  labourCost: number | null;
+  lastSeen: string | null;
+}
+
+export interface ProjectMaterialRow {
+  invoiceId: number;
+  date: string | null;
+  itemName: string;
+  movement: "IN" | "OUT" | "PLANNED";
+  quantity: number;
+  unit: string | null;
+  rate: number;
+  amount: number;
+  partyName: string;
+  docNo: string | null;
+}
+
+export interface ProjectProgress {
+  /** What the site manager entered. */
+  reported: number;
+  /** What the task completion rate implies. */
+  derivedFromTasks: number;
+  diverges: boolean;
+}
+
+/** Sections are null when the signed-in user lacks that module's VIEW permission. */
+export interface ProjectSummary {
+  projectId: number;
+  finance: ProjectFinance | null;
+  tasks: ProjectWorkload | null;
+  manpower: ProjectManpower | null;
+  tenders: unknown[] | null;
+  progress: ProjectProgress;
+  from: string;
+  to: string;
+}
+
+export function getProjectSummary(projectId: number, from?: string, to?: string) {
+  const qs = new URLSearchParams();
+  if (from) qs.set("from", from);
+  if (to) qs.set("to", to);
+  const suffix = qs.toString() ? `?${qs}` : "";
+  return request<ProjectSummary>(`/api/v1/projects/${projectId}/summary${suffix}`);
+}
+
+export function getProjectStaff(projectId: number, from?: string, to?: string) {
+  const qs = new URLSearchParams();
+  if (from) qs.set("from", from);
+  if (to) qs.set("to", to);
+  const suffix = qs.toString() ? `?${qs}` : "";
+  return request<ProjectStaffRow[]>(`/api/v1/projects/${projectId}/staff${suffix}`);
+}
+
+export function getProjectMaterials(projectId: number) {
+  return request<ProjectMaterialRow[]>(`/api/v1/projects/${projectId}/materials`);
+}
+
+/** Money for every project at once — one call for the whole projects list. */
+export function getProjectsFinance() {
+  return request<Record<string, ProjectFinance>>("/api/v1/projects/finance");
 }
 
 // ---- Project locations (hierarchical location structure) ----
@@ -539,6 +683,8 @@ export function deletePayrollProfile(userId: number) {
 export type AttendanceCodeApi = "P" | "A" | "HD" | "PL" | "WO" | "NM";
 
 export interface AttendanceApiResponse {
+  /** Hours the punch pair came to, derived against the member's shift. Null = never punched out. */
+  workedHours: number | null;
   id: number | null;
   userId: number;
   memberName: string;
@@ -664,6 +810,78 @@ export interface LeaveRequestApi {
   approvedAt: string | null;
   decisionNote: string | null;
   createdAt: string | null;
+  /** Multi-level chain state, or null when this request never went through one. */
+  approval: ApprovalState | null;
+  /** True when the signed-in user can decide this request right now. Drives the action buttons. */
+  canActNow: boolean;
+}
+
+// ---- Multi-level approval framework (user-management-service, com.hitech.erp.approval) ----
+
+export type ApprovalStatus = "PENDING" | "APPROVED" | "REJECTED" | "CANCELLED";
+export type ApprovalMode = "EXPLICIT" | "REPORTING_CHAIN";
+
+/** One entry in the audit trail rendered by the approval sidebar. */
+export interface ApprovalAction {
+  id: number;
+  levelOrder: number | null;
+  actorUserId: number | null;
+  actorName: string | null;
+  actorRole: string | null;
+  action: "SUBMITTED" | "APPROVED" | "REJECTED" | "CANCELLED";
+  note: string | null;
+  at: string | null;
+}
+
+/** One rung of the ladder, and where it stands. */
+export interface ApprovalLevelState {
+  levelOrder: number;
+  roleNames: string[];
+  /** APPROVED | REJECTED | PENDING (this rung's turn) | WAITING (an earlier rung hasn't cleared) | CANCELLED */
+  state: string;
+  decidedBy: string | null;
+  decidedAt: string | null;
+  note: string | null;
+}
+
+export interface ApprovalState {
+  requestId: number;
+  entityType: string;
+  entityId: number;
+  status: ApprovalStatus;
+  currentLevel: number;
+  totalLevels: number;
+  canActNow: boolean;
+  /** Roles the request is currently waiting on, pre-joined for display. */
+  awaitingRoleNames: string | null;
+  levels: ApprovalLevelState[];
+  trail: ApprovalAction[];
+}
+
+export interface ApprovalChainLevel {
+  levelOrder: number;
+  roleIds: number[];
+  roleNames: string[];
+}
+
+export interface ApprovalChain {
+  id: number | null;
+  entityType: string;
+  entityLabel: string;
+  mode: ApprovalMode;
+  published: boolean;
+  levels: ApprovalChainLevel[];
+}
+
+export function getApprovalChains() {
+  return request<ApprovalChain[]>("/api/v1/approval-chains");
+}
+
+export function saveApprovalChain(
+  entityType: string,
+  body: { mode?: ApprovalMode; published?: boolean; levels?: { roleIds: number[] }[] }
+) {
+  return request<ApprovalChain>(`/api/v1/approval-chains/${entityType}`, { method: "PUT", body });
 }
 
 export interface LeaveBalanceApi {
@@ -685,6 +903,13 @@ export function memberLeave(userId: number) {
 }
 export function pendingLeave() {
   return request<LeaveRequestApi[]>("/api/v1/payroll/leave/pending");
+}
+/**
+ * Every leave request — pending and decided — in one call, each row carrying its approval chain.
+ * Replaces fanning out one memberLeave() call per member just to build an org-wide list.
+ */
+export function allLeave() {
+  return request<LeaveRequestApi[]>("/api/v1/payroll/leave/all");
 }
 export function applyLeave(body: { leaveTypeName: string; fromDate: string; toDate: string; reason?: string }) {
   return request<LeaveRequestApi>("/api/v1/payroll/leave/apply", { method: "POST", body });

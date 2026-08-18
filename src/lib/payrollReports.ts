@@ -176,7 +176,7 @@ export const REPORT_BUILDERS: Record<string, (ctx: ReportContext) => ReportData>
     head: ["Member", "Email", "Department", "Designation", "Monthly CTC", "Bank A/c"],
     rows: ctx.members.map((m) => {
       const p = ctx.profiles.get(m.id);
-      return [m.fullName, m.email, deptOf(m), p?.designation ?? "—", p ? inr(p.salary.monthlyCtc) : "—", p?.bankAccount ?? "—"];
+      return [m.fullName, m.email ?? "—", deptOf(m), p?.designation ?? "—", p ? inr(p.salary.monthlyCtc) : "—", p?.bankAccount ?? "—"];
     }),
     rightAlignFrom: 4,
   }),

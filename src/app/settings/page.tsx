@@ -2,6 +2,7 @@
 
 import { type ChangeEvent, type ComponentType, useEffect, useMemo, useState } from "react";
 import { AppShell } from "@/components/AppShell";
+import { MultiLevelApproval } from "@/components/settings/MultiLevelApproval";
 import { Drawer, DrawerField } from "@/components/Drawer";
 import { Spinner } from "@/components/Spinner";
 import { Select } from "@/components/Select";
@@ -28,7 +29,7 @@ import { useDepartments } from "@/lib/useDepartments";
 // Roles & Access is the only built Settings section. Unimplemented sections used to be listed here
 // as "Coming soon" placeholders — that's been removed. The "coming soon" hint now lives in the
 // New/Manage Role permission matrix (RoleDrawer), against modules whose feature isn't built yet.
-const SECTIONS = ["Roles & Access"] as const;
+const SECTIONS = ["Roles & Access", "Multi Level Approval"] as const;
 type Section = (typeof SECTIONS)[number];
 
 // Backend module codes that map to a real, usable feature. Everything else is flagged "Coming soon"
@@ -83,7 +84,7 @@ export default function SettingsPage() {
         </div>
 
         <div className="min-w-0 flex-1">
-          <RolesAndAccess />
+          {section === "Roles & Access" ? <RolesAndAccess /> : <MultiLevelApproval />}
         </div>
       </div>
     </AppShell>
@@ -403,7 +404,7 @@ function AccountsSection({
     if (roleFilter !== "all" && user.role.id !== roleFilter) return false;
     const q = search.trim().toLowerCase();
     if (!q) return true;
-    return user.fullName.toLowerCase().includes(q) || user.email.toLowerCase().includes(q);
+    return user.fullName.toLowerCase().includes(q) || (user.email ?? "").toLowerCase().includes(q);
   });
 
   return (
@@ -466,7 +467,7 @@ function AccountsSection({
                 <Avatar name={user.fullName} id={String(user.id)} photoUrl={user.photoUrl} size={44} />
                 <div className="min-w-0">
                   <div className="truncate font-medium text-gray-800 group-hover:text-brand-accent">{user.fullName}</div>
-                  <div className="truncate text-xs text-gray-400">{user.email}</div>
+                  <div className="truncate text-xs text-gray-400">{user.email ?? "No sign-in"}</div>
                 </div>
               </div>
               <div className="mt-3 flex flex-wrap items-center gap-1.5">
@@ -507,7 +508,7 @@ function AccountsSection({
                     <Avatar name={user.fullName} id={String(user.id)} photoUrl={user.photoUrl} size={30} />
                     <div className="min-w-0">
                       <div className="font-medium text-gray-800">{user.fullName}</div>
-                      <div className="truncate text-xs text-gray-400">{user.email}</div>
+                      <div className="truncate text-xs text-gray-400">{user.email ?? "No sign-in"}</div>
                     </div>
                   </div>
                 </td>
@@ -971,6 +972,7 @@ function UserDrawer({
   onClose: () => void;
   onSaved: () => void;
 }) {
+  const [isLoginUser, setIsLoginUser] = useState(existing?.isLoginUser ?? true);
   const [email, setEmail] = useState(existing?.email ?? "");
   const [password, setPassword] = useState("");
   const [fullName, setFullName] = useState(existing?.fullName ?? "");
@@ -1001,8 +1003,18 @@ function UserDrawer({
   }
 
   async function submit() {
-    if (!fullName.trim() || roleId === "" || (!existing && (!email.trim() || !password))) {
-      setError("Full name, role, and (for new users) email and password are required.");
+    // Credentials only matter for members who actually sign in. Site labour is on the payroll for
+    // attendance and payslips and has no reason to ever open the app.
+    if (!fullName.trim() || roleId === "") {
+      setError("Full name and role are required.");
+      return;
+    }
+    if (isLoginUser && !email.trim()) {
+      setError("An email address is required for members who sign in.");
+      return;
+    }
+    if (isLoginUser && !existing && !password) {
+      setError("A password is required for members who sign in.");
       return;
     }
     setSaving(true);
@@ -1010,6 +1022,8 @@ function UserDrawer({
     try {
       if (existing) {
         await api.updateUser(existing.id, {
+          isLoginUser,
+          email: isLoginUser ? email.trim() : null,
           fullName: fullName.trim(),
           phoneNumber: phoneNumber.trim() || undefined,
           roleId: roleId as number,
@@ -1022,8 +1036,9 @@ function UserDrawer({
         });
       } else {
         await api.createUser({
-          email: email.trim(),
-          password,
+          isLoginUser,
+          email: isLoginUser ? email.trim() : undefined,
+          password: isLoginUser ? password : undefined,
           fullName: fullName.trim(),
           phoneNumber: phoneNumber.trim() || undefined,
           roleId: roleId as number,
@@ -1073,20 +1088,43 @@ function UserDrawer({
           <input value={fullName} onChange={(e) => setFullName(e.target.value)} className="input" />
         </DrawerField>
 
-        <DrawerField label="Email" required={!existing}>
-          <input
-            type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            className="input"
-            disabled={!!existing}
-          />
-        </DrawerField>
+        {/* Sign-in access. Off = a payroll/directory record with no credentials at all. */}
+        <div className="rounded-lg border border-gray-200 p-3">
+          <label className="flex cursor-pointer items-start gap-2.5">
+            <input
+              type="checkbox"
+              checked={isLoginUser}
+              onChange={(e) => setIsLoginUser(e.target.checked)}
+              className="mt-0.5 rounded border-gray-300"
+            />
+            <span>
+              <span className="text-sm font-medium text-gray-800">This member signs in</span>
+              <span className="mt-0.5 block text-xs text-gray-500">
+                Turn off for site labour who are on the payroll but never use the app — no email or
+                password is kept for them.
+              </span>
+            </span>
+          </label>
+        </div>
 
-        {!existing && (
-          <DrawerField label="Password" required>
-            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} className="input" />
-          </DrawerField>
+        {isLoginUser && (
+          <>
+            <DrawerField label="Email" required>
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                className="input"
+                disabled={!!existing && !!existing.email}
+              />
+            </DrawerField>
+
+            {!existing && (
+              <DrawerField label="Password" required>
+                <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} className="input" />
+              </DrawerField>
+            )}
+          </>
         )}
 
         <DrawerField label="Phone (optional)">

@@ -69,15 +69,25 @@ function numId(id: string): number {
   return Number(id);
 }
 
-export async function listTenders(params: { page?: number; size?: number; stage?: string; source?: string; q?: string } = {}): Promise<Tender[]> {
+export async function listTenders(
+  params: { page?: number; size?: number; stage?: string; source?: string; q?: string; projectId?: number } = {}
+): Promise<Tender[]> {
   const qs = new URLSearchParams();
   qs.set("page", String(params.page ?? 0));
   qs.set("size", String(params.size ?? 500));
   if (params.stage) qs.set("stage", params.stage);
   if (params.source) qs.set("source", params.source);
   if (params.q) qs.set("q", params.q);
+  // Set only when scoping to a project — omitting it means "every tender", as before.
+  if (params.projectId !== undefined) qs.set("projectId", String(params.projectId));
   const page = await apiRequest<TenderPage>(`/api/v1/tenders?${qs.toString()}`);
   return page.content.map(tenderFromApi);
+}
+
+/** The tender(s) a project was handed off from — the Project workspace's Tender tab. */
+export async function listTendersForProject(projectId: number): Promise<Tender[]> {
+  const rows = await apiRequest<TenderApiResponse[]>(`/api/v1/projects/${projectId}/tenders`);
+  return rows.map(tenderFromApi);
 }
 
 export async function createTenderApi(t: Partial<Tender>): Promise<Tender> {

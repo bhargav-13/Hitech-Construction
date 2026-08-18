@@ -9,8 +9,9 @@ import type { Task } from "./taskTypes";
  *
  * The rule the client asked for: a task's real data belongs to whoever raised it. Only the
  * **creator** and **Super Admin** can edit its fields or delete it. The **assignee** owns the work
- * rather than the record, so they can move status and progress but nothing else. Everyone who can
- * see the task — followers included — can always attach files and chat.
+ * rather than the record, so they can move status and progress and tick sub tasks off, but they
+ * can't add, rename or remove sub tasks — the checklist itself is part of the record. Everyone who
+ * can see the task — followers included — can always attach files and chat.
  *
  * The backend still enforces its own TASKOPAD:* matrix; this is the UI half, so controls a user
  * can't use are disabled rather than failing on save.
@@ -21,6 +22,11 @@ export interface TaskRights {
   /** Creator, Super Admin or the assignee — the work-progress fields. */
   canSetStatus: boolean;
   canSetProgress: boolean;
+  /**
+   * Creator, Super Admin or the assignee — ticking sub tasks off. Separate from `canEditAll`
+   * because checking an item is doing the work, while adding or deleting one edits the record.
+   */
+  canToggleSubtasks: boolean;
   /** Deleting is a record-level act, so it tracks canEditAll. */
   canDelete: boolean;
   /** Approving a completion request is the creator's call (or Super Admin's). */
@@ -33,6 +39,7 @@ const FULL_RIGHTS: TaskRights = {
   canEditAll: true,
   canSetStatus: true,
   canSetProgress: true,
+  canToggleSubtasks: true,
   canDelete: true,
   canApprove: true,
   reason: null,
@@ -62,9 +69,10 @@ export function computeTaskRights(
       canEditAll: false,
       canSetStatus: true,
       canSetProgress: true,
+      canToggleSubtasks: true,
       canDelete: false,
       canApprove: false,
-      reason: "You're the assignee — you can update status and progress, comment and attach files. Only the creator can change the task's details.",
+      reason: "You're the assignee — you can update status and progress, tick sub tasks off, comment and attach files. Only the creator can change the task's details.",
     };
   }
 
@@ -72,6 +80,7 @@ export function computeTaskRights(
     canEditAll: false,
     canSetStatus: false,
     canSetProgress: false,
+    canToggleSubtasks: false,
     canDelete: false,
     canApprove: false,
     reason: "You can comment and attach files here. Only the task's creator can change its details.",

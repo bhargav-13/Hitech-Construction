@@ -27,7 +27,7 @@ import { useUsers } from "@/lib/useUsers";
 import { useProjects } from "@/lib/useProjects";
 import { useProjectScope } from "@/lib/projectScope";
 import { useTaskStore } from "@/lib/taskStore";
-import { PRIORITY_STYLE, formatTaskDate, isDueToday, isOverdue, toIso } from "@/lib/taskTypes";
+import { PRIORITY_STYLE, formatTaskDate, formatTaskDateTime, isDueToday, isOverdue, toIso } from "@/lib/taskTypes";
 import type { Task } from "@/lib/taskTypes";
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -309,7 +309,7 @@ export default function TaskopadDashboardPage() {
                         <span className="font-medium">{userName(a.userId)}</span> · {a.text}
                       </div>
                       <div className="truncate text-xs text-gray-400">{a.task}</div>
-                      <div className="text-[10px] text-gray-400">{formatTaskDate(a.at)}</div>
+                      <div className="text-[10px] text-gray-400">{formatTaskDateTime(a.at)}</div>
                     </div>
                   </div>
                 ))}

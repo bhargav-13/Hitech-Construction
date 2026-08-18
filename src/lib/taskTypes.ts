@@ -1,7 +1,7 @@
 // TaskOPad-style task model. Richer than the legacy `TodoTask` in types.ts (which is left
 // untouched for the existing project To-Do screens) — this one backs the Taskopad module.
 
-import { formatDateIST, formatDateTimeIST } from "./datetime";
+import { dateKeyIST, formatDateIST, formatDateTimeIST, todayIST } from "./datetime";
 
 export type TaskStatus = "Pending" | "In Progress" | "On Hold" | "Stuck" | "Completed" | "Awaiting Approval";
 export type TaskPriority = "Low" | "Medium" | "High";
@@ -188,7 +188,8 @@ export function taskFromApi(t: ApiTask): Task {
 // Compares plain "yyyy-MM-dd" strings directly instead of parsing into Date objects. Parsing a
 // date-only string with `new Date(...)` reads it as UTC midnight, which can silently shift the
 // calendar day (and therefore the overdue/due-today flags) depending on the browser's timezone —
-// this is why some tasks weren't showing as overdue for the client.
+// this is why some tasks weren't showing as overdue for the client. "Today" is likewise resolved in
+// IST, so a UTC server and an Indian browser agree on which day it is.
 export function isOverdue(task: Task, today = new Date()): boolean {
   if (task.status === "Completed") return false;
   if (!task.dueDate) return false;
@@ -201,20 +202,15 @@ export function isDueToday(task: Task, today = new Date()): boolean {
 }
 
 function toDateKey(d: Date): string {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
+  return dateKeyIST(d);
 }
 
 export function startOfDay(d: Date): Date {
-  return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  return new Date(`${dateKeyIST(d)}T00:00:00+05:30`);
 }
 
 export function sameDay(a: Date, b: Date): boolean {
-  return (
-    a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate()
-  );
+  return dateKeyIST(a) === dateKeyIST(b);
 }
 
 // Chat and activity timestamps must read in India Standard Time regardless of where they render
@@ -228,6 +224,10 @@ export function formatTaskDateTime(iso: string): string {
   return formatDateTimeIST(iso);
 }
 
-export function toIso(d: Date): string {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+/** `yyyy-MM-dd` for a Date, read in IST — this is what due-date fields and day buckets compare on. */
+export function toIso(d: Date = new Date()): string {
+  return dateKeyIST(d);
 }
+
+/** Today in India as `yyyy-MM-dd`. Re-exported so task screens have one obvious import. */
+export { todayIST };

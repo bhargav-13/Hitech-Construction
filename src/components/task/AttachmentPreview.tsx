@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { ChevronLeft, ChevronRight, Download, FileText, Loader2, X } from "lucide-react";
 import type { TaskAttachment } from "@/lib/taskTypes";
-import { formatTaskDate } from "@/lib/taskTypes";
+import { formatTaskDateTime } from "@/lib/taskTypes";
 
 /** What we can render inline; anything else falls back to a download prompt. */
 type PreviewKind = "image" | "pdf" | "video" | "audio" | "text" | "none";
@@ -161,7 +161,7 @@ export function AttachmentPreview({
           <div className="text-[11px] text-white/60">
             {current.size}
             {current.size && " · "}
-            {formatTaskDate(current.at)}
+            {formatTaskDateTime(current.at)}
             {items.length > 1 && ` · ${index + 1} of ${items.length}`}
           </div>
         </div>

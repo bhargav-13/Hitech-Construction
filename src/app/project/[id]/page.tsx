@@ -6,60 +6,60 @@ import Link from "next/link";
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import {
   ChevronLeft,
-  Clock,
-  Image as ImageIcon,
   Settings,
-  Wrench,
   AlertTriangle,
   Activity,
   ArrowDownRight,
   ArrowUpRight,
   ListTodo,
   MapPin,
+  HardHat,
+  TriangleAlert,
 } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
-import { SimpleTable } from "@/components/SimpleTable";
 import { ProjectSettingModal } from "@/components/ProjectSettingModal";
 import { TaskWorkspace } from "@/components/task/TaskWorkspace";
 import { ProjectMembers } from "@/components/ProjectMembers";
 import { ProjectAttendance } from "@/components/project/ProjectAttendance";
-import { CreateTransactionMenu } from "@/components/CreateTransactionMenu";
-import { TransactionFormModal } from "@/components/TransactionFormModal";
+import { ProjectTransactions } from "@/components/project/ProjectTransactions";
+import { ProjectParties } from "@/components/project/ProjectParties";
+import { ProjectMaterials } from "@/components/project/ProjectMaterials";
+import { ProjectStaff } from "@/components/project/ProjectStaff";
+import { ProjectSite } from "@/components/project/ProjectSite";
+import { ProjectTender } from "@/components/project/ProjectTender";
+import { ProjectActivity } from "@/components/project/ProjectActivity";
 import * as api from "@/lib/api";
-import type { ProjectResponse } from "@/lib/api";
-import { useAppStore } from "@/lib/store";
-import { formatRupee, projectInitials } from "@/lib/projectHelpers";
+import type { ProjectResponse, ProjectSummary } from "@/lib/api";
+import { projectInitials } from "@/lib/projectHelpers";
 import { inr } from "@/lib/format";
-import { txnStyle } from "@/lib/txnDisplay";
-import type { TxnType } from "@/lib/types";
-import {
-  generateProjectAttendance,
-  generateProjectMaterials,
-  generateProjectTasks,
-} from "@/lib/projectTabData";
 
 export const runtime = "edge";
 
-// Real Onsite project workspace tabs
+/**
+ * The project workspace.
+ *
+ * <p>Every tab here renders the owning module's own surface, scoped to this project — a project
+ * doesn't store transactions, staff or materials, it's a lens onto the modules that do. Tabs fetch
+ * on activation rather than on mount, so opening a project is one request, not fourteen.
+ *
+ * <p>Tabs that had nothing behind them ("Subcon", "Equipment", "Files", "MOM", "Inspection") have
+ * been removed rather than left as "coming soon" panels: seven placeholders were the main reason
+ * the module read as unfinished. They come back when they have data.
+ */
 const TABS = [
   "Dashboard",
-  "Design",
-  "Party",
+  "Site",
   "Transaction",
-  "To Do",
-  "Task",
-  "Members",
-  "Attendance",
+  "Party",
   "Material",
-  "Subcon",
-  "Equipment",
-  "Files",
-  "MOM",
-  "Inspection",
+  "Task",
+  "Staff",
+  "Attendance",
+  "Members",
+  "Tender",
+  "Activity",
 ] as const;
 type Tab = (typeof TABS)[number];
-
-const COMING_SOON: Tab[] = ["Design", "Party", "Subcon", "Equipment", "Files", "MOM", "Inspection"];
 
 const STATUS_DISPLAY: Record<ProjectResponse["status"], string> = {
   NOT_STARTED: "Not Started",
@@ -82,35 +82,13 @@ const HEALTH_CHIP: Record<ProjectResponse["health"], string> = {
   AT_RISK: "bg-rose-50 text-rose-700 ring-rose-600/20",
 };
 
-// Adapt the real backend project to the shape the workspace body displays.
-function adapt(p: ProjectResponse) {
-  return {
-    id: String(p.id),
-    name: p.name,
-    address: [p.address, p.city].filter(Boolean).join(", "),
-    status: STATUS_DISPLAY[p.status],
-    health: HEALTH_DISPLAY[p.health],
-    progress: p.progress,
-    inAmount: p.inAmount,
-    outAmount: p.outAmount,
-    stage: p.stage ?? "",
-    category: p.category ?? "",
-    startDate: p.startDate ?? "",
-    endDate: p.endDate ?? "",
-  };
-}
-
 export default function ProjectDetailPage() {
   const params = useParams<{ id: string }>();
   const projectId = Number(params.id);
-  const transactions = useAppStore((s) => s.transactions);
-  const todos = useAppStore((s) => s.todos);
-  const parties = useAppStore((s) => s.parties);
   const [tab, setTab] = useState<Tab>("Dashboard");
   const [editing, setEditing] = useState(false);
-  const [txnType, setTxnType] = useState<TxnType | null>(null);
 
-  const [real, setReal] = useState<ProjectResponse | null>(null);
+  const [project, setProject] = useState<ProjectResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -118,7 +96,7 @@ export default function ProjectDetailPage() {
     setLoading(true);
     setError(null);
     try {
-      setReal(await api.getProjectById(projectId));
+      setProject(await api.getProjectById(projectId));
     } catch (e) {
       setError(e instanceof api.ApiError ? e.message : "Couldn't load this project.");
     } finally {
@@ -129,18 +107,6 @@ export default function ProjectDetailPage() {
   useEffect(() => {
     loadProject();
   }, [loadProject]);
-
-  const project = useMemo(() => (real ? adapt(real) : null), [real]);
-
-  const attendance = useMemo(() => (project ? generateProjectAttendance(project.id) : []), [project]);
-  const materials = useMemo(() => (project ? generateProjectMaterials(project.id) : []), [project]);
-  const tasks = useMemo(() => (project ? generateProjectTasks(project.id) : []), [project]);
-  const projectTxns = useMemo(
-    () => transactions.filter((t) => t.projectId === params.id),
-    [transactions, params.id]
-  );
-  const projectTodos = useMemo(() => todos.filter((t) => t.projectId === params.id), [todos, params.id]);
-  const partyName = (id: string) => parties.find((p) => p.id === id)?.name ?? "—";
 
   if (loading) {
     return (
@@ -153,19 +119,21 @@ export default function ProjectDetailPage() {
     );
   }
 
-  if (error || !project || !real) {
+  if (error || !project) {
     return (
       <AppShell title="Projects">
         <div className="flex flex-col items-center justify-center rounded-xl border border-rose-200 bg-rose-50/60 py-16 text-center">
           <AlertTriangle size={24} className="mb-2 text-rose-500" />
           <p className="text-sm font-medium text-rose-700">{error ?? "Project not found."}</p>
-          <Link href="/project" className="mt-3 text-sm font-medium text-brand-accent hover:underline">Back to projects</Link>
+          <Link href="/project" className="mt-3 text-sm font-medium text-brand-accent hover:underline">
+            Back to projects
+          </Link>
         </div>
       </AppShell>
     );
   }
 
-  const balance = projectTxns.reduce((s, t) => s + (t.flow === "in" ? t.amount : t.flow === "out" ? -t.amount : 0), 0);
+  const address = [project.address, project.city].filter(Boolean).join(", ");
 
   return (
     <AppShell title="Projects">
@@ -182,22 +150,26 @@ export default function ProjectDetailPage() {
           <div>
             <div className="flex items-center gap-2">
               <h2 className="text-xl font-semibold tracking-tight text-slate-900">{project.name}</h2>
-              <span className="font-mono text-xs text-slate-400">{real.projectCode}</span>
+              <span className="font-mono text-xs text-slate-400">{project.projectCode}</span>
             </div>
             <div className="mt-1 flex items-center gap-1.5 text-sm text-slate-500">
               <MapPin size={14} className="text-slate-400" />
-              {project.address || "No address set"}
+              {address || "No address set"}
             </div>
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <span className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-medium ring-1 ring-inset ${STATUS_CHIP[real.status]}`}>
-            {project.status}
+          <span className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-medium ring-1 ring-inset ${STATUS_CHIP[project.status]}`}>
+            {STATUS_DISPLAY[project.status]}
           </span>
-          <span className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-medium ring-1 ring-inset ${HEALTH_CHIP[real.health]}`}>
-            {project.health}
+          <span className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-medium ring-1 ring-inset ${HEALTH_CHIP[project.health]}`}>
+            {HEALTH_DISPLAY[project.health]}
           </span>
-          <button onClick={() => setEditing(true)} title="Project settings" className="rounded-lg border border-slate-200 bg-white p-2 text-slate-500 transition hover:bg-slate-50 hover:text-slate-700">
+          <button
+            onClick={() => setEditing(true)}
+            title="Project settings"
+            className="rounded-lg border border-slate-200 bg-white p-2 text-slate-500 transition hover:bg-slate-50 hover:text-slate-700"
+          >
             <Settings size={16} />
           </button>
         </div>
@@ -217,168 +189,237 @@ export default function ProjectDetailPage() {
         ))}
       </div>
 
-      {tab === "Dashboard" && (
-        <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-            <StatCard icon={<Activity size={16} />} tint="bg-cyan-50 text-cyan-600" label="Progress" value={`${real.progress}%`} />
-            <StatCard icon={<ArrowDownRight size={16} />} tint="bg-emerald-50 text-emerald-600" label="Amount In" value={inr(real.inAmount)} />
-            <StatCard icon={<ArrowUpRight size={16} />} tint="bg-rose-50 text-rose-600" label="Amount Out" value={inr(real.outAmount)} />
-            <StatCard icon={<ListTodo size={16} />} tint="bg-amber-50 text-amber-600" label="To Do" value={String(real.todoCount)} />
-          </div>
-
-          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <div className="mb-1.5 flex items-center justify-between text-sm">
-              <span className="text-slate-500">Overall progress</span>
-              <span className="font-semibold text-slate-900">{real.progress}%</span>
-            </div>
-            <div className="h-2 w-full overflow-hidden rounded-full bg-slate-100">
-              <div className="h-full rounded-full bg-cyan-500" style={{ width: `${real.progress}%` }} />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-x-6 gap-y-4 rounded-2xl border border-slate-200 bg-white p-5 text-sm shadow-sm md:grid-cols-3">
-            <InfoRow label="Status" value={project.status} />
-            <InfoRow label="Health" value={project.health} />
-            <InfoRow label="Stage" value={project.stage || "—"} />
-            <InfoRow label="Category" value={project.category || "—"} />
-            <InfoRow label="Start Date" value={project.startDate || "—"} />
-            <InfoRow label="End Date" value={project.endDate || "—"} />
-            <InfoRow label="Project Value" value={inr(real.projectValue)} />
-            <InfoRow label="Client" value={real.customerName || "—"} />
-            <InfoRow label="Key Personnel" value={real.keyPersonnel || "—"} />
-          </div>
-
-          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <h3 className="mb-3 text-sm font-semibold text-slate-700">Attendance (Last 7 Days)</h3>
-            <div className="h-56">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={attendance}>
-                  <CartesianGrid vertical={false} stroke="#eef2f1" />
-                  <XAxis dataKey="date" tick={{ fontSize: 11, fill: "#64748b" }} axisLine={false} tickLine={false} />
-                  <YAxis tick={{ fontSize: 11, fill: "#94a3b8" }} axisLine={false} tickLine={false} />
-                  <Tooltip contentStyle={{ borderRadius: 10, border: "1px solid #e2e8f0", fontSize: 12 }} />
-                  <Bar dataKey="workers" fill="#0891b2" radius={[5, 5, 0, 0]} maxBarSize={44} />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {tab === "Transaction" && (
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <div className="grid flex-1 grid-cols-2 gap-4">
-              <div className="rounded-xl border border-gray-200 bg-white p-4">
-                <div className="text-sm text-gray-500">Project Balance</div>
-                <div className="mt-1 text-xl font-semibold text-gray-800">{formatRupee(balance)}</div>
-                <div className="text-xs text-gray-400">In: {formatRupee(project.inAmount)} · Out: {formatRupee(project.outAmount)}</div>
-              </div>
-              <div className="rounded-xl border border-gray-200 bg-white p-4">
-                <div className="text-sm text-gray-500">Transactions</div>
-                <div className="mt-1 text-xl font-semibold text-gray-800">{projectTxns.length}</div>
-                <div className="text-xs text-gray-400">on this project</div>
-              </div>
-            </div>
-            <div className="ml-4">
-              <CreateTransactionMenu onPick={(t) => (t === "Sales Invoice" ? setTxnType("Sales Invoice") : setTxnType(t))} />
-            </div>
-          </div>
-          <div className="overflow-hidden rounded-xl border border-gray-200 bg-white">
-            {projectTxns.length === 0 ? (
-              <div className="py-10 text-center text-sm text-gray-400">No transactions yet.</div>
-            ) : (
-              projectTxns.map((t) => {
-                const style = txnStyle(t.type, t.flow);
-                return (
-                  <div key={t.id} className="flex items-center justify-between border-b border-gray-50 px-4 py-3 last:border-b-0">
-                    <div>
-                      <div className="text-sm font-medium text-gray-800">{partyName(t.partyId)}</div>
-                      <div className="text-xs text-gray-400">{t.type} · {t.date} · {t.description}</div>
-                    </div>
-                    <div className={`text-sm font-semibold ${style.amountColor}`}>{style.sign}{formatRupee(t.amount)}</div>
-                  </div>
-                );
-              })
-            )}
-          </div>
-        </div>
-      )}
-
-      {tab === "To Do" && (
-        <SimpleTable
-          columns={[
-            { key: "title", label: "Task" },
-            { key: "assignee", label: "Assignee" },
-            { key: "priority", label: "Priority" },
-            { key: "dueDate", label: "Due Date" },
-            { key: "status", label: "Status" },
-          ]}
-          rows={projectTodos.length ? projectTodos.map((t) => ({ ...t })) : [{ title: "No to-dos for this project", assignee: "", priority: "", dueDate: "", status: "" }]}
-        />
-      )}
-
-      {/* Project-scoped Taskopad workspace — same surface as the Taskopad module, filtered to this project. */}
+      {/* Each tab mounts only when opened, so a project page is one request rather than fourteen. */}
+      {tab === "Dashboard" && <ProjectDashboard project={project} />}
+      {tab === "Site" && <ProjectSite project={project} />}
+      {tab === "Transaction" && <ProjectTransactions projectId={projectId} />}
+      {tab === "Party" && <ProjectParties projectId={projectId} />}
+      {tab === "Material" && <ProjectMaterials projectId={projectId} />}
       {tab === "Task" && (
         // TaskWorkspace reads query params, which needs a boundary for the production build.
         <Suspense fallback={null}>
           <TaskWorkspace projectId={params.id} />
         </Suspense>
       )}
-
-      {tab === "Members" && <ProjectMembers projectId={params.id} />}
-
+      {tab === "Staff" && <ProjectStaff projectId={projectId} />}
       {tab === "Attendance" && <ProjectAttendance projectId={params.id} />}
-
-      {tab === "Material" && (
-        <SimpleTable
-          columns={[
-            { key: "date", label: "Date" },
-            { key: "material", label: "Material" },
-            { key: "movement", label: "Movement" },
-            { key: "quantity", label: "Quantity" },
-            { key: "unit", label: "Unit" },
-          ]}
-          rows={materials}
-        />
-      )}
-
-      {COMING_SOON.includes(tab) && <ComingSoonPanel tab={tab} />}
+      {tab === "Members" && <ProjectMembers projectId={params.id} />}
+      {tab === "Tender" && <ProjectTender projectId={projectId} />}
+      {tab === "Activity" && <ProjectActivity projectId={projectId} />}
 
       {editing && (
-        <ProjectSettingModal
-          project={real}
-          onClose={() => setEditing(false)}
-          onSaved={loadProject}
-        />
+        <ProjectSettingModal project={project} onClose={() => setEditing(false)} onSaved={loadProject} />
       )}
-      {txnType && <TransactionFormModal type={txnType} fixedProjectId={project.id} onClose={() => setTxnType(null)} />}
     </AppShell>
   );
 }
 
-function ComingSoonPanel({ tab }: { tab: string }) {
-  const ICONS: Record<string, React.ComponentType<{ size?: number }>> = { Files: ImageIcon, MOM: Clock, Inspection: Wrench };
-  const Icon = ICONS[tab] ?? Clock;
+/**
+ * The Dashboard tab. Every number comes from `/projects/{id}/summary`, which each module computes
+ * from its own records — previously these tiles read `projects.in_amount`, `out_amount` and
+ * `todo_count`, which were free-text fields on the settings modal and so could never disagree with
+ * whatever someone last typed.
+ */
+function ProjectDashboard({ project }: { project: ProjectResponse }) {
+  const [summary, setSummary] = useState<ProjectSummary | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError("");
+    api
+      .getProjectSummary(project.id)
+      .then((s) => {
+        if (!cancelled) setSummary(s);
+      })
+      .catch((e: unknown) => {
+        if (!cancelled) setError(e instanceof api.ApiError ? e.message : "Couldn't load this project's figures.");
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [project.id]);
+
+  const trend = useMemo(
+    () =>
+      (summary?.manpower?.trend ?? []).map((d) => ({
+        date: d.date.slice(5), // MM-DD is enough on an axis
+        workers: d.workers,
+      })),
+    [summary]
+  );
+
+  if (loading) {
+    return (
+      <div className="space-y-4">
+        <div className="h-24 animate-pulse rounded-2xl border border-slate-200 bg-white" />
+        <div className="h-64 animate-pulse rounded-2xl border border-slate-200 bg-white" />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="rounded-xl border border-rose-200 bg-rose-50/60 px-4 py-8 text-center text-sm text-rose-700">
+        {error}
+      </div>
+    );
+  }
+
+  const finance = summary?.finance ?? null;
+  const tasks = summary?.tasks ?? null;
+  const manpower = summary?.manpower ?? null;
+  const progress = summary?.progress;
+
   return (
-    <div className="flex min-h-[360px] items-center justify-center rounded-xl border border-dashed border-gray-300 bg-white">
-      <div className="flex flex-col items-center text-center">
-        <div className="mb-3 flex h-14 w-14 items-center justify-center rounded-full bg-teal-50 text-brand-accent">
-          <Icon size={24} />
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+        <StatCard
+          icon={<Activity size={16} />}
+          tint="bg-cyan-50 text-cyan-600"
+          label="Progress (reported)"
+          value={`${project.progress}%`}
+          note={progress && tasks ? `${progress.derivedFromTasks}% of tasks done` : undefined}
+          warn={progress?.diverges}
+        />
+        <StatCard
+          icon={<ArrowDownRight size={16} />}
+          tint="bg-emerald-50 text-emerald-600"
+          label="Billed to client"
+          value={finance ? inr(finance.billed) : "—"}
+          note={finance ? `${inr(finance.outstanding)} still to collect` : "No Vyapar access"}
+        />
+        <StatCard
+          icon={<ArrowUpRight size={16} />}
+          tint="bg-rose-50 text-rose-600"
+          label="Spent on site"
+          value={finance ? inr(finance.spent) : "—"}
+          note={finance ? `${inr(finance.payable)} still to pay` : "No Vyapar access"}
+        />
+        <StatCard
+          icon={<ListTodo size={16} />}
+          tint="bg-amber-50 text-amber-600"
+          label="Open tasks"
+          value={tasks ? String(tasks.open) : "—"}
+          note={tasks ? `${tasks.overdue} overdue · ${tasks.dueThisWeek} due this week` : "No Taskopad access"}
+          warn={!!tasks && tasks.overdue > 0}
+        />
+      </div>
+
+      {manpower && (
+        <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+          <StatCard
+            icon={<HardHat size={16} />}
+            tint="bg-indigo-50 text-indigo-600"
+            label="On site (latest day)"
+            value={String(manpower.presentToday)}
+            note={`${manpower.assignedMembers} assigned to this project`}
+          />
+          <StatCard
+            icon={<HardHat size={16} />}
+            tint="bg-indigo-50 text-indigo-600"
+            label="Man-days"
+            value={manpower.manDays.toFixed(1)}
+            note={`${summary?.from} → ${summary?.to}`}
+          />
+          <StatCard
+            icon={<ArrowUpRight size={16} />}
+            tint="bg-slate-100 text-slate-600"
+            label="Labour cost (allocated)"
+            value={inr(manpower.labourCost)}
+            note={manpower.costIncomplete ? "Some workers have no pay rate on file" : "From attendance × day rate"}
+            warn={manpower.costIncomplete}
+          />
+          <StatCard
+            icon={<Activity size={16} />}
+            tint="bg-amber-50 text-amber-600"
+            label="Overtime hours"
+            value={manpower.overtimeHours.toFixed(1)}
+          />
         </div>
-        <div className="text-base font-medium text-gray-700">{tab}</div>
-        <div className="mt-1 text-sm text-gray-400">This tab is coming soon.</div>
+      )}
+
+      <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="mb-1.5 flex items-center justify-between text-sm">
+          <span className="text-slate-500">Overall progress (as reported by the site)</span>
+          <span className="font-semibold text-slate-900">{project.progress}%</span>
+        </div>
+        <div className="h-2 w-full overflow-hidden rounded-full bg-slate-100">
+          <div className="h-full rounded-full bg-cyan-500" style={{ width: `${project.progress}%` }} />
+        </div>
+        {progress?.diverges && (
+          <p className="mt-2 flex items-center gap-1.5 text-xs text-amber-600">
+            <TriangleAlert size={13} />
+            Tasks say {progress.derivedFromTasks}% complete. Percent-complete on site is a judgement
+            call, but a gap this wide is worth a second look.
+          </p>
+        )}
+      </div>
+
+      <div className="grid grid-cols-2 gap-x-6 gap-y-4 rounded-2xl border border-slate-200 bg-white p-5 text-sm shadow-sm md:grid-cols-3">
+        <InfoRow label="Status" value={STATUS_DISPLAY[project.status]} />
+        <InfoRow label="Health" value={HEALTH_DISPLAY[project.health]} />
+        <InfoRow label="Stage" value={project.stage || "—"} />
+        <InfoRow label="Category" value={project.category || "—"} />
+        <InfoRow label="Start Date" value={project.startDate || "—"} />
+        <InfoRow label="End Date" value={project.endDate || "—"} />
+        <InfoRow label="Contract Value" value={inr(project.projectValue)} />
+        <InfoRow label="Client" value={project.customerName || "—"} />
+        <InfoRow label="Key Personnel" value={project.keyPersonnel || "—"} />
+      </div>
+
+      <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <h3 className="mb-3 text-sm font-semibold text-slate-700">
+          Headcount on site {summary ? `(${summary.from} → ${summary.to})` : ""}
+        </h3>
+        {trend.length === 0 ? (
+          <div className="py-10 text-center text-sm text-slate-400">
+            No attendance has been recorded against this project in this period.
+          </div>
+        ) : (
+          <div className="h-56">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={trend}>
+                <CartesianGrid vertical={false} stroke="#eef2f1" />
+                <XAxis dataKey="date" tick={{ fontSize: 11, fill: "#64748b" }} axisLine={false} tickLine={false} />
+                <YAxis tick={{ fontSize: 11, fill: "#94a3b8" }} axisLine={false} tickLine={false} allowDecimals={false} />
+                <Tooltip contentStyle={{ borderRadius: 10, border: "1px solid #e2e8f0", fontSize: 12 }} />
+                <Bar dataKey="workers" fill="#0891b2" radius={[5, 5, 0, 0]} maxBarSize={44} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
-function StatCard({ icon, tint, label, value }: { icon: React.ReactNode; tint: string; label: string; value: string }) {
+function StatCard({
+  icon,
+  tint,
+  label,
+  value,
+  note,
+  warn,
+}: {
+  icon: React.ReactNode;
+  tint: string;
+  label: string;
+  value: string;
+  note?: string;
+  warn?: boolean;
+}) {
   return (
     <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
       <span className={`flex h-8 w-8 items-center justify-center rounded-lg ${tint}`}>{icon}</span>
       <div className="mt-3 text-xl font-semibold tracking-tight text-slate-900">{value}</div>
       <div className="mt-0.5 text-xs text-slate-500">{label}</div>
+      {note && <div className={`mt-1 text-[11px] ${warn ? "text-amber-600" : "text-slate-400"}`}>{note}</div>}
     </div>
   );
 }

@@ -5,7 +5,7 @@ import { create } from "zustand";
 import { useTaskStore } from "@/lib/taskStore";
 import { useAuthStore } from "@/lib/authStore";
 import { isOverdue, isDueToday } from "@/lib/taskTypes";
-import { formatDateIST } from "@/lib/datetime";
+import { formatDateIST, msIST } from "@/lib/datetime";
 import type { Task } from "@/lib/taskTypes";
 
 const SEEN_KEY = "taskopad:notifSeen";
@@ -45,9 +45,11 @@ export const useNotifSeen = create<SeenState>((set) => ({
   },
 }));
 
+// Backend timestamps carry no timezone, so a plain `new Date(iso)` read them in the runtime's own
+// zone — which made a comment posted seconds ago come back as "5h ago" and threw off the unread
+// counts that compare these against `Date.now()`. `msIST` resolves them as IST.
 export function ms(iso: string): number {
-  const t = new Date(iso).getTime();
-  return Number.isNaN(t) ? 0 : t;
+  return msIST(iso);
 }
 
 export function relativeTime(iso: string): string {

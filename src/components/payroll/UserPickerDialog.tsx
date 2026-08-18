@@ -35,7 +35,8 @@ export function UserPickerDialog({ onClose }: { onClose: () => void }) {
   }, [users, linkedIds, search]);
 
   function pick(u: (typeof users)[number]) {
-    setFromUser({ id: u.id, name: u.fullName, email: u.email, phone: u.phoneNumber ?? null });
+    // Non-login members have no address; the staff form treats an empty string as "none".
+    setFromUser({ id: u.id, name: u.fullName, email: u.email ?? "", phone: u.phoneNumber ?? null });
     router.push("/payroll/staff/add");
   }
 

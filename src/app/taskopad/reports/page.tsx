@@ -37,7 +37,7 @@ import { useDepartments } from "@/lib/useDepartments";
 import { useProjects } from "@/lib/useProjects";
 import { useProjectScope } from "@/lib/projectScope";
 import { useTaskStore } from "@/lib/taskStore";
-import { TASK_STATUSES, formatTaskDate, isDueToday, isOverdue } from "@/lib/taskTypes";
+import { TASK_STATUSES, formatTaskDate, formatTaskDateTime, isDueToday, isOverdue } from "@/lib/taskTypes";
 import type { Task, TaskStatus } from "@/lib/taskTypes";
 
 type ReportId =
@@ -707,7 +707,7 @@ function ReportBody({
             </td>
             <td className="px-4 py-2.5 text-gray-600">{a.text}</td>
             <td className="px-4 py-2.5 text-gray-600">{a.task}</td>
-            <td className="px-4 py-2.5 text-gray-500">{formatTaskDate(a.at)}</td>
+            <td className="px-4 py-2.5 whitespace-nowrap text-gray-500">{formatTaskDateTime(a.at)}</td>
           </tr>
         ))}
       </Table>

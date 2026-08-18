@@ -18,6 +18,7 @@ import type {
   ReimbursementApi,
   ReimbursementCreateBody,
 } from "./api";
+import { useVyaparProjectId } from "./projectScope";
 
 /**
  * Fetch hooks for the real Payroll data layer (attendance, leave, loans, reimbursements,
@@ -52,7 +53,19 @@ export function useMemberAttendance(userId: number | null, from: string, to: str
   return { rows, loading, error, refresh };
 }
 
+/**
+ * The attendance muster, following the header's project selector.
+ *
+ * <p>Payroll used to ignore the global project scope entirely — the muster always showed every
+ * member on every site, which is the wrong answer for the common question ("who was on Tower B last
+ * week?"). With a project selected it now loads that project's attendance instead; "All projects"
+ * keeps the company-wide muster.
+ *
+ * <p>The switch also changes what an edit means: marking someone present while a project is
+ * selected files that day against the project, which is what makes per-site labour costing work.
+ */
 export function useMuster(from: string, to: string) {
+  const scopedProjectId = useVyaparProjectId();
   const [rows, setRows] = useState<AttendanceApiResponse[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -63,28 +76,34 @@ export function useMuster(from: string, to: string) {
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
-      setRows(await api.getMuster(from, to));
+      setRows(
+        scopedProjectId === undefined
+          ? await api.getMuster(from, to)
+          : await api.getProjectAttendance(scopedProjectId, from, to)
+      );
       setError("");
-      setLoadedKey(`${from}:${to}`);
+      setLoadedKey(`${from}:${to}:${scopedProjectId ?? "all"}`);
     } catch (err) {
       setError(err instanceof api.ApiError ? err.message : "Unable to load muster.");
     } finally {
       setLoading(false);
     }
-  }, [from, to]);
+  }, [from, to, scopedProjectId]);
 
   useEffect(() => {
     refresh();
   }, [refresh]);
 
   const edit = async (body: api.AttendanceEditRequestBody) => {
-    const updated = await api.editAttendance(body);
+    // Default the day to the selected project, so a mark made while scoped to a site is costed
+    // against that site. An explicit projectId on the call still wins.
+    const updated = await api.editAttendance({ projectId: scopedProjectId, ...body });
     await refresh();
     return updated;
   };
 
   // True once the current range has loaded at least once; stays true through revalidations.
-  const ready = loadedKey === `${from}:${to}`;
+  const ready = loadedKey === `${from}:${to}:${scopedProjectId ?? "all"}`;
 
   return { rows, loading, ready, error, refresh, edit };
 }

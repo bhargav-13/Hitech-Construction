@@ -25,7 +25,8 @@ import { useUsers } from "@/lib/useUsers";
 import { useDepartments } from "@/lib/useDepartments";
 import { useProjects } from "@/lib/useProjects";
 import { useTaskStore } from "@/lib/taskStore";
-import { TASK_PRIORITIES, TASK_STATUSES, formatTaskDate, formatTaskDateTime, toIso } from "@/lib/taskTypes";
+import { TASK_PRIORITIES, TASK_STATUSES, formatTaskDateTime, toIso } from "@/lib/taskTypes";
+import { formatChatStampIST, msIST } from "@/lib/datetime";
 import type { SubTask, Task, TaskAttachment, TaskComment, TaskPriority, TaskStatus } from "@/lib/taskTypes";
 import { UserAvatar, PeopleSelect, PeopleMultiSelect, ClientSelect } from "./TaskBits";
 import type { Person } from "./TaskBits";
@@ -87,9 +88,11 @@ function activityIcon(text: string) {
  * bubble left on a light background. Attachments render as a compact file card inside a bubble
  * so uploads show up in the conversation instead of being hidden away in the Attachment tab.
  */
+// `id` is prefixed so a comment and an attachment can't collide as React keys; `sourceId` keeps the
+// unprefixed id around for callers that need to act on the underlying record.
 type ChatEntry =
-  | { kind: "comment"; id: string; userId: string; at: string; text: string }
-  | { kind: "attachment"; id: string; userId: string; at: string; att: TaskAttachment };
+  | { kind: "comment"; id: string; sourceId: string; userId: string; at: string; text: string }
+  | { kind: "attachment"; id: string; sourceId: string; userId: string; at: string; att: TaskAttachment };
 
 function ChatThread({
   comments,
@@ -97,20 +100,25 @@ function ChatThread({
   userName,
   meId,
   onOpenAttachment,
+  onRemove,
 }: {
   comments: TaskComment[];
   attachments: TaskAttachment[];
   userName: (id: string) => string;
   meId: string;
   onOpenAttachment: (att: TaskAttachment) => void;
+  /** Set only while composing a new task, where nothing has been sent yet and can still be pulled back. */
+  onRemove?: (kind: "comment" | "attachment", id: string) => void;
 }) {
   const entries = useMemo<ChatEntry[]>(() => {
     const merged: ChatEntry[] = [
-      ...comments.map((c) => ({ kind: "comment" as const, id: `c-${c.id}`, userId: c.userId, at: c.at, text: c.text })),
-      ...attachments.map((a) => ({ kind: "attachment" as const, id: `a-${a.id}`, userId: a.userId, at: a.at, att: a })),
+      ...comments.map((c) => ({ kind: "comment" as const, id: `c-${c.id}`, sourceId: c.id, userId: c.userId, at: c.at, text: c.text })),
+      ...attachments.map((a) => ({ kind: "attachment" as const, id: `a-${a.id}`, sourceId: a.id, userId: a.userId, at: a.at, att: a })),
     ];
-    // Oldest first — matches WhatsApp reading order; the composer sits below.
-    merged.sort((x, y) => x.at.localeCompare(y.at));
+    // Oldest first — matches WhatsApp reading order; the composer sits below. Sorted on the resolved
+    // instant rather than the raw string, since drafted entries and saved ones are spelled
+    // differently (`…Z` vs `…+05:30`) and would not sort against each other as text.
+    merged.sort((x, y) => msIST(x.at) - msIST(y.at));
     return merged;
   }, [comments, attachments]);
 
@@ -144,7 +152,22 @@ function ChatThread({
               ) : (
                 <AttachmentBubble att={e.att} mine={mine} onOpen={onOpenAttachment} />
               )}
-              <span className="mt-0.5 px-1 text-[10px] text-gray-400">{formatTaskDate(e.at)}</span>
+              <span className="mt-0.5 flex items-center gap-1 px-1 text-[10px] text-gray-400">
+                {onRemove ? (
+                  <>
+                    <span title="Sent when you create the task">Not sent yet</span>
+                    <button
+                      onClick={() => onRemove(e.kind, e.sourceId)}
+                      title="Remove"
+                      className="text-gray-400 transition-colors duration-150 hover:text-rose-500"
+                    >
+                      <X size={11} />
+                    </button>
+                  </>
+                ) : (
+                  <span title={formatTaskDateTime(e.at)}>{formatChatStampIST(e.at)}</span>
+                )}
+              </span>
             </div>
           </div>
         );
@@ -287,6 +310,7 @@ export function TaskDrawer({
   const patchTask = useTaskStore((s) => s.patchTask);
   const addComment = useTaskStore((s) => s.addComment);
   const addAttachment = useTaskStore((s) => s.addAttachment);
+  const toggleSubtask = useTaskStore((s) => s.toggleSubtask);
   // Re-read the live task from the store so newly added comments/attachments/activity show at once.
   const liveTask = useTaskStore((s) => (existing ? s.tasks.find((t) => t.id === existing.id) ?? existing : undefined));
 
@@ -313,11 +337,22 @@ export function TaskDrawer({
   const [departmentId, setDepartmentId] = useState<string>(existing?.departmentId ?? "");
   const [panel, setPanel] = useState<Panel>("Comment");
   const [commentText, setCommentText] = useState("");
+  // Comments and files added while composing a brand-new task. The API can only hang them off a
+  // task id, which doesn't exist yet, so they're held here and posted right after the create call.
+  const [draftComments, setDraftComments] = useState<TaskComment[]>([]);
+  const [draftAttachments, setDraftAttachments] = useState<TaskAttachment[]>([]);
+  // Set once the create succeeds. Guards against a second create if posting the drafted
+  // comments/files then fails and the user hits Submit again.
+  const [createdId, setCreatedId] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   const [sendingComment, setSendingComment] = useState(false);
+  const [togglingSubtaskId, setTogglingSubtaskId] = useState<string | null>(null);
   const [previewId, setPreviewId] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  // Ids for drafted chat/files. A counter rather than Date.now(), which repeats within a millisecond
+  // and would hand two entries the same React key.
+  const draftSeq = useRef(0);
 
   // Who may change what. A task's details belong to its creator (and Super Admin); the assignee
   // owns the work, so they get status and progress. Everyone else can still chat and attach.
@@ -379,12 +414,42 @@ export function TaskDrawer({
     setSaving(true);
     setError("");
     try {
-      if (existing) await saveTask(existing.id, payload);
-      else await createTask(payload);
+      const targetId = existing?.id ?? createdId;
+      let taskId: string;
+      if (targetId) {
+        await saveTask(targetId, payload);
+        taskId = targetId;
+      } else {
+        const created = await createTask(payload);
+        setCreatedId(created.id);
+        taskId = created.id;
+      }
+      // Drafted chat and files can only be posted now that the task has an id. Sequential, because
+      // each call returns the whole task and the store mirrors the last response — parallel writes
+      // would race and drop entries. Each item is cleared as it lands, so a retry after a failure
+      // only resends what's left.
+      await flushDrafts(taskId);
       requestClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not save the task.");
       setSaving(false);
+    }
+  }
+
+  /** Posts the comments/attachments drafted before the task existed. Throws on the first failure. */
+  async function flushDrafts(taskId: string) {
+    for (const c of draftComments) {
+      await addComment(taskId, c.text);
+      setDraftComments((list) => list.filter((x) => x.id !== c.id));
+    }
+    for (const a of draftAttachments) {
+      await addAttachment(taskId, {
+        name: a.name,
+        sizeLabel: a.size,
+        contentType: a.contentType ?? undefined,
+        dataUrl: a.url ?? undefined,
+      });
+      setDraftAttachments((list) => list.filter((x) => x.id !== a.id));
     }
   }
 
@@ -394,11 +459,44 @@ export function TaskDrawer({
     setSubtaskInput("");
   }
 
+  /**
+   * Tick a sub task off.
+   *
+   * For the creator/Super Admin this is just another edited field — it rides along with Save like
+   * the title or the due date. The assignee has no full-save path (their Save is a narrow PATCH of
+   * status and progress), so their tick has to persist on its own through the dedicated toggle
+   * endpoint, and is rolled back if that call fails.
+   */
+  async function onToggleSubtask(s: SubTask) {
+    const next = !s.done;
+    setSubtasks((list) => list.map((x) => (x.id === s.id ? { ...x, done: next } : x)));
+    if (rights.canEditAll || !existing) return;
+    setTogglingSubtaskId(s.id);
+    try {
+      await toggleSubtask(existing.id, s.id);
+    } catch (err) {
+      setSubtasks((list) => list.map((x) => (x.id === s.id ? { ...x, done: !next } : x)));
+      setError(err instanceof Error ? err.message : "Could not update the sub task.");
+    } finally {
+      setTogglingSubtaskId(null);
+    }
+  }
+
   async function sendComment() {
-    if (!commentText.trim() || !existing) return;
+    const text = commentText.trim();
+    if (!text) return;
+    // Composing a new task: hold the message until there's a task to hang it off.
+    if (!existing) {
+      setDraftComments((list) => [
+        ...list,
+        { id: `draft-${++draftSeq.current}`, userId: meId, text, at: new Date().toISOString() },
+      ]);
+      setCommentText("");
+      return;
+    }
     setSendingComment(true);
     try {
-      await addComment(existing.id, commentText.trim());
+      await addComment(existing.id, text);
       setCommentText("");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not add comment.");
@@ -410,7 +508,7 @@ export function TaskDrawer({
   async function onUploadFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     e.target.value = "";
-    if (!file || !existing) return;
+    if (!file) return;
     // Store the file contents as a data URL so it can actually be downloaded later.
     const MAX_BYTES = 8 * 1024 * 1024; // 8 MB
     if (file.size > MAX_BYTES) {
@@ -419,6 +517,22 @@ export function TaskDrawer({
     }
     try {
       const dataUrl = await readAsDataUrl(file);
+      // Composing a new task: keep the file locally until the create call gives us an id.
+      if (!existing) {
+        setDraftAttachments((list) => [
+          ...list,
+          {
+            id: `draft-${++draftSeq.current}`,
+            name: file.name,
+            size: formatBytes(file.size),
+            at: new Date().toISOString(),
+            url: dataUrl,
+            userId: meId,
+            contentType: file.type || null,
+          },
+        ]);
+        return;
+      }
       await addAttachment(existing.id, {
         name: file.name,
         sizeLabel: formatBytes(file.size),
@@ -430,8 +544,19 @@ export function TaskDrawer({
     }
   }
 
+  function removeDraft(kind: "comment" | "attachment", id: string) {
+    if (kind === "comment") setDraftComments((list) => list.filter((c) => c.id !== id));
+    else setDraftAttachments((list) => list.filter((a) => a.id !== id));
+  }
+
   const userName = (id: string) => users.find((u) => u.id === id)?.name ?? "Unknown";
   const meId = authUser ? String(authUser.id) : "";
+
+  // A task being composed has no server-side thread yet, so the side panel runs off the local
+  // drafts instead. Everything below reads these rather than `liveTask` directly.
+  const isDrafting = !existing;
+  const panelComments = liveTask ? liveTask.comments : draftComments;
+  const panelAttachments = liveTask ? liveTask.attachments : draftAttachments;
 
   return (
     <div
@@ -704,12 +829,13 @@ export function TaskDrawer({
                       <input
                         type="checkbox"
                         checked={s.done}
-                        disabled={readOnlyFields}
-                        onChange={() =>
-                          setSubtasks((list) =>
-                            list.map((x) => (x.id === s.id ? { ...x, done: !x.done } : x))
-                          )
+                        disabled={!rights.canToggleSubtasks || togglingSubtaskId === s.id}
+                        title={
+                          rights.canToggleSubtasks
+                            ? undefined
+                            : "Only the task's creator or assignee can tick sub tasks off"
                         }
+                        onChange={() => onToggleSubtask(s)}
                         className="h-3.5 w-3.5 accent-cyan-600 disabled:cursor-not-allowed disabled:opacity-50"
                       />
                       <span className={`flex-1 text-sm ${s.done ? "text-gray-400 line-through" : "text-gray-700"}`}>
@@ -803,17 +929,14 @@ export function TaskDrawer({
             </div>
 
             <div className="flex-1 overflow-y-auto px-4 py-3">
-              {!existing || !liveTask ? (
-                <p className="py-10 text-center text-xs text-gray-400">
-                  Save the task to start a discussion, attach files and see its activity log.
-                </p>
-              ) : panel === "Comment" ? (
+              {panel === "Comment" ? (
                 <ChatThread
-                  comments={liveTask.comments}
-                  attachments={liveTask.attachments}
+                  comments={panelComments}
+                  attachments={panelAttachments}
                   userName={userName}
                   meId={meId}
                   onOpenAttachment={(a) => setPreviewId(a.id)}
+                  onRemove={isDrafting ? removeDraft : undefined}
                 />
               ) : panel === "Attachment" ? (
                 <div className="space-y-3">
@@ -823,10 +946,10 @@ export function TaskDrawer({
                   >
                     <Paperclip size={14} /> Upload a file
                   </button>
-                  {liveTask.attachments.length === 0 ? (
+                  {panelAttachments.length === 0 ? (
                     <p className="py-6 text-center text-xs text-gray-400">No attachments yet.</p>
                   ) : (
-                    liveTask.attachments.map((a) => {
+                    panelAttachments.map((a) => {
                       const previewable = canPreview(a);
                       const isImage = previewable && (a.contentType ?? "").startsWith("image/");
                       return (
@@ -852,10 +975,18 @@ export function TaskDrawer({
                           <div className="min-w-0 flex-1">
                             <div className="truncate text-sm font-medium text-gray-700">{a.name}</div>
                             <div className="text-[10px] text-gray-400">
-                              {a.size} · {formatTaskDate(a.at)}
+                              {a.size} · {isDrafting ? "Uploaded when you create the task" : formatTaskDateTime(a.at)}
                             </div>
                           </div>
-                          {a.url ? (
+                          {isDrafting ? (
+                            <button
+                              onClick={() => removeDraft("attachment", a.id)}
+                              title={`Remove ${a.name}`}
+                              className="shrink-0 rounded-lg border border-gray-200 bg-white p-1.5 text-gray-400 transition-all duration-150 hover:border-rose-200 hover:bg-rose-50 hover:text-rose-500 active:scale-95"
+                            >
+                              <Trash2 size={13} />
+                            </button>
+                          ) : a.url ? (
                             <div className="flex shrink-0 items-center gap-1">
                               {previewable && (
                                 <button
@@ -888,18 +1019,22 @@ export function TaskDrawer({
                     })
                   )}
                 </div>
-              ) : (
+              ) : liveTask ? (
                 <ActivityTimeline items={liveTask.activity} userName={userName} />
+              ) : (
+                <p className="py-10 text-center text-xs text-gray-400">
+                  The activity log starts once the task is created.
+                </p>
               )}
             </div>
 
-            {existing && liveTask && panel === "Comment" && (
+            {panel === "Comment" && (
               <div className="flex items-center gap-2 border-t border-gray-100 px-3 py-2">
                 <input
                   value={commentText}
                   onChange={(e) => setCommentText(e.target.value)}
                   onKeyDown={(e) => e.key === "Enter" && sendComment()}
-                  placeholder="Type a message"
+                  placeholder={isDrafting ? "Type a message — sent on create" : "Type a message"}
                   className="flex-1 rounded-full border border-gray-200 px-3 py-1.5 text-sm outline-none transition-colors duration-150 focus:border-cyan-500"
                 />
                 <button
@@ -923,9 +1058,9 @@ export function TaskDrawer({
         </div>
       </div>
 
-      {previewId && liveTask && (
+      {previewId && panelAttachments.length > 0 && (
         <AttachmentPreview
-          attachments={liveTask.attachments}
+          attachments={panelAttachments}
           startId={previewId}
           onClose={() => setPreviewId(null)}
         />

@@ -55,6 +55,8 @@ export default function ProjectsPage() {
   const [filter, setFilter] = useState<"ALL" | ProjectStatus>("ALL");
   const [selected, setSelected] = useState<ProjectResponse | null>(null);
   const [showNew, setShowNew] = useState(false);
+  /** Derived money per project id — see api.getProjectsFinance. Empty until it loads, or on 403. */
+  const [finance, setFinance] = useState<Record<string, api.ProjectFinance>>({});
 
   async function load() {
     setLoading(true);
@@ -67,6 +69,13 @@ export default function ProjectsPage() {
     } finally {
       setLoading(false);
     }
+    // Real money per project, in one pass over the books rather than a call per card. Best-effort:
+    // a user without Vyapar access still gets the full list, just without the billed/spent line.
+    try {
+      setFinance(await api.getProjectsFinance());
+    } catch {
+      setFinance({});
+    }
   }
 
   useEffect(() => {
@@ -78,8 +87,11 @@ export default function ProjectsPage() {
     const value = projects.reduce((s, p) => s + p.projectValue, 0);
     const ongoing = projects.filter((p) => p.status === "ONGOING").length;
     const atRisk = projects.filter((p) => p.health === "AT_RISK").length;
-    return { total, value, ongoing, atRisk };
-  }, [projects]);
+    // Portfolio-wide receivable, summed from the derived per-project figures rather than from the
+    // old hand-typed in_amount column.
+    const outstanding = Object.values(finance).reduce((s, f) => s + f.outstanding, 0);
+    return { total, value, ongoing, atRisk, outstanding };
+  }, [projects, finance]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -117,9 +129,10 @@ export default function ProjectsPage() {
       </div>
 
       {/* KPI tiles */}
-      <div className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
+      <div className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-5">
         <Kpi icon={<Building2 size={18} />} tint="bg-cyan-50 text-cyan-600" label="Total Projects" value={String(stats.total)} />
         <Kpi icon={<Wallet size={18} />} tint="bg-indigo-50 text-indigo-600" label="Portfolio Value" value={inr(stats.value)} />
+        <Kpi icon={<Wallet size={18} />} tint="bg-amber-50 text-amber-600" label="To Collect" value={inr(stats.outstanding)} />
         <Kpi icon={<Activity size={18} />} tint="bg-emerald-50 text-emerald-600" label="Ongoing" value={String(stats.ongoing)} />
         <Kpi icon={<AlertTriangle size={18} />} tint="bg-rose-50 text-rose-600" label="At Risk" value={String(stats.atRisk)} />
       </div>
@@ -176,7 +189,7 @@ export default function ProjectsPage() {
       ) : (
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
           {filtered.map((p) => (
-            <ProjectCard key={p.id} project={p} onOpen={() => setSelected(p)} />
+            <ProjectCard key={p.id} project={p} finance={finance[String(p.id)]} onOpen={() => setSelected(p)} />
           ))}
         </div>
       )}
@@ -311,7 +324,16 @@ function Kpi({ icon, tint, label, value }: { icon: React.ReactNode; tint: string
   );
 }
 
-function ProjectCard({ project: p, onOpen }: { project: ProjectResponse; onOpen: () => void }) {
+function ProjectCard({
+  project: p,
+  finance,
+  onOpen,
+}: {
+  project: ProjectResponse;
+  /** Derived money for this project; undefined when it has no documents, or the user lacks Vyapar. */
+  finance?: api.ProjectFinance;
+  onOpen: () => void;
+}) {
   const s = STATUS_META[p.status];
   const h = HEALTH_META[p.health];
   return (
@@ -359,6 +381,18 @@ function ProjectCard({ project: p, onOpen }: { project: ProjectResponse; onOpen:
       ) : (
         <div className="mt-4 flex items-center gap-2 text-xs text-slate-400">
           <Layers3 size={14} /> {p.stage || "Awaiting kickoff"}
+        </div>
+      )}
+
+      {/* Billed/collected come from the documents actually filed against this project. */}
+      {finance && (finance.billed > 0 || finance.spent > 0) && (
+        <div className="mt-3 flex items-center justify-between rounded-lg bg-slate-50 px-2.5 py-2 text-xs">
+          <span className="text-slate-500">
+            Billed <span className="font-semibold text-slate-700">{inr(finance.billed)}</span>
+          </span>
+          <span className={finance.outstanding > 0 ? "text-amber-600" : "text-emerald-600"}>
+            {finance.outstanding > 0 ? `${inr(finance.outstanding)} due` : "Fully collected"}
+          </span>
         </div>
       )}
 

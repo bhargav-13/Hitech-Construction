@@ -59,7 +59,7 @@ export default function PayrollPeoplePage() {
       if (posting !== "all" && m.staffType !== posting) return false;
       if (dept !== "all" && (m.departmentName ?? "") !== dept) return false;
       if (!q) return true;
-      return [m.fullName, m.email, m.phoneNumber ?? ""].some((f) => f.toLowerCase().includes(q));
+      return [m.fullName, m.email ?? "", m.phoneNumber ?? ""].some((f) => f.toLowerCase().includes(q));
     });
   }, [members, search, posting, dept]);
 

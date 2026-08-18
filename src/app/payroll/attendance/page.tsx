@@ -11,7 +11,7 @@ import { editAttendance, getUsers, ApiError } from "@/lib/api";
 import type { AttendanceApiResponse, AttendanceCodeApi, UserResponse } from "@/lib/api";
 import { ATTENDANCE_META, DEPARTMENTS } from "@/lib/payrollConfig";
 import { exportRowsToCsv } from "@/lib/vyaparExport";
-import {
+import { AlertTriangle,
   CalendarDays, CheckCheck, ChevronLeft, ChevronRight, CircleCheck, CircleX, Clock, FileSpreadsheet, Plane, Search, Users,
 } from "lucide-react";
 
@@ -72,7 +72,7 @@ export default function AttendancePage() {
     return members.filter((m) => {
       if (dept !== "all" && (m.departmentName ?? "") !== dept) return false;
       if (!q) return true;
-      return m.fullName.toLowerCase().includes(q) || m.email.toLowerCase().includes(q);
+      return m.fullName.toLowerCase().includes(q) || (m.email ?? "").toLowerCase().includes(q);
     });
   }, [members, search, dept]);
 
@@ -296,6 +296,7 @@ function DayView({
               <th className="px-4 py-2 font-medium">Mark</th>
               <th className="px-4 py-2 font-medium">In</th>
               <th className="px-4 py-2 font-medium">Out</th>
+              <th className="px-4 py-2 font-medium">Hours</th>
               <th className="px-4 py-2 font-medium">OT (hrs)</th>
               <th className="px-4 py-2 font-medium">Fine (hrs)</th>
             </tr>
@@ -362,6 +363,20 @@ function DayView({
                   </td>
                   <td className="px-4 py-2.5">
                     <input type="time" value={att?.outTime ?? ""} onChange={(e) => mark(m.id, { outTime: e.target.value || null })} className="rounded-md border border-gray-200 px-2 py-1 text-xs outline-none focus:border-cyan-500" />
+                  </td>
+                  {/* Hours actually worked, derived from the punch pair against the member's shift.
+                      A present day with no punch-out never had its length established, so it is
+                      flagged here rather than quietly counting as a full day in the payroll run. */}
+                  <td className="px-4 py-2.5">
+                    {att?.workedHours != null ? (
+                      <span className="font-medium text-gray-700">{Number(att.workedHours).toFixed(2)}</span>
+                    ) : att?.inTime && !att?.outTime ? (
+                      <span title="Punched in but never out — counts as half a day until corrected" className="inline-flex items-center gap-1 text-amber-600">
+                        <AlertTriangle size={12} /> no punch-out
+                      </span>
+                    ) : (
+                      <span className="text-gray-300">—</span>
+                    )}
                   </td>
                   <td className="px-4 py-2.5">
                     <input type="number" value={Number(att?.overtimeHours ?? 0)} onChange={(e) => mark(m.id, { overtimeHours: Number(e.target.value) })} className="w-16 rounded-md border border-gray-200 px-2 py-1 text-right text-xs outline-none focus:border-cyan-500" />
