@@ -1,14 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { VyaparEmpty } from "@/components/vyapar/VyaparShell";
 import { Drawer, DrawerField } from "@/components/Drawer";
 import { Select } from "@/components/Select";
 import { Spinner } from "@/components/Spinner";
 import { DatePicker } from "@/components/DatePicker";
 import { InvoiceBuilder } from "@/components/vyapar/InvoiceBuilder";
-import { UploadBillDialog } from "@/components/vyapar/UploadBillDialog";
+import { UploadBillDialog, type BillAttachment } from "@/components/vyapar/UploadBillDialog";
 import { ImportDialog } from "@/components/vyapar/ImportDialog";
 import { documentImportConfig } from "@/lib/vyaparImportConfigs";
 import { FilterTh, useColumnFilters } from "@/components/vyapar/ColumnFilter";
@@ -33,13 +33,18 @@ export function InvoiceWorkspace({
   docType,
   title,
   accent = "brand",
+  projectId: projectOverride,
 }: {
   docType: DocType;
   title: string;
   accent?: "brand" | "rose";
+  /** Pin to one project — set by the Project workspace, which embeds this surface. */
+  projectId?: number;
 }) {
   const params = useSearchParams();
-  const projectId = useVyaparProjectId();
+  const router = useRouter();
+  const pathname = usePathname();
+  const projectId = useVyaparProjectId(projectOverride);
   // Estimates, proformas and sale orders are non-payment/planning docs — no payment status, a
   // Ref/Order No. instead of an invoice number, and a quotation/order summary, not received/balance.
   const isOrder = docType === "SALE_ORDER" || docType === "PURCHASE_ORDER";
@@ -73,6 +78,8 @@ export function InvoiceWorkspace({
   const [importing, setImporting] = useState(false);
   const [paying, setPaying] = useState<Invoice | null>(null);
   const [uploading, setUploading] = useState(false);
+  /** The file chosen in Upload Bill, held until the Purchase form opens and takes it. */
+  const [uploadedBill, setUploadedBill] = useState<BillAttachment | null>(null);
   const [history, setHistory] = useState<Invoice | null>(null);
   // Vyapar opens every transaction list on the current year, not on everything ever recorded.
   const [range, setRange] = useState<DateRange>(() => defaultRange("This Year"));
@@ -101,9 +108,17 @@ export function InvoiceWorkspace({
   }, [load]);
 
   // ?new=1 opens the builder straight away (used by the dashboard's Add Sale/Purchase buttons).
+  // ?new= opens the create form. The flag is stripped from the URL as soon as it's consumed:
+  // leaving it there means the next Alt+<key> press (or another click on "Add Sale") pushes an
+  // identical URL, `params` never changes, this effect never re-runs, and the shortcut looks dead.
   useEffect(() => {
-    if (params?.get("new") === "1") setCreating(true);
-  }, [params]);
+    if (!params?.get("new")) return;
+    setCreating(true);
+    const rest = new URLSearchParams(params.toString());
+    rest.delete("new");
+    const qs = rest.toString();
+    router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+  }, [params, router, pathname]);
 
   // ?open=<id> opens a specific document — how party/item ledgers deep-link back to their source.
   useEffect(() => {
@@ -492,12 +507,16 @@ export function InvoiceWorkspace({
           existing={editing ?? undefined}
           parties={parties}
           items={items}
+          projectId={projectOverride}
+          initialAttachment={uploadedBill ?? undefined}
           // An inline-created master joins the local lists immediately, so the picker shows it
           // without waiting for a round trip.
           onItemCreated={(item) => setItems((prev) => [item, ...prev])}
           onPartyCreated={(party) => setParties((prev) => [party, ...prev])}
-          onClose={() => { setCreating(false); setEditing(null); }}
+          onClose={() => { setCreating(false); setEditing(null); setUploadedBill(null); }}
           onSaved={(again) => {
+            // The uploaded bill belongs to the document just saved; a Save & New starts clean.
+            setUploadedBill(null);
             // Save & New keeps the builder open for the next document.
             if (!again) {
               setCreating(false);
@@ -511,7 +530,13 @@ export function InvoiceWorkspace({
       {uploading && (
         <UploadBillDialog
           onClose={() => setUploading(false)}
-          onContinue={() => { setUploading(false); setCreating(true); }}
+          // The uploaded file rides into the new bill as its attachment, rather than being
+          // previewed and then dropped on the way to a blank form.
+          onContinue={(attachment) => {
+            setUploadedBill(attachment);
+            setUploading(false);
+            setCreating(true);
+          }}
         />
       )}
 

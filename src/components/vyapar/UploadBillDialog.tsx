@@ -4,24 +4,96 @@ import { useState } from "react";
 import { Modal } from "@/components/Modal";
 import { FileText, Upload, X } from "lucide-react";
 
+/** Attachments ride inside the invoice JSON, so keep them postable. */
+const MAX_BILL_BYTES = 10 * 1024 * 1024;
+
+/** A phone photo of a bill is several MB; 1400px is still readable and a fraction of the size. */
+function downscaleImage(file: File, maxPx = 1400): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("Couldn't read that image."));
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = () => reject(new Error("That file isn't a readable image."));
+      img.onload = () => {
+        const scale = Math.min(1, maxPx / Math.max(img.width, img.height));
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.round(img.width * scale);
+        canvas.height = Math.round(img.height * scale);
+        const ctx = canvas.getContext("2d");
+        if (!ctx) return reject(new Error("Couldn't process that image."));
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL("image/jpeg", 0.82));
+      };
+      img.src = String(reader.result);
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+function readAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("Couldn't read that file."));
+    reader.onload = () => resolve(String(reader.result));
+    reader.readAsDataURL(file);
+  });
+}
+
+/** What the picked file becomes on the Purchase form — the same shape the form already stores. */
+export interface BillAttachment {
+  imageDataUrl: string | null;
+  documentName: string | null;
+  documentDataUrl: string | null;
+}
+
 /**
- * Upload a purchase bill (photo or PDF), preview it, then continue to manual entry.
- * Automatic field extraction (OCR) needs the bill-scan service, so for now this is an
- * attach-and-review step that hands off to the Purchase form.
+ * Upload a purchase bill (photo or PDF), preview it, then continue to entering its details.
+ *
+ * The file now travels with you: it arrives on the Purchase form as that bill's attachment, so the
+ * supplier's own document stays filed against the bill it belongs to — which is what Vyapar does,
+ * and what the client's own screenshot shows ("SalesBi….PDF added successfully" with a Download).
+ * Previously the file was previewed and then silently dropped on the way to a blank form, which is
+ * why "upload bill" appeared to do nothing.
+ *
+ * Automatic field extraction (OCR) still needs the bill-scan service; this is attach-and-key.
  */
 export function UploadBillDialog({
   onClose,
   onContinue,
 }: {
   onClose: () => void;
-  onContinue: () => void;
+  onContinue: (attachment: BillAttachment) => void;
 }) {
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
 
   function pick(f: File | null) {
     setFile(f);
+    setError("");
     setPreview(f && f.type.startsWith("image/") ? URL.createObjectURL(f) : "");
+  }
+
+  /** Read the file into a data URL, downscaling a photo so a phone snap doesn't bloat the bill. */
+  async function handOff() {
+    if (!file) return;
+    if (file.size > MAX_BILL_BYTES) {
+      setError(`"${file.name}" is larger than 10 MB. Attach a smaller file.`);
+      return;
+    }
+    setBusy(true);
+    try {
+      if (file.type.startsWith("image/")) {
+        onContinue({ imageDataUrl: await downscaleImage(file), documentName: null, documentDataUrl: null });
+      } else {
+        onContinue({ imageDataUrl: null, documentName: file.name, documentDataUrl: await readAsDataUrl(file) });
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't read that file.");
+      setBusy(false);
+    }
   }
 
   return (
@@ -67,8 +139,11 @@ export function UploadBillDialog({
           )}
         </div>
 
+        {error && <div className="mt-3 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-600">{error}</div>}
+
         <p className="mt-3 text-[11px] text-gray-400">
-          Automatic data extraction (OCR) arrives with the bill-scan service. For now, enter the bill details on the next screen.
+          The file is attached to the bill you enter next, so the supplier&apos;s own document stays with it.
+          Automatic data extraction (OCR) arrives with the bill-scan service.
         </p>
 
         <div className="mt-6 flex justify-end gap-2">
@@ -79,11 +154,11 @@ export function UploadBillDialog({
             Cancel
           </button>
           <button
-            onClick={onContinue}
-            disabled={!file}
+            onClick={handOff}
+            disabled={!file || busy}
             className="rounded-lg bg-rose-600 px-4 py-2 text-sm font-medium text-white transition-all duration-150 hover:bg-rose-700 active:scale-95 disabled:opacity-50"
           >
-            Enter Bill Details
+            {busy ? "Attaching…" : "Enter Bill Details"}
           </button>
         </div>
       </div>
