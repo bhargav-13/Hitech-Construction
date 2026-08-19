@@ -112,10 +112,17 @@ async function main() {
   console.log(`Authenticated as ${EMAIL}`);
 
   const parties = await api("/api/v1/vyapar/parties");
-  const suppliers = parties.filter((p) => p.partyType === "SUPPLIER");
-  const pool = (suppliers.length >= 3 ? suppliers : parties).slice(0, 8);
+  // See seed-procurement.mjs: nearly every trade account in their books is typed CUSTOMER, so the
+  // pick is suppliers-where-marked, then newest, minus the RMC accounts they build for.
+  const pool = parties
+    .filter((p) => !/^RMC[ .]/i.test(p.name))
+    .sort(
+      (a, b) =>
+        (a.partyType === "SUPPLIER" ? 0 : 1) - (b.partyType === "SUPPLIER" ? 0 : 1) || b.id - a.id,
+    )
+    .slice(0, 8);
   if (pool.length === 0) throw new Error("Need at least one party on this database to act as a subcontractor.");
-  console.log(`Using ${pool.length} parties as subcontractors`);
+  console.log(`Using ${pool.length} parties as subcontractors: ${pool.map((p) => p.name).join(", ")}`);
 
   const projects = await api("/api/v1/projects");
   const list = Array.isArray(projects) ? projects : (projects.content ?? []);

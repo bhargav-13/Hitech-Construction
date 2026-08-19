@@ -126,10 +126,19 @@ async function main() {
   console.log(`Authenticated as ${EMAIL}`);
 
   const parties = await api("/api/v1/vyapar/parties");
-  const suppliers = parties.filter((p) => p.partyType === "SUPPLIER");
-  const pool = (suppliers.length >= 4 ? suppliers : parties).slice(0, 8);
+  // Their books type almost every trade account as CUSTOMER — supplier, subcontractor and client
+  // all land in one list — so picking on partyType alone would put "RMC NAVAGAM", who they build
+  // for, in a demo as a valve supplier. Suppliers first where they are marked, then the newest
+  // accounts, which in practice are the trade ones; the RMC entries are the municipal client.
+  const pool = parties
+    .filter((p) => !/^RMC[ .]/i.test(p.name))
+    .sort(
+      (a, b) =>
+        (a.partyType === "SUPPLIER" ? 0 : 1) - (b.partyType === "SUPPLIER" ? 0 : 1) || b.id - a.id,
+    )
+    .slice(0, 8);
   if (pool.length < 2) throw new Error("Need at least two parties on this database to quote with.");
-  console.log(`Using ${pool.length} parties as suppliers`);
+  console.log(`Using ${pool.length} parties as vendors: ${pool.map((p) => p.name).join(", ")}`);
 
   const projects = await api("/api/v1/projects");
   const list = Array.isArray(projects) ? projects : (projects.content ?? []);
