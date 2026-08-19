@@ -76,13 +76,6 @@ export function ProcurementShell({ children }: { children: React.ReactNode }) {
             {railCollapsed ? <PanelLeftOpen size={15} /> : <PanelLeftClose size={15} />}
           </button>
 
-          {!railCollapsed && (
-            <div className="mb-2 flex items-center gap-1.5 rounded-lg bg-amber-50 px-3 py-2 text-[11px] font-medium text-amber-700 ring-1 ring-inset ring-amber-600/20">
-              <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
-              Demo — data is seeded
-            </div>
-          )}
-
           <nav className="space-y-0.5">
             {PROCUREMENT_NAV.map((node) => (
               <div key={node.label}>
