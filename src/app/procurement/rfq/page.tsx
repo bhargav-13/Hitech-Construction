@@ -1,22 +1,64 @@
 "use client";
 
+import { useCallback, useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { Plus, Scale, Send } from "lucide-react";
+import { Link2, Pencil, Plus, Scale, Send, Trash2 } from "lucide-react";
 import { ProcurementShell, ProcurementEmpty, ProcurementHeader } from "@/components/procurement/ProcurementShell";
-import { useRfqs } from "@/lib/useRfqs";
+import { SendRfqDialog } from "@/components/procurement/SendRfqDialog";
+import { QuoteDialog } from "@/components/procurement/QuoteDialog";
+import { RowMenu, RowMenuDivider, RowMenuItem } from "@/components/RowMenu";
 import { Spinner } from "@/components/Spinner";
+import { useRfqs } from "@/lib/useRfqs";
 import { RFQ_STATUS_CLS } from "@/lib/procurementConfig";
 import { inr } from "@/lib/format";
+import { useVyaparProjectId } from "@/lib/projectScope";
+import * as procurement from "@/lib/procurementApi";
+import * as vyapar from "@/lib/vyaparApi";
+import type { Rfq } from "@/lib/procurementApi";
+import type { Party } from "@/lib/vyaparApi";
 
 /**
- * RFQ list — enquiries out to suppliers.
+ * RFQ list — enquiries out to suppliers, and where quotes get keyed in.
  *
- * A quote is priced per line, so the list shows the range across responses rather than a single
- * "amount": with a five-line enquiry split across three suppliers there is no one number, and
- * showing one would invite a decision the comparison screen exists to make properly.
+ * The list shows a price *range* rather than one amount: a quote is priced per line, so with a
+ * five-line enquiry split across three suppliers there is no single number, and showing one would
+ * invite a decision the comparison screen exists to make properly.
  */
 export default function RfqPage() {
-  const { rfqs, loading, error } = useRfqs();
+  const router = useRouter();
+  const { rfqs, loading, error, reload, splice } = useRfqs();
+  const projectId = useVyaparProjectId();
+
+  // Parties back the quote dialog; loaded once here rather than on every open.
+  const [parties, setParties] = useState<Party[]>([]);
+  const loadMasters = useCallback(async () => {
+    try {
+      setParties(await vyapar.getParties(undefined, projectId));
+    } catch {
+      setParties([]);
+    }
+  }, [projectId]);
+  useEffect(() => {
+    loadMasters();
+  }, [loadMasters]);
+
+  const [quoting, setQuoting] = useState<{ rfq: Rfq; vendorId?: number } | null>(null);
+  // Reopening the send dialog is not a nicety: the quote links are shown once when the enquiry is
+  // sent, and a supplier who loses the message needs it again the next day.
+  const [sharing, setSharing] = useState<Rfq | null>(null);
+  const [busy, setBusy] = useState("");
+
+  async function remove(r: Rfq) {
+    if (!confirm(`Delete ${r.rfqNo}? Any quotes received against it go too.`)) return;
+    setBusy(r.rfqNo);
+    try {
+      await procurement.deleteRfq(r.id);
+      reload();
+    } finally {
+      setBusy("");
+    }
+  }
 
   return (
     <ProcurementShell>
@@ -24,9 +66,12 @@ export default function RfqPage() {
         title="RFQ"
         subtitle="What we've asked suppliers to quote, and what has come back."
         right={
-          <button className="flex items-center gap-1.5 rounded-lg bg-brand-accent px-4 py-2.5 text-sm font-medium text-white transition-opacity duration-150 hover:opacity-90">
+          <Link
+            href="/procurement/rfq/build"
+            className="flex items-center gap-1.5 rounded-lg bg-brand-accent px-4 py-2.5 text-sm font-medium text-white transition-opacity duration-150 hover:opacity-90"
+          >
             <Plus size={15} /> New RFQ
-          </button>
+          </Link>
         }
       />
 
@@ -37,7 +82,19 @@ export default function RfqPage() {
           <Spinner size={16} className="text-brand-accent" /> Loading enquiries…
         </div>
       ) : rfqs.length === 0 ? (
-        <ProcurementEmpty icon={Send} title="No enquiries yet" hint="Raise an RFQ to ask suppliers for a price." />
+        <ProcurementEmpty
+          icon={Send}
+          title="No enquiries yet"
+          hint="Raise an RFQ to ask suppliers for a price."
+          action={
+            <Link
+              href="/procurement/rfq/build"
+              className="flex items-center gap-1.5 rounded-lg bg-brand-accent px-4 py-2.5 text-sm font-medium text-white transition-opacity duration-150 hover:opacity-90"
+            >
+              <Plus size={15} /> New RFQ
+            </Link>
+          }
+        />
       ) : (
         <div className="space-y-3">
           {rfqs.map((r) => {
@@ -58,7 +115,7 @@ export default function RfqPage() {
             );
 
             return (
-              <div key={r.id} className="rounded-xl border border-gray-200 bg-white p-4">
+              <div key={r.id} className={`rounded-xl border border-gray-200 bg-white p-4 ${busy === r.rfqNo ? "opacity-50" : ""}`}>
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
@@ -74,14 +131,40 @@ export default function RfqPage() {
                     </div>
                   </div>
 
-                  {r.quotes.length > 0 && (
-                    <Link
-                      href="/procurement/compare"
-                      className="flex items-center gap-1.5 rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-medium text-brand-accent transition-colors duration-150 hover:bg-brand-accent/5"
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => setQuoting({ rfq: r })}
+                      className="flex items-center gap-1.5 rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-600 transition-colors duration-150 hover:border-brand-accent hover:text-brand-accent"
                     >
-                      <Scale size={14} /> Compare
-                    </Link>
-                  )}
+                      <Plus size={13} /> Enter quote
+                    </button>
+                    {r.quotes.length > 0 && (
+                      <Link
+                        href="/procurement/compare"
+                        className="flex items-center gap-1.5 rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-medium text-brand-accent transition-colors duration-150 hover:bg-brand-accent/5"
+                      >
+                        <Scale size={14} /> Compare
+                      </Link>
+                    )}
+                    <RowMenu align="right" buttonLabel="Enquiry actions">
+                      {(close) => (
+                        <>
+                          <RowMenuItem
+                            icon={Pencil}
+                            label="Edit"
+                            onClick={() => { close(); router.push(`/procurement/rfq/build?id=${r.id}`); }}
+                          />
+                          <RowMenuItem
+                            icon={Link2}
+                            label={r.suppliers.some((x) => x.shareToken) ? "Quote links" : "Send to suppliers"}
+                            onClick={() => { close(); setSharing(r); }}
+                          />
+                          <RowMenuDivider />
+                          <RowMenuItem icon={Trash2} label="Delete" tone="danger" onClick={() => { close(); remove(r); }} />
+                        </>
+                      )}
+                    </RowMenu>
+                  </div>
                 </div>
 
                 <div className="mt-3 flex flex-wrap gap-x-6 gap-y-1 border-t border-gray-50 pt-3 text-xs text-gray-500">
@@ -89,7 +172,9 @@ export default function RfqPage() {
                     {r.lines.length} line{r.lines.length > 1 ? "s" : ""}
                   </span>
                   <span>
-                    {r.quotes.length} quote{r.quotes.length === 1 ? "" : "s"} in
+                    {r.suppliers.length > 0
+                      ? `${r.quotes.length} of ${r.suppliers.length} replied`
+                      : `${r.quotes.length} quote${r.quotes.length === 1 ? "" : "s"} in`}
                   </span>
                   {range.low > 0 && (
                     <span className="tabular-nums">
@@ -103,10 +188,44 @@ export default function RfqPage() {
                     </span>
                   )}
                 </div>
+
+                {/* Who has replied, and a way back into each quote to revise it */}
+                {r.quotes.length > 0 && (
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {r.quotes.map((q) => (
+                      <button
+                        key={q.id}
+                        onClick={() => setQuoting({ rfq: r, vendorId: q.vendorPartyId })}
+                        title="Revise this quote"
+                        className="rounded-lg bg-gray-50 px-2 py-1 text-[11px] text-gray-600 transition-colors duration-150 hover:bg-cyan-50 hover:text-brand-accent"
+                      >
+                        {q.vendorName}
+                        {q.version > 1 && <span className="text-gray-400"> v{q.version}</span>}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
             );
           })}
         </div>
+      )}
+
+      {sharing && (
+        <SendRfqDialog rfq={sharing} onSent={(saved) => { splice(saved); setSharing(saved); }} onClose={() => setSharing(null)} />
+      )}
+
+      {quoting && (
+        <QuoteDialog
+          rfq={quoting.rfq}
+          vendors={parties}
+          existingVendorId={quoting.vendorId}
+          onClose={() => setQuoting(null)}
+          onSaved={(saved) => {
+            splice(saved);
+            setQuoting(null);
+          }}
+        />
       )}
     </ProcurementShell>
   );

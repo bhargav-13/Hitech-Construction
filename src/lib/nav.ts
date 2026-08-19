@@ -9,7 +9,7 @@ export const NAV_ITEMS: NavItem[] = [
   { label: "Project", href: "/project" },
   { label: "Taskopad", href: "/taskopad" },
   { label: "Vyapar", href: "/vyapar" },
-  { label: "Procurement", href: "/procurement", badge: "Soon" },
+  { label: "Procurement", href: "/procurement" },
   { label: "Payroll", href: "/payroll" },
   { label: "Audit", href: "/audit" },
   { label: "Library", href: "/library" },
@@ -42,9 +42,7 @@ export const NAV_MODULE: Record<string, string> = {
   "/finance": "FINANCE",
   "/payroll": "PAYROLL",
   "/crm": "CRM",
-  // Procurement is a seeded "Soon" demo — deliberately left ungated so it shows for everyone while
-  // the backend has no PROCUREMENT:* permissions yet. Restore this mapping once the module is real.
-  // "/procurement": "PROCUREMENT",
+  "/procurement": "PROCUREMENT",
   "/warehouse": "WAREHOUSE",
   "/equipment": "EQUIPMENT",
   "/asset": "ASSET",

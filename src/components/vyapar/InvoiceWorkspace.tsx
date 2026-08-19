@@ -17,6 +17,7 @@ import { InvoiceHistoryDialog, TxnRowActions } from "@/components/vyapar/TxnRowA
 import { useTableSort } from "@/lib/useTableSort";
 import { inr, bookDate } from "@/lib/format";
 import { useVyaparProjectId } from "@/lib/projectScope";
+import { takePoDraft, type PoDraft } from "@/lib/poHandoff";
 import { downloadInvoicePdf, downloadPdf, printRows } from "@/lib/vyaparExport";
 import * as vyapar from "@/lib/vyaparApi";
 import type { DocType, Invoice, Item, Party } from "@/lib/vyaparApi";
@@ -75,6 +76,8 @@ export function InvoiceWorkspace({
   const [statusFilter, setStatusFilter] = useState<"All" | "Paid" | "Partial" | "Unpaid">("All");
   const [editing, setEditing] = useState<Invoice | null>(null);
   const [creating, setCreating] = useState(false);
+  /** A purchase order carried over from an awarded RFQ, waiting for the builder to open. */
+  const [prefill, setPrefill] = useState<PoDraft | null>(null);
   const [importing, setImporting] = useState(false);
   const [paying, setPaying] = useState<Invoice | null>(null);
   const [uploading, setUploading] = useState(false);
@@ -113,9 +116,17 @@ export function InvoiceWorkspace({
   // identical URL, `params` never changes, this effect never re-runs, and the shortcut looks dead.
   useEffect(() => {
     if (!params?.get("new")) return;
+    // An award (from=rfq) or a subcon bill (from=wo) hands the whole document over rather than
+    // pushing it through the URL; see poHandoff.
+    // Reading it here (not in the builder) keeps the one-shot take tied to this one navigation.
+    // Functional update, and deliberately so: Strict Mode runs this effect twice in development,
+    // and a second bare take would return null (the draft is read once and cleared) and wipe the
+    // one already in hand. Keeping what we hold makes the double-invoke harmless.
+    if (params.get("from")) setPrefill((prev) => prev ?? takePoDraft());
     setCreating(true);
     const rest = new URLSearchParams(params.toString());
     rest.delete("new");
+    rest.delete("from");
     const qs = rest.toString();
     router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
   }, [params, router, pathname]);
@@ -509,14 +520,17 @@ export function InvoiceWorkspace({
           items={items}
           projectId={projectOverride}
           initialAttachment={uploadedBill ?? undefined}
+          prefill={prefill ?? undefined}
           // An inline-created master joins the local lists immediately, so the picker shows it
           // without waiting for a round trip.
           onItemCreated={(item) => setItems((prev) => [item, ...prev])}
           onPartyCreated={(party) => setParties((prev) => [party, ...prev])}
-          onClose={() => { setCreating(false); setEditing(null); setUploadedBill(null); }}
+          onClose={() => { setCreating(false); setEditing(null); setUploadedBill(null); setPrefill(null); }}
           onSaved={(again) => {
-            // The uploaded bill belongs to the document just saved; a Save & New starts clean.
+            // The uploaded bill and the carried-over award both belong to the document just
+            // saved; a Save & New starts clean.
             setUploadedBill(null);
+            setPrefill(null);
             // Save & New keeps the builder open for the next document.
             if (!again) {
               setCreating(false);

@@ -15,6 +15,7 @@ import { GST_RATE_OPTIONS, ITC_ELIGIBILITY, ITC_DEFAULT, gstCodeForPercent, gstP
 import { downloadInvoicePdf } from "@/lib/vyaparExport";
 import { shareInvoice } from "@/components/vyapar/TxnRowActions";
 import { useVyaparSettings } from "@/lib/useVyaparSettings";
+import type { PoDraft } from "@/lib/poHandoff";
 import { useVyaparProjectId } from "@/lib/projectScope";
 import { useProjects } from "@/lib/useProjects";
 import * as vyapar from "@/lib/vyaparApi";
@@ -135,6 +136,7 @@ export function InvoiceBuilder({
   onPartyCreated,
   projectId: projectOverride,
   initialAttachment,
+  prefill,
 }: {
   docType: DocType;
   existing?: Invoice;
@@ -153,6 +155,11 @@ export function InvoiceBuilder({
    * document — an existing one already carries whatever was filed against it.
    */
   initialAttachment?: { imageDataUrl: string | null; documentName: string | null; documentDataUrl: string | null };
+  /**
+   * A document started elsewhere — today, a purchase order carried over from an awarded RFQ.
+   * Only meaningful on a new document: an `existing` one already has its own values, and they win.
+   */
+  prefill?: PoDraft;
 }) {
   const projectId = useVyaparProjectId(projectOverride);
   const { projects } = useProjects();
@@ -212,9 +219,11 @@ export function InvoiceBuilder({
 
   // Sales default to cash (fully received); purchases default to unpaid until a Paid amount is entered.
   const [isCash, setIsCash] = useState(existing?.isCash ?? docType !== "PURCHASE");
-  const [partyId, setPartyId] = useState(existing?.partyId ? String(existing.partyId) : "");
+  const [partyId, setPartyId] = useState(
+    existing?.partyId ? String(existing.partyId) : prefill?.partyId ? String(prefill.partyId) : ""
+  );
   /** What's typed in the party box — kept apart from `partyId` so free text can be searched. */
-  const [partyText, setPartyText] = useState(existing?.partyName ?? "");
+  const [partyText, setPartyText] = useState(existing?.partyName ?? prefill?.partyName ?? "");
   // Inline creation, so an unknown item or party doesn't force the document to be abandoned.
   const [creatingItem, setCreatingItem] = useState<{ idx: number; name: string } | null>(null);
   const [creatingParty, setCreatingParty] = useState<string | null>(null);
@@ -223,23 +232,33 @@ export function InvoiceBuilder({
   const [paymentLinks, setPaymentLinks] = useState<{ invoiceId: number; amount: number }[]>([]);
   // Which construction project this document belongs to — defaults to the header scope, editable.
   const [selectedProjectId, setSelectedProjectId] = useState(
-    existing?.projectId != null ? String(existing.projectId) : projectId != null ? String(projectId) : ""
+    existing?.projectId != null
+      ? String(existing.projectId)
+      : prefill?.projectId != null
+        ? String(prefill.projectId)
+        : projectId != null
+          ? String(projectId)
+          : ""
   );
   const [phone, setPhone] = useState("");
   /** Walk-in billing address, used when a cash bill isn't tied to a saved party. */
   const [billingAddress, setBillingAddress] = useState(existing?.billingAddress ?? "");
   const [invoicePrefix, setInvoicePrefix] = useState(existing?.invoicePrefix ?? "");
   const [invoiceNo, setInvoiceNo] = useState(existing?.invoiceNo ?? "");
-  const [invoiceDate, setInvoiceDate] = useState(existing?.invoiceDate ?? new Date().toISOString().slice(0, 10));
-  const [dueDate, setDueDate] = useState(existing?.dueDate ?? "");
+  const [invoiceDate, setInvoiceDate] = useState(
+    existing?.invoiceDate ?? prefill?.orderDate ?? new Date().toISOString().slice(0, 10)
+  );
+  const [dueDate, setDueDate] = useState(existing?.dueDate ?? prefill?.deliveryDate ?? "");
   const [stateOfSupply, setStateOfSupply] = useState(existing?.stateOfSupply ?? "");
-  const [terms, setTerms] = useState(existing?.terms ?? "Thank you for doing business with us.");
+  const [terms, setTerms] = useState(
+    existing?.terms ?? prefill?.terms ?? "Thank you for doing business with us."
+  );
   const [termsTitle, setTermsTitle] = useState(isPurchase ? "Purchase Bill" : "Sale Invoice");
   /** Vyapar lets the round-off figure itself be nudged by hand. */
   const [roundOffOverride, setRoundOffOverride] = useState<number | null>(null);
-  const [notes, setNotes] = useState(existing?.notes ?? "");
+  const [notes, setNotes] = useState(existing?.notes ?? prefill?.notes ?? "");
   const [discountPercent, setDiscountPercent] = useState(existing?.discountPercent ?? 0);
-  const [discountAmount, setDiscountAmount] = useState(existing?.discount ?? 0);
+  const [discountAmount, setDiscountAmount] = useState(existing?.discount ?? prefill?.discountAmount ?? 0);
   const [roundOffOn, setRoundOffOn] = useState(true);
   // Vyapar's Price/Unit column can be entered tax-inclusive or exclusive; the toggle applies to every row.
   const [priceHasTax, setPriceHasTax] = useState(false);
@@ -276,7 +295,19 @@ export function InvoiceBuilder({
           taxCode: l.taxCode ?? gstCodeForPercent(l.taxPercent),
           itcEligibility: l.itcEligibility ?? (isPurchase ? ITC_DEFAULT : ""),
         }))
-      : [emptyLine(isPurchase), emptyLine(isPurchase)]
+      : prefill?.lines.length
+        ? prefill.lines.map((l) => ({
+            itemId: l.itemId,
+            itemName: l.itemName,
+            description: l.description,
+            unit: l.unit,
+            quantity: l.quantity,
+            rate: l.rate,
+            discountPercent: 0,
+            taxCode: l.taxCode,
+            itcEligibility: isPurchase ? ITC_DEFAULT : "",
+          }))
+        : [emptyLine(isPurchase), emptyLine(isPurchase)]
   );
   /** Vyapar's ADD DESCRIPTION / ADD IMAGE / ADD DOCUMENT, carried with the document. */
   const [description, setDescription] = useState(existing?.description ?? "");
@@ -306,7 +337,10 @@ export function InvoiceBuilder({
     description, imageDataUrl, documentName, documentDataUrl,
   });
   // Captured on the first render only — state, not a ref, so nothing is read during render.
-  const [initialSignature] = useState(signature);
+  // A prefilled form starts dirty: it holds real work the moment it opens, the draft behind it has
+  // already been consumed, and losing an awarded PO to a stray click on the backdrop is exactly
+  // what this guard is for.
+  const [initialSignature] = useState(prefill ? "" : signature);
   const dirty = signature !== initialSignature;
 
   /** Mirrors the server's maths exactly so the on-screen preview always matches what gets saved. */

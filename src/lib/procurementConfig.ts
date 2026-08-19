@@ -34,6 +34,10 @@ export const PROCUREMENT_NAV: ProcNavNode[] = [
   { label: "RFQ", href: "/procurement/rfq", icon: "send", section: "Sourcing", badge: "rfq" },
   { label: "Comparison", href: "/procurement/compare", icon: "scale" },
 
+  // Subcontracts. The labour half of buying: same spine as an award, but billed in instalments
+  // over months and carrying the material we issue the contractor against his order.
+  { label: "Work Orders", href: "/procurement/work-order", icon: "hammer", section: "Subcontract" },
+
   // These are Vyapar's screens. Procurement links to them rather than keeping its own copy, so
   // there is one purchase order, one vendor list and one set of books.
   {
@@ -55,6 +59,15 @@ export const RFQ_STATUS_CLS: Record<string, string> = {
   Sent: "bg-blue-50 text-blue-700 ring-blue-600/20",
   "Responses In": "bg-amber-50 text-amber-700 ring-amber-600/20",
   Awarded: "bg-emerald-50 text-emerald-700 ring-emerald-600/20",
+  Closed: "bg-gray-100 text-gray-600 ring-gray-500/20",
+};
+
+/** Work orders move through their own states — a subcontract is approved, then worked, then closed. */
+export const WORK_ORDER_STATUS_CLS: Record<string, string> = {
+  Draft: "bg-gray-100 text-gray-600 ring-gray-500/20",
+  Approved: "bg-blue-50 text-blue-700 ring-blue-600/20",
+  "In Progress": "bg-amber-50 text-amber-700 ring-amber-600/20",
+  Completed: "bg-emerald-50 text-emerald-700 ring-emerald-600/20",
   Closed: "bg-gray-100 text-gray-600 ring-gray-500/20",
 };
 

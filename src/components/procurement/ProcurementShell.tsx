@@ -11,6 +11,7 @@ import type { ProcNavNode } from "@/lib/procurementConfig";
 import {
   ClipboardList,
   FileText,
+  Hammer,
   Home,
   PanelLeftClose,
   PanelLeftOpen,
@@ -27,6 +28,7 @@ const ICONS: Record<string, React.ComponentType<{ size?: number; className?: str
   send: Send,
   scale: Scale,
   file: FileText,
+  hammer: Hammer,
   truck: Truck,
   users: Users,
   settings: Settings,
@@ -162,10 +164,13 @@ export function ProcurementEmpty({
   icon: Icon = FileText,
   title,
   hint,
+  action,
 }: {
   icon?: React.ComponentType<{ size?: number }>;
   title: string;
   hint?: string;
+  /** The one thing to do from here — an empty screen should offer a way out of being empty. */
+  action?: React.ReactNode;
 }) {
   return (
     <div className="animate-fade-in flex min-h-[280px] flex-col items-center justify-center rounded-xl border border-dashed border-gray-300 bg-white text-center">
@@ -174,6 +179,7 @@ export function ProcurementEmpty({
       </div>
       <div className="text-base font-semibold text-gray-700">{title}</div>
       {hint && <p className="mt-1 max-w-xs text-sm text-gray-400">{hint}</p>}
+      {action && <div className="mt-4">{action}</div>}
     </div>
   );
 }

@@ -51,5 +51,17 @@ export function useRfqs() {
     [splice],
   );
 
-  return { rfqs, loading, error, reload: load, award, splice };
+  /** Reopen a supplier's quote link so they can revise. Our decision, not theirs. */
+  const unlock = useCallback(
+    async (rfqId: number, quoteId: number) => {
+      try {
+        splice(await procurement.unlockQuote(rfqId, quoteId));
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Couldn't reopen that quote.");
+      }
+    },
+    [splice],
+  );
+
+  return { rfqs, loading, error, reload: load, award, unlock, splice };
 }
