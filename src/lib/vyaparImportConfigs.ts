@@ -63,8 +63,10 @@ export const partyImportConfig: ImportConfig = {
     { key: "gstin", label: "GSTIN" },
     { key: "openingBalance", label: "Opening", align: "right", render: (v) => v ?? "0" },
   ],
-  commit: async (records) => {
-    const rows = records as Partial<vyapar.Party>[];
+  commit: async (records, projectId) => {
+    // Imported parties join the directory of whatever project was in scope, matching what the
+    // Add Party form does.
+    const rows = (records as Partial<vyapar.Party>[]).map((r) => ({ ...r, projectId: projectId ?? null }));
     try {
       return (await vyapar.importParties(rows)).length;
     } catch {
@@ -127,8 +129,8 @@ export const itemImportConfig: ImportConfig = {
     { key: "salePrice", label: "Sale", align: "right", render: (v) => v ?? "0" },
     { key: "openingQty", label: "Qty", align: "right", render: (v) => v ?? "0" },
   ],
-  commit: async (records) => {
-    const rows = records as Partial<vyapar.Item>[];
+  commit: async (records, projectId) => {
+    const rows = (records as Partial<vyapar.Item>[]).map((r) => ({ ...r, projectId: projectId ?? null }));
     try {
       return (await vyapar.importItems(rows)).length;
     } catch {

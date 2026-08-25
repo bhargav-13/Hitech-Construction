@@ -7,6 +7,7 @@ import { ProcurementShell, ProcurementEmpty, ProcurementHeader } from "@/compone
 import { Spinner } from "@/components/Spinner";
 import { Select } from "@/components/Select";
 import { useRfqs } from "@/lib/useRfqs";
+import { useAuthStore } from "@/lib/authStore";
 import { downloadPdf } from "@/lib/vyaparExport";
 import { inr } from "@/lib/format";
 import { gstCodeForPercent } from "@/lib/gstRates";
@@ -178,6 +179,9 @@ function Matrix({
   onUnlock: (rfqId: number, quoteId: number) => void;
 }) {
   const router = useRouter();
+  // Raising a PO writes a Vyapar document, so it needs Vyapar rights. Reading the orders afterwards
+  // does not — that lives on Procurement's own Purchase Orders screen.
+  const canRaisePo = (useAuthStore((s) => s.user?.permissions) ?? []).includes("VYAPAR:CREATE");
   const totals = useMemo(() => rfq.quotes.map((q) => quoteTotals(rfq, q)), [rfq]);
 
   /** Focus one vendor's column. Twelve columns is a wall; one at a time is a comparison. */
@@ -726,8 +730,16 @@ function Matrix({
           </div>
         </div>
 
-        {/* One button per winning vendor — because that is one purchase order each, prefilled. */}
-        {byVendor.length > 0 && (
+        {/* One button per winning vendor — because that is one purchase order each, prefilled.
+            Raising one is a Vyapar write, so it stays behind VYAPAR:CREATE; reading the resulting
+            orders does not, and lives on Procurement's own Purchase Orders screen. */}
+        {byVendor.length > 0 && !canRaisePo && (
+          <p className="mt-3 border-t border-gray-100 pt-3 text-xs text-amber-700">
+            {byVendor.length} vendor{byVendor.length === 1 ? " has" : "s have"} won lines here. Raising the purchase
+            order needs Vyapar access — ask someone who has it, then track the order under Purchase Orders.
+          </p>
+        )}
+        {byVendor.length > 0 && canRaisePo && (
           <div className="mt-3 flex flex-wrap gap-2 border-t border-gray-100 pt-3">
             {byVendor.map(([vendorPartyId, v]) => (
               <button

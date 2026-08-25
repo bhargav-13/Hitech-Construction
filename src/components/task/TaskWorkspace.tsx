@@ -31,6 +31,7 @@ import { useTaskStore } from "@/lib/taskStore";
 import { getAccessSelf } from "@/lib/api";
 import { useTaskUnread } from "@/lib/taskNotifications";
 import { isSuperAdminRole, useTaskRights } from "@/lib/taskPermissions";
+import { TaskImportDrawer, type ParsedTaskRow } from "@/components/task/TaskImportDrawer";
 import type { TaskRights } from "@/lib/taskPermissions";
 import {
   TASK_PRIORITIES,
@@ -162,6 +163,7 @@ export function TaskWorkspace({ projectId }: { projectId?: string }) {
   const [showDrafts, setShowDrafts] = useState(false);
   const [editing, setEditing] = useState<Task | null>(null);
   const [creating, setCreating] = useState(false);
+  const [importing, setImporting] = useState(false);
   // Due-date range filter (client asked for a date filter on the task list).
   const [dueFrom, setDueFrom] = useState("");
   const [dueTo, setDueTo] = useState("");
@@ -381,42 +383,37 @@ export function TaskWorkspace({ projectId }: { projectId?: string }) {
     URL.revokeObjectURL(url);
   }
 
-  /** Bulk-create tasks from a CSV whose first column is the title (optional due date second). */
-  async function importTasksCsv(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    e.target.value = "";
-    if (!file) return;
-    const text = await file.text();
-    const lines = text.split(/\r?\n/).filter((l) => l.trim());
-    if (lines.length === 0) return;
-    // Skip a header row if it looks like one.
-    const body = /title/i.test(lines[0]) ? lines.slice(1) : lines;
-    const parsed = body
-      .map((l) => l.split(",").map((c) => c.trim().replace(/^"|"$/g, "")))
-      .filter((cols) => cols[0]);
-    if (parsed.length === 0) return;
-    if (!confirm(`Import ${parsed.length} task(s) from ${file.name}?`)) return;
-
+  /**
+   * Bulk-create tasks from a parsed sheet.
+   *
+   * <p>Parsing, the sample file and the preview all live in TaskImportDrawer now — this only turns
+   * rows into tasks. The old inline version took a bare file input and a confirm() dialog, so there
+   * was no way to see the expected column order or what was about to be created.
+   */
+  async function importParsedTasks(rows: ParsedTaskRow[]): Promise<number> {
     setBulkBusy(true);
+    let created = 0;
     try {
-      for (const cols of parsed) {
+      for (const r of rows) {
         await createTask({
-          title: cols[0],
-          description: "",
+          title: r.title,
+          description: r.description,
           projectId: effectiveProjectId ?? null,
           assigneeId: String(authUserId ?? users[0]?.id ?? ""),
           followerIds: [],
           clientName: null,
-          status: "Pending",
-          priority: "Medium",
+          status: r.status,
+          priority: r.priority,
           progress: 0,
-          dueDate: cols[1] || toIso(new Date()),
+          dueDate: r.dueDate,
           subtasks: [],
         });
+        created++;
       }
     } finally {
       setBulkBusy(false);
     }
+    return created;
   }
 
   return (
@@ -518,13 +515,13 @@ export function TaskWorkspace({ projectId }: { projectId?: string }) {
         </button>
 
         {/* Bulk import / export */}
-        <label
-          title="Import tasks from CSV (first column = title, optional second = due date)"
-          className="cursor-pointer rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-600 transition-all duration-150 hover:bg-gray-50 active:scale-95"
+        <button
+          onClick={() => setImporting(true)}
+          title="Import tasks from a CSV — a sample file is offered inside"
+          className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-600 transition-all duration-150 hover:bg-gray-50 active:scale-95"
         >
           <Upload size={14} className="inline" /> Import
-          <input type="file" accept=".csv,text/csv" hidden onChange={importTasksCsv} />
-        </label>
+        </button>
         <button
           onClick={exportTasksCsv}
           disabled={tasks.length === 0}
@@ -765,6 +762,7 @@ export function TaskWorkspace({ projectId }: { projectId?: string }) {
       )}
 
       {creating && <TaskDrawer defaultProjectId={effectiveProjectId ?? null} onClose={() => setCreating(false)} />}
+      {importing && <TaskImportDrawer onClose={() => setImporting(false)} onImport={importParsedTasks} />}
       {editing && <TaskDrawer existing={editing} onClose={closeDrawer} />}
     </div>
   );
@@ -972,10 +970,14 @@ function ListView({
                           ? "Unpin task"
                           : "Pin task to top"
                     }
+                    /* The unpinned state used to be `opacity-0 group-hover:opacity-100`, but the row
+                       it sits in is not a `group`, so the icon never appeared — there was nothing on
+                       screen to say a task could be pinned at all. It now always shows, greyed until
+                       pinned. */
                     className={`rounded-md p-1 transition-all duration-150 active:scale-90 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent ${
                       t.pinned
                         ? "text-amber-500 hover:bg-amber-100"
-                        : "text-gray-300 opacity-0 group-hover:opacity-100 hover:bg-gray-100 hover:text-amber-500"
+                        : "text-gray-300 hover:bg-gray-100 hover:text-amber-500"
                     }`}
                   >
                     <Pin size={14} className={t.pinned ? "fill-amber-400" : ""} />

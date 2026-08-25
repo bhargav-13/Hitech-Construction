@@ -49,6 +49,8 @@ export interface AuditQuery {
   actorUserId?: number;
   action?: string;
   entityType?: string;
+  /** Narrow the trail to one record — the Tender sidebar's activity feed reads its own history. */
+  entityId?: string;
   from?: string; // ISO date (inclusive), e.g. 2026-07-01
   to?: string; // ISO date (inclusive)
   q?: string; // free text over summary, path and actor

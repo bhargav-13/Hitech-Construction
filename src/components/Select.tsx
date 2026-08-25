@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Check, ChevronDown } from "lucide-react";
+import { notifyFormTouched } from "@/lib/formDirty";
 
 export interface SelectOption {
   value: string;
@@ -114,6 +115,10 @@ export function Select({
   const pick = (opt: SelectOption) => {
     if (opt.disabled) return;
     onChange(opt.value);
+    // The listbox is portalled to the document root, so nothing about this choice reaches the
+    // drawer the field sits in. Raise the touch signal from the field itself instead, so an
+    // unsaved-changes guard upstream can see it.
+    notifyFormTouched(rootRef.current);
     setOpen(false);
   };
 

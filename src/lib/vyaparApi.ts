@@ -57,6 +57,8 @@ export interface Party {
   isActive: boolean;
   /** The bank/cash account this party belongs to (null = all accounts). */
   bankAccountId: number | null;
+  /** The project whose catalogue/directory this belongs to. Null = shared across every project. */
+  projectId: number | null;
   /** Opening balance + every posted document and payment. Positive = receivable. */
   balance: number;
 }
@@ -106,6 +108,8 @@ export interface Item {
   isActive: boolean;
   /** The bank/cash account this item belongs to (null = all accounts). */
   bankAccountId: number | null;
+  /** The project whose catalogue/directory this belongs to. Null = shared across every project. */
+  projectId: number | null;
   stockValue: number;
   lowStock: boolean;
 }

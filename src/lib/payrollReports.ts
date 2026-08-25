@@ -28,12 +28,23 @@ export interface ReportContext {
 
 const pad = (n: number) => String(n).padStart(2, "0");
 
-/** Fetch everything the reports need in one shot (current month). Missing pieces degrade gracefully. */
-export async function loadReportContext(): Promise<ReportContext> {
+/** `yyyy-MM` for right now, in the browser's calendar — the default month for every report. */
+export function currentReportMonth(): string {
   const now = new Date();
-  const month = `${now.getFullYear()}-${pad(now.getMonth() + 1)}`;
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}`;
+}
+
+/**
+ * Fetch everything the reports need in one shot. Missing pieces degrade gracefully.
+ *
+ * @param month `yyyy-MM`. This used to be hardcoded to today's month, so on the 2nd of a month
+ *   every report came back nearly empty and last month's — the one payroll actually needs for
+ *   filing — could not be produced at all.
+ */
+export async function loadReportContext(month: string = currentReportMonth()): Promise<ReportContext> {
+  const [year, monthNo] = month.split("-").map(Number);
   const from = `${month}-01`;
-  const to = `${month}-${pad(new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate())}`;
+  const to = `${month}-${pad(new Date(year, monthNo, 0).getDate())}`;
 
   const usersRes = await getUsers(0, 500);
   const members = usersRes.content.filter((u) => u.onPayroll);

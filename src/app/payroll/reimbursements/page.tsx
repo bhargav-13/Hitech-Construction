@@ -9,9 +9,10 @@ import { DatePicker } from "@/components/DatePicker";
 import { RowMenu, RowMenuItem } from "@/components/RowMenu";
 import { useReimbursements } from "@/lib/usePayrollLive";
 import { getUsers, ApiError } from "@/lib/api";
-import type { ReimbStatus, UserResponse } from "@/lib/api";
+import type { ReimbursementApi, ReimbStatus, UserResponse } from "@/lib/api";
 import { inr } from "@/lib/format";
-import { Banknote, Check, CircleCheck, Clock, Plus, Receipt, Wallet, X } from "lucide-react";
+import { formatDateTimeIST } from "@/lib/datetime";
+import { Banknote, CalendarDays, Check, CircleCheck, Clock, Plus, Receipt, UserRound, Wallet, X } from "lucide-react";
 
 const STATUS_STYLE: Record<ReimbStatus, string> = {
   PENDING: "bg-amber-50 text-amber-700",
@@ -29,6 +30,9 @@ export default function ReimbursementsPage() {
   const [tab, setTab] = useState<"ALL" | ReimbStatus>("ALL");
   const [members, setMembers] = useState<UserResponse[]>([]);
   const [actionError, setActionError] = useState("");
+  // Clicking anywhere on a row opens the claim — the kebab was the only way in before, which meant
+  // there was nowhere to read a claim's dates, amounts and approver together.
+  const [openClaim, setOpenClaim] = useState<ReimbursementApi | null>(null);
 
   useEffect(() => {
     getUsers(0, 200).then((r) => setMembers(r.content.filter((u) => u.onPayroll))).catch(() => setMembers([]));
@@ -103,7 +107,12 @@ export default function ReimbursementsPage() {
               </thead>
               <tbody>
                 {visible.map((r) => (
-                  <tr key={r.id} className="border-b border-gray-50 last:border-b-0 even:bg-gray-50/40 hover:bg-cyan-50/30">
+                  <tr
+                    key={r.id}
+                    onClick={() => setOpenClaim(r)}
+                    title="Open this claim"
+                    className="cursor-pointer border-b border-gray-50 last:border-b-0 even:bg-gray-50/40 hover:bg-cyan-50/30"
+                  >
                     <td className="px-4 py-2.5">
                       <div className="font-medium text-gray-800">{r.expenseType}</div>
                       <div className="font-mono text-xs text-gray-400">{r.claimId}</div>
@@ -114,7 +123,7 @@ export default function ReimbursementsPage() {
                     <td className="px-4 py-2.5 text-right font-medium text-gray-800">{r.approvedAmount != null ? inr(r.approvedAmount) : "—"}</td>
                     <td className="px-4 py-2.5 text-gray-500">{r.approverName ?? "—"}</td>
                     <td className="px-4 py-2.5"><span className={`rounded-md px-2 py-0.5 text-xs font-medium ${STATUS_STYLE[r.status]}`}>{r.status}</span></td>
-                    <td className="px-4 py-2.5 text-right">
+                    <td className="px-4 py-2.5 text-right" onClick={(e) => e.stopPropagation()}>
                       <div className="inline-flex">
                         <RowMenu align="right" buttonLabel={`Actions for ${r.claimId}`}>
                           {(close) => (
@@ -138,6 +147,17 @@ export default function ReimbursementsPage() {
         )}
       </div>
 
+      {openClaim && (
+        <ClaimDetailDrawer
+          claim={rows.find((r) => r.id === openClaim.id) ?? openClaim}
+          onClose={() => setOpenClaim(null)}
+          onAct={async (action) => {
+            await act(openClaim.id, action);
+            setOpenClaim(null);
+          }}
+        />
+      )}
+
       {creating && (
         <ClaimDialog
           members={members}
@@ -153,6 +173,95 @@ export default function ReimbursementsPage() {
         />
       )}
     </PayrollShell>
+  );
+}
+
+/** One claim in full, with its decision buttons — what a row click opens. */
+function ClaimDetailDrawer({
+  claim,
+  onClose,
+  onAct,
+}: {
+  claim: ReimbursementApi;
+  onClose: () => void;
+  onAct: (action: "APPROVE" | "REJECT" | "PAY") => Promise<void>;
+}) {
+  const [busy, setBusy] = useState(false);
+  const run = async (action: "APPROVE" | "REJECT" | "PAY") => {
+    setBusy(true);
+    try { await onAct(action); } finally { setBusy(false); }
+  };
+
+  return (
+    <Drawer title={`Claim ${claim.claimId}`} onClose={onClose} width="max-w-lg" guardOnClose={false}>
+      <div className="space-y-4">
+        <div className="flex items-start justify-between gap-3 rounded-xl border border-gray-200 bg-gray-50/60 p-4">
+          <div className="min-w-0">
+            <div className="text-base font-semibold text-gray-900">{claim.expenseType}</div>
+            <div className="mt-0.5 flex items-center gap-1.5 text-sm text-gray-500">
+              <UserRound size={13} className="text-gray-400" /> {claim.memberName}
+            </div>
+          </div>
+          <span className={`shrink-0 rounded-md px-2 py-0.5 text-xs font-medium ${STATUS_STYLE[claim.status]}`}>{claim.status}</span>
+        </div>
+
+        <div className="grid grid-cols-2 gap-x-6 gap-y-3">
+          <Detail label="Requested" value={inr(claim.requestedAmount)} />
+          <Detail label="Approved" value={claim.approvedAmount != null ? inr(claim.approvedAmount) : "—"} />
+          <Detail label="Expense date" value={claim.expenseDate} icon={CalendarDays} />
+          <Detail label="Applied" value={formatDateTimeIST(claim.appliedAt)} />
+          <Detail label="Decided" value={claim.approvedAt ? formatDateTimeIST(claim.approvedAt) : "—"} />
+          <Detail label="Settled" value={claim.settlementDate ?? "—"} />
+          <Detail label="Approved by" value={claim.approverName ?? "—"} />
+          <Detail label="Claim id" value={claim.claimId} mono />
+        </div>
+
+        {claim.status === "PENDING" && (
+          <div className="flex gap-2 border-t border-gray-100 pt-4">
+            <button
+              disabled={busy}
+              onClick={() => run("APPROVE")}
+              className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-50"
+            >
+              <Check size={15} /> Approve
+            </button>
+            <button
+              disabled={busy}
+              onClick={() => run("REJECT")}
+              className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-rose-200 bg-white px-3 py-2 text-sm font-semibold text-rose-600 transition hover:bg-rose-50 disabled:opacity-50"
+            >
+              <X size={15} /> Reject
+            </button>
+          </div>
+        )}
+        {claim.status === "APPROVED" && (
+          <div className="border-t border-gray-100 pt-4">
+            <button
+              disabled={busy}
+              onClick={() => run("PAY")}
+              className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-brand-accent px-3 py-2 text-sm font-semibold text-white transition hover:opacity-90 disabled:opacity-50"
+            >
+              <Banknote size={15} /> Mark paid
+            </button>
+            <p className="mt-2 text-[11px] text-gray-400">
+              Records that Hi-Tech settled this claim manually — no money is moved by the system.
+            </p>
+          </div>
+        )}
+      </div>
+    </Drawer>
+  );
+}
+
+function Detail({ label, value, mono, icon: Icon }: { label: string; value: string; mono?: boolean; icon?: React.ComponentType<{ size?: number; className?: string }> }) {
+  return (
+    <div className="min-w-0">
+      <div className="text-[11px] tracking-wide text-gray-400 uppercase">{label}</div>
+      <div className={`mt-0.5 flex items-center gap-1.5 truncate text-sm font-medium text-gray-800 ${mono ? "font-mono" : ""}`}>
+        {Icon && <Icon size={12} className="shrink-0 text-gray-300" />}
+        {value}
+      </div>
+    </div>
   );
 }
 

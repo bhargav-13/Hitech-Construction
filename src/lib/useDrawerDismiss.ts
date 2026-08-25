@@ -12,7 +12,15 @@ export const DRAWER_EXIT_MS = 220;
  *
  * Also wires Escape-to-close through the same animated path.
  */
-export function useDrawerDismiss(onClose: () => void, exitMs: number = DRAWER_EXIT_MS) {
+export function useDrawerDismiss(
+  onClose: () => void,
+  exitMs: number = DRAWER_EXIT_MS,
+  /**
+   * Asked before every dismissal — return false to keep the panel open. Escape used to bypass the
+   * caller's own guard entirely, so a half-filled form could still be lost to a stray key press.
+   */
+  canClose?: () => boolean
+) {
   const [closing, setClosing] = useState(false);
   // Guards against double-fires (Escape + overlay click, or a re-render mid-exit).
   const closingRef = useRef(false);
@@ -20,10 +28,11 @@ export function useDrawerDismiss(onClose: () => void, exitMs: number = DRAWER_EX
 
   const requestClose = useCallback(() => {
     if (closingRef.current) return;
+    if (canClose && !canClose()) return;
     closingRef.current = true;
     setClosing(true);
     timerRef.current = window.setTimeout(onClose, exitMs);
-  }, [onClose, exitMs]);
+  }, [onClose, exitMs, canClose]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {

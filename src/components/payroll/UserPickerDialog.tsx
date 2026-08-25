@@ -41,7 +41,7 @@ export function UserPickerDialog({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <Drawer title="Add Staff from Existing User" onClose={onClose} width="max-w-md">
+    <Drawer title="Add Staff from Existing User" onClose={onClose} width="max-w-md" guardOnClose={false}>
       <div className="space-y-4">
         <p className="text-sm text-gray-500">Pick a user you already created in Settings. We&apos;ll pre-fill their details and link the login — you just add their department, role and salary.</p>
 

@@ -8,7 +8,10 @@
  * separate approval-limits page all used to live here; each was demo data shadowing something real,
  * so they were removed rather than left to be mistaken for working software.
  *
- *   RFQ → Comparison → award → Vyapar Purchase Order → approval → bill
+ *   RFQ → Comparison → award → Purchase Order → approval → bill
+ *
+ * The last three screens (orders, bills, vendors) render Vyapar's records through a narrow
+ * read-only endpoint of Procurement's own, so they work for a buyer who has no Vyapar access.
  */
 
 export interface ProcNavNode {
@@ -38,18 +41,20 @@ export const PROCUREMENT_NAV: ProcNavNode[] = [
   // over months and carrying the material we issue the contractor against his order.
   { label: "Work Orders", href: "/procurement/work-order", icon: "hammer", section: "Subcontract" },
 
-  // These are Vyapar's screens. Procurement links to them rather than keeping its own copy, so
-  // there is one purchase order, one vendor list and one set of books.
+  // Still one purchase order, one vendor list and one set of books — Vyapar's — but read through
+  // Procurement's own endpoints and rendered here. These used to be external links into Vyapar,
+  // which anyone without VYAPAR:VIEW (most buyers and store keepers) could not open at all, so
+  // three of this module's own outputs were invisible to the people producing them. Editing still
+  // happens in Vyapar; each screen offers that link to whoever can actually follow it.
   {
     label: "Purchase Orders",
-    href: "/vyapar/purchase-order",
+    href: "/procurement/purchase-order",
     icon: "file",
-    section: "In Vyapar",
-    external: true,
-    hint: "Orders, approval and billing",
+    section: "Buying",
+    hint: "Orders raised on suppliers",
   },
-  { label: "Vendors", href: "/vyapar/parties", icon: "users", external: true, hint: "Parties and balances" },
-  { label: "Purchase Bills", href: "/vyapar/purchase", icon: "receipt", external: true, hint: "What was invoiced" },
+  { label: "Purchase Bills", href: "/procurement/purchase-bill", icon: "receipt", hint: "What was invoiced" },
+  { label: "Vendors", href: "/procurement/vendors", icon: "users", hint: "Suppliers and their history" },
 ];
 
 // ---- Shared status → chip class maps ----

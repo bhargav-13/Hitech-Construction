@@ -23,6 +23,7 @@ import {
 } from "@/lib/tenderTypes";
 import type { TenderCustomField } from "@/lib/tenderTypes";
 import { parseDurationMonths, parseValidityDays, parseLooseDate } from "@/lib/tenderHelpers";
+import { transitionsFor } from "@/lib/tenderStateMachine";
 import { ChevronDown, ChevronRight, Plus, Trash2 } from "lucide-react";
 
 const STAGE_OPTIONS = (["SORTING", "RESEARCH", "APPLIED", "WON", "LOST"] as TenderStage[]).map((s) => ({
@@ -71,7 +72,9 @@ export function TenderForm({
 }) {
   const addTender = useTenderStore((s) => s.addTender);
   const updateTender = useTenderStore((s) => s.updateTender);
+  const setStage = useTenderStore((s) => s.setStage);
   const isEdit = !!tender;
+  const [saveNote, setSaveNote] = useState<string | null>(null);
 
   const [f, setF] = useState<Partial<Tender>>(
     tender ?? { source: "PORTAL", stage: initialStage, status: defaultStatus(initialStage), emdState: "PENDING" },
@@ -95,10 +98,20 @@ export function TenderForm({
   const removeCustomField = (id: string) => set({ customFields: customFields.filter((c) => c.id !== id) });
 
   const stage = (f.stage ?? "SORTING") as TenderStage;
+  /**
+   * A new tender can start anywhere (an old one is often captured mid-flight). An existing one can
+   * only stay put or take a legal step — the dropdown used to list all five stages, which let anyone
+   * drag a tender from Sorting to Won and skip the bid entirely.
+   */
+  const stageOptions = useMemo(() => {
+    if (!tender) return STAGE_OPTIONS;
+    const allowed = new Set<TenderStage>([tender.stage, ...transitionsFor(tender.stage).map((t) => t.to)]);
+    return STAGE_OPTIONS.filter((o) => allowed.has(o.value));
+  }, [tender]);
   const isGem = f.source === "GEM";
   const isApplied = stage === "APPLIED" || stage === "WON" || stage === "LOST";
 
-  function save() {
+  async function save() {
     const clean: Tender = {
       ...f,
       id: tender?.id ?? `tnd-new-${Date.now()}`,
@@ -117,8 +130,23 @@ export function TenderForm({
         .map((c) => ({ ...c, label: c.label.trim(), value: c.value.trim() })),
     } as Tender;
 
-    if (isEdit) updateTender(clean.id, clean);
-    else addTender(clean);
+    if (!isEdit) {
+      addTender(clean);
+      onClose();
+      return;
+    }
+
+    // Details save the ordinary way. A stage change is a different act — it has to clear the
+    // transition rules and the approval ladder — so it goes through setStage, and if the move gets
+    // parked for approval the drawer stays open long enough to say so.
+    updateTender(clean.id, clean);
+    if (stage !== tender!.stage) {
+      const message = await setStage(clean.id, stage, clean.status ?? null);
+      if (message) {
+        setSaveNote(message);
+        return;
+      }
+    }
     onClose();
   }
 
@@ -145,10 +173,23 @@ export function TenderForm({
   return (
     <Drawer title={isEdit ? "Edit Tender" : "New Tender"} onClose={onClose} onSave={save} saveLabel={isEdit ? "Save changes" : "Add tender"} width="max-w-3xl">
       <div className="space-y-6">
+        {saveNote && (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">{saveNote}</div>
+        )}
         {/* Pipeline */}
         <Section title="Pipeline">
           <DrawerField label="Stage" required>
-            <Select value={stage} onChange={(v) => set({ stage: v as TenderStage, status: defaultStatus(v as TenderStage) })} options={STAGE_OPTIONS} />
+            <Select
+              value={stage}
+              onChange={(v) => set({ stage: v as TenderStage, status: defaultStatus(v as TenderStage) })}
+              options={stageOptions}
+            />
+            {isEdit && (
+              <p className="mt-1 text-xs text-gray-400">
+                Only the moves allowed from {STAGE_META[tender!.stage].label} are listed, and the move goes to your
+                approver rather than taking effect straight away. Use the buttons on the tender for the full flow.
+              </p>
+            )}
           </DrawerField>
           <DrawerField label="Source">
             <Select value={f.source ?? "PORTAL"} onChange={(v) => set({ source: v as TenderSource })} options={SOURCE_OPTIONS} />
@@ -241,6 +282,16 @@ export function TenderForm({
           </DrawerField>
           <DrawerField label="Next Follow Up">
             <DatePicker value={f.nextFollowUp ?? ""} onChange={(v) => set({ nextFollowUp: v })} />
+          </DrawerField>
+          {/* A date on its own never said who to call or what to ask, so the chase note lives with it. */}
+          <DrawerField label="Follow Up Remarks" className="col-span-2">
+            <textarea
+              className="input resize-none"
+              rows={2}
+              value={f.nextFollowUpNote ?? ""}
+              onChange={(e) => set({ nextFollowUpNote: e.target.value })}
+              placeholder="What to chase on that date — e.g. call the EE about the corrigendum"
+            />
           </DrawerField>
           <DrawerField label="Hardcopy Due">
             <DatePicker value={f.hardcopyDue ?? ""} onChange={(v) => set({ hardcopyDue: v })} />

@@ -214,18 +214,35 @@ function DayView({
     fineHours?: number;
   };
 
+  /**
+   * Build the edit payload.
+   *
+   * <p>The code is deliberately left off a pure in/out edit. The backend derives P / HD / A and
+   * overtime from the punch pair against the member's shift, but treats any code in the request as
+   * an explicit admin override that wins over that derivation — so re-sending the row's current
+   * code, which is what this used to do, meant typing real in/out times never reclassified the day.
+   * Someone marked Present who worked three hours of an eight-hour shift stayed Present.
+   *
+   * <p>Overtime is likewise omitted on a time edit so the shift's own OT rules apply; typing in the
+   * OT box still sends an explicit figure and still wins.
+   */
   function buildBody(userId: number, patch: Partial<AttendanceApiResponse>): EditBody {
     const existing = byUser.get(userId);
+    const timeEdit = patch.inTime !== undefined || patch.outTime !== undefined;
     const body: EditBody = {
       userId,
       date,
-      code: patch.code ?? existing?.code,
       inTime: patch.inTime !== undefined ? patch.inTime : existing?.inTime ?? null,
       outTime: patch.outTime !== undefined ? patch.outTime : existing?.outTime ?? null,
-      overtimeHours: patch.overtimeHours !== undefined ? patch.overtimeHours : Number(existing?.overtimeHours ?? 0),
       fineHours: patch.fineHours !== undefined ? patch.fineHours : Number(existing?.fineHours ?? 0),
     };
-    if (patch.code === "P" && !body.inTime) { body.inTime = "09:00"; body.outTime = "18:00"; }
+    if (patch.code) body.code = patch.code;
+    else if (!timeEdit) body.code = existing?.code;
+
+    if (patch.overtimeHours !== undefined) body.overtimeHours = patch.overtimeHours;
+    else if (!timeEdit) body.overtimeHours = Number(existing?.overtimeHours ?? 0);
+
+    // Absent means nobody was here — clear the punch pair so no stale hours survive the mark.
     if (patch.code === "A") { body.inTime = null; body.outTime = null; body.overtimeHours = 0; }
     return body;
   }
@@ -287,6 +304,13 @@ function DayView({
           <FileSpreadsheet size={14} /> CSV
         </button>
       </div>
+
+      <p className="text-xs text-gray-400">
+        Enter an <strong>In</strong> and <strong>Out</strong> time and the day is graded against that member&apos;s shift
+        (Setup → Shifts): full-day hours or more marks <strong>P</strong> and earns overtime, at least half-day hours
+        marks <strong>HD</strong>, anything less marks <strong>A</strong>. Clicking P / A / HD / PL sets the day by hand
+        and overrides that grading.
+      </p>
 
       <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white">
         <table className="w-full min-w-[860px] border-collapse text-sm">

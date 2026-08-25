@@ -32,6 +32,21 @@ export const PAYROLL_NAV: PayrollNavNode[] = [
   // nav so no mock data reaches users. Re-add once Phase 6 (payroll_payments) ships.
   { label: "Reports", href: "/payroll/reports", icon: "chart" },
   { label: "Others", href: "/payroll/others", icon: "grid" },
+  // Admins are employees too — they need somewhere to apply for their own leave and read their own
+  // payslip. Without this the only "Leave" in the rail was the approval queue, which anyone without
+  // PAYROLL:APPROVE was refused from, leaving them no way to raise a request at all.
+  {
+    label: "Self Service",
+    icon: "users",
+    children: [
+      { label: "My Attendance", href: "/payroll/me/attendance" },
+      { label: "My Leave", href: "/payroll/me/leave" },
+      { label: "My Payslips", href: "/payroll/me/payslips" },
+      { label: "My Loans", href: "/payroll/me/loans" },
+      { label: "My Reimbursements", href: "/payroll/me/reimbursements" },
+      { label: "My Profile", href: "/payroll/me/profile" },
+    ],
+  },
 ];
 
 /** The self-service rail — what a regular employee (VIEW-only) sees: just their own records. */

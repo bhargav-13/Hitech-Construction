@@ -105,16 +105,17 @@ export default function ProcurementDashboard() {
           )}
         </div>
 
-        {/* Handoffs — stated plainly so nobody looks for these here */}
+        {/* The buying records themselves. Vyapar owns them; these screens read them here so a
+            buyer without Vyapar access can still see the module's own output. */}
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
           <Handoff
-            href="/vyapar/purchase-order"
+            href="/procurement/purchase-order"
             icon={FileText}
             title="Purchase Orders"
-            body="Raised in Vyapar once a line is awarded, with approval and billing."
+            body="Orders raised on suppliers once a line is awarded."
           />
-          <Handoff href="/vyapar/parties" icon={Users} title="Vendors" body="Suppliers, balances and ledgers live with the parties." />
-          <Handoff href="/vyapar/purchase" icon={Send} title="Purchase Bills" body="What was actually invoiced against an order." />
+          <Handoff href="/procurement/vendors" icon={Users} title="Vendors" body="Suppliers, balances and their full purchase history." />
+          <Handoff href="/procurement/purchase-bill" icon={Send} title="Purchase Bills" body="What was actually invoiced against an order." />
         </div>
       </div>
     </ProcurementShell>

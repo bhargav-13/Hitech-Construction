@@ -5,7 +5,8 @@ import { PayrollShell, PayrollEmpty, StatCard } from "@/components/payroll/Payro
 import { Spinner } from "@/components/Spinner";
 import { usePayrollRuns, usePayrollRun } from "@/lib/usePayrollLive";
 import { ApiError, editPayslip } from "@/lib/api";
-import type { PayslipApi } from "@/lib/api";
+import type { PayslipApi, UnmarkedDayPolicy } from "@/lib/api";
+import { Select } from "@/components/Select";
 import { inr } from "@/lib/format";
 import { exportRowsToCsv } from "@/lib/vyaparExport";
 import { downloadPayslip } from "@/lib/payslipExport";
@@ -31,6 +32,12 @@ export default function PayrollRunPage() {
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState("");
   const [editing, setEditing] = useState<PayslipApi | null>(null);
+  /**
+   * What an unmarked day is worth. Left on "Paid" a month with two ticks and twenty-eight blanks
+   * pays a full salary, which is what made runs off a partly-filled site muster look wrong. Choose
+   * "Unpaid" and only marked days count.
+   */
+  const [unmarked, setUnmarked] = useState<UnmarkedDayPolicy>("PRESENT");
 
   const step = (dir: 1 | -1) => {
     let m = monthIdx + dir, y = year;
@@ -41,7 +48,7 @@ export default function PayrollRunPage() {
 
   async function doGenerate() {
     setBusy(true); setActionError("");
-    try { await generate(monthKey); await refreshRun(); await refreshList(); }
+    try { await generate(monthKey, unmarked); await refreshRun(); await refreshList(); }
     catch (err) { setActionError(err instanceof ApiError ? err.message : "Unable to generate the run."); }
     finally { setBusy(false); }
   }
@@ -101,6 +108,22 @@ export default function PayrollRunPage() {
             </span>
           </div>
         )}
+        {run?.status !== "PAID" && run?.status !== "LOCKED" && (
+          <p className="text-xs text-gray-500">
+            {unmarked === "PRESENT" ? (
+              <>
+                Days with no attendance mark are <strong>paid</strong> — the office default, where absence is the
+                exception. If your muster is only filled in for the days people turned up, switch to
+                &ldquo;count as unpaid&rdquo; before generating, or a month with two ticks pays a full salary.
+              </>
+            ) : (
+              <>
+                Only days carrying a mark are paid: present, half-day (½), paid leave and week-off. Blank days count
+                as <strong>unpaid</strong>, so finish the muster before you lock the run.
+              </>
+            )}
+          </p>
+        )}
         {run?.status === "PAID" && (
           <div className="flex items-start gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-sm text-emerald-800">
             <CircleCheck size={15} className="mt-0.5 shrink-0" />
@@ -126,6 +149,21 @@ export default function PayrollRunPage() {
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
+            {run?.status !== "PAID" && run?.status !== "LOCKED" && (
+              <label className="flex items-center gap-2 text-xs text-gray-500">
+                Unmarked days
+                <Select
+                  value={unmarked}
+                  onChange={(v) => setUnmarked(v as UnmarkedDayPolicy)}
+                  size="sm"
+                  className="min-w-[150px]"
+                  options={[
+                    { value: "PRESENT", label: "Count as paid" },
+                    { value: "ABSENT", label: "Count as unpaid" },
+                  ]}
+                />
+              </label>
+            )}
             {run?.status !== "PAID" && (
               <button
                 onClick={doGenerate}

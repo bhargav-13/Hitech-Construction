@@ -1,7 +1,9 @@
 "use client";
 
+import { useCallback, useEffect, useRef } from "react";
 import { X } from "lucide-react";
 import { useDrawerDismiss } from "@/lib/useDrawerDismiss";
+import { DISCARD_PROMPT, watchFormTouches } from "@/lib/formDirty";
 
 /**
  * Right-side slide-over drawer — Onsite's standard "add / edit record" form pattern.
@@ -16,6 +18,7 @@ export function Drawer({
   saveAndNewLabel = "Save & New",
   dirty = false,
   width = "max-w-xl",
+  guardOnClose = true,
   footer,
   children,
 }: {
@@ -27,11 +30,16 @@ export function Drawer({
   saveLabel?: string;
   saveAndNewLabel?: string;
   /**
-   * Whether the form has unsaved edits. When true, dismissing asks first — Vyapar guards every
-   * form with "Current changes will be discarded. Do you wish to continue?", and losing a
-   * half-entered invoice to a stray click on the backdrop is exactly the complaint we heard.
+   * Force the discard confirmation on, regardless of what the user has touched. Rarely needed:
+   * every drawer is guarded automatically the moment a field inside it is edited (see below). Pass
+   * this when a drawer opens already holding unsaved work — a prefilled form, a staged import.
    */
   dirty?: boolean;
+  /**
+   * Opt a drawer out of the automatic guard. For read-only panels whose "fields" are filters or
+   * search boxes, where a confirmation on close is just noise.
+   */
+  guardOnClose?: boolean;
   width?: string;
   /**
    * Optional sticky action bar pinned to the bottom of the drawer. Vyapar's document forms carry a
@@ -41,21 +49,38 @@ export function Drawer({
   footer?: React.ReactNode;
   children: React.ReactNode;
 }) {
-  const { closing, requestClose } = useDrawerDismiss(onClose);
+  const panelRef = useRef<HTMLDivElement>(null);
+  /**
+   * Set as soon as anything inside the panel is edited. This is what makes the confirmation
+   * universal: drawers no longer have to remember to pass `dirty`, which almost none of the ~50 of
+   * them did — so every tender, procurement and payroll form silently discarded a half-filled page
+   * on a stray backdrop click.
+   */
+  const touched = useRef(false);
 
-  function dismiss() {
-    if (dirty && !confirm("Current changes will be discarded. Do you wish to continue?")) return;
-    requestClose();
-  }
+  useEffect(() => {
+    const el = panelRef.current;
+    if (!el) return;
+    return watchFormTouches(el, () => { touched.current = true; });
+  }, []);
+
+  // Consulted by the overlay/close button and, through useDrawerDismiss, by Escape.
+  const canClose = useCallback(
+    () => !(guardOnClose && (dirty || touched.current)) || confirm(DISCARD_PROMPT),
+    [dirty, guardOnClose]
+  );
+
+  const { closing, requestClose } = useDrawerDismiss(onClose, undefined, canClose);
 
   return (
     <div
       className={`fixed inset-0 z-50 flex justify-end bg-black/40 ${
         closing ? "animate-overlay-out" : "animate-overlay-in"
       }`}
-      onClick={dismiss}
+      onClick={requestClose}
     >
       <div
+        ref={panelRef}
         className={`flex h-full w-full ${width} flex-col bg-white shadow-2xl ${
           closing ? "animate-slide-out-right" : "animate-slide-in-right"
         }`}
@@ -65,7 +90,7 @@ export function Drawer({
         <div className="flex items-center justify-between border-b border-gray-100 px-6 py-4">
           <div className="flex items-center gap-3">
             <button
-              onClick={dismiss}
+              onClick={requestClose}
               className="rounded-full p-1 text-gray-400 transition-all duration-150 hover:bg-gray-100 hover:text-gray-600 active:scale-90"
             >
               <X size={18} />

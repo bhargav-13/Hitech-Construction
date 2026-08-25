@@ -11,6 +11,16 @@ import { ApiError } from "@/lib/api";
 import { LeaveStatusPill } from "@/components/payroll/LeaveStatusPill";
 import { CalendarDays, Plus, X } from "lucide-react";
 
+/**
+ * Leave types offered when the member has no leave policy assigned yet.
+ *
+ * <p>Applying used to be blocked outright in that case — the button was disabled and the only hint
+ * was "HR will set this up", which left a new joiner with no way to request time off at all. The
+ * backend takes the type as free text, so a request can be raised now and reconciled against a
+ * policy once HR assigns one.
+ */
+const FALLBACK_LEAVE_TYPES = ["Casual Leave", "Sick Leave", "Earned Leave", "Unpaid Leave"];
+
 /** My Leave — self-service. See balance per type + apply for leave + cancel a pending request. */
 export default function MyLeavePage() {
   const { requests, balance, loading, error, apply, cancel } = useMyLeave();
@@ -27,8 +37,7 @@ export default function MyLeavePage() {
           </div>
           <button
             onClick={() => setApplying(true)}
-            disabled={balance.length === 0}
-            className="flex items-center gap-1.5 rounded-lg bg-brand-accent px-3.5 py-2 text-sm font-semibold text-white transition-all duration-150 hover:opacity-90 active:scale-95 disabled:opacity-50"
+            className="flex items-center gap-1.5 rounded-lg bg-brand-accent px-3.5 py-2 text-sm font-semibold text-white transition-all duration-150 hover:opacity-90 active:scale-95"
           >
             <Plus size={15} /> Apply for Leave
           </button>
@@ -40,7 +49,8 @@ export default function MyLeavePage() {
         {/* Balance cards */}
         {balance.length === 0 ? (
           <div className="rounded-xl border border-dashed border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
-            You don&apos;t have a leave policy assigned yet — HR will set this up in your payroll profile.
+            You don&apos;t have a leave policy assigned yet, so there&apos;s no balance to show — HR sets this up in your
+            payroll profile. You can still apply; the request goes to your approver as usual.
           </div>
         ) : (
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -120,7 +130,8 @@ export default function MyLeavePage() {
 
       {applying && (
         <ApplyLeaveDrawer
-          types={balance.map((b) => b.leaveTypeName)}
+          types={balance.length ? balance.map((b) => b.leaveTypeName) : FALLBACK_LEAVE_TYPES}
+          policyAssigned={balance.length > 0}
           onClose={() => setApplying(false)}
           onApply={async (body) => { try { await apply(body); setApplying(false); } catch (err) { throw err; } }}
         />
@@ -131,10 +142,13 @@ export default function MyLeavePage() {
 
 function ApplyLeaveDrawer({
   types,
+  policyAssigned,
   onClose,
   onApply,
 }: {
   types: string[];
+  /** False when the types are the fallback list rather than the member's own policy. */
+  policyAssigned: boolean;
   onClose: () => void;
   onApply: (body: { leaveTypeName: string; fromDate: string; toDate: string; reason?: string }) => Promise<void>;
 }) {
@@ -163,6 +177,12 @@ function ApplyLeaveDrawer({
     <Drawer title="Apply for Leave" onClose={onClose} onSave={submit} saveLabel={saving ? "Submitting…" : "Submit"}>
       <div className="space-y-4">
         {error && <div className="rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-600">{error}</div>}
+        {!policyAssigned && (
+          <div className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700">
+            No leave policy is assigned to you yet, so these are the standard types. HR will map your request to the
+            right policy when they set one up.
+          </div>
+        )}
         <DrawerField label="Leave Type" required>
           <Select value={type} onChange={setType} options={types.map((t) => ({ value: t, label: t }))} />
         </DrawerField>

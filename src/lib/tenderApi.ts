@@ -39,8 +39,21 @@ export interface TenderSummary {
   emdRecoverable: number;
 }
 
-/** Fields the frontend keeps that the backend does not model — stripped before sending. */
-const LOCAL_ONLY: (keyof Tender)[] = ["attachments"];
+/**
+ * Fields the frontend keeps that the backend does not model, plus the ones it owns outright.
+ *
+ * <p>`stage`/`status` are read-only on the edit endpoint now: a move has to go through
+ * {@link changeTenderStageApi} so the transition rules and the approval ladder both get a say.
+ * `pendingStage`, `approval` and `canActNow` are server-computed and would be ignored anyway.
+ */
+const LOCAL_ONLY: (keyof Tender)[] = [
+  "attachments",
+  "stage",
+  "pendingStage",
+  "pendingStatus",
+  "approval",
+  "canActNow",
+];
 
 function tenderToApi(t: Partial<Tender>): Record<string, unknown> {
   const body: Record<string, unknown> = { ...t };
@@ -105,6 +118,25 @@ export async function changeTenderStageApi(id: string, stage: string, status?: s
     method: "PATCH",
     body: { stage, status: status ?? null },
   });
+  return tenderFromApi(dto);
+}
+
+/** Approve or reject a parked stage move. */
+export async function decideTenderStageApi(
+  id: string,
+  action: "APPROVE" | "REJECT",
+  note?: string,
+): Promise<Tender> {
+  const dto = await apiRequest<TenderApiResponse>(`/api/v1/tenders/${numId(id)}/stage/decide`, {
+    method: "POST",
+    body: { action, note: note ?? null },
+  });
+  return tenderFromApi(dto);
+}
+
+/** Withdraw a stage move you raised. */
+export async function cancelTenderStageApi(id: string): Promise<Tender> {
+  const dto = await apiRequest<TenderApiResponse>(`/api/v1/tenders/${numId(id)}/stage/cancel`, { method: "POST" });
   return tenderFromApi(dto);
 }
 

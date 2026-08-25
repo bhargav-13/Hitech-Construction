@@ -70,7 +70,7 @@ export function StaffLoginDialog({ employee, onClose }: { employee: Employee; on
 
   if (done) {
     return (
-      <Drawer title="Login Created" onClose={onClose} width="max-w-md">
+      <Drawer title="Login Created" onClose={onClose} width="max-w-md" guardOnClose={false}>
         <div className="space-y-4">
           <div className="flex items-center gap-2 rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
             <ShieldCheck size={16} /> Login created for {employee.name}.

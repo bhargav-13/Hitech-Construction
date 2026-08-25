@@ -37,6 +37,9 @@ import {
   deleteHardcopyApi,
   listMaterialsApi,
   createMaterialApi,
+  changeTenderStageApi,
+  decideTenderStageApi,
+  cancelTenderStageApi,
 } from "./tenderApi";
 
 /** Log-and-swallow: backend persistence is best-effort so the UI never blocks on it. */
@@ -109,12 +112,23 @@ interface TenderState {
   /** Load tenders + trackers from the backend, replacing seed/local data. No-op (stays local) if it fails. */
   hydrateFromBackend: () => Promise<void>;
 
-  /** Move a tender to a new stage (e.g. shortlist from research, or mark applied). */
-  setStage: (id: string, stage: TenderStage, status?: TenderStatus | null, patch?: Partial<Tender>) => void;
+  /**
+   * Propose a stage move.
+   *
+   * <p>Not a local edit any more: the server decides. It refuses a move that skips the pipeline, and
+   * where an approval chain is published it parks the move as `pendingStage` instead of applying it
+   * — so the tender only changes stage once the ladder has signed off. Resolves to a short message
+   * for the caller to show, or null when the move landed silently.
+   */
+  setStage: (id: string, stage: TenderStage, status?: TenderStatus | null, patch?: Partial<Tender>) => Promise<string | null>;
   /** Record an applied tender's outcome status; stage is derived from it. */
-  setStatus: (id: string, status: TenderStatus, patch?: Partial<Tender>) => void;
+  setStatus: (id: string, status: TenderStatus, patch?: Partial<Tender>) => Promise<string | null>;
   /** Move many tenders at once — the sorting screen is 120+ rows, one-at-a-time is unusable. */
-  setStageBulk: (ids: string[], stage: TenderStage, status?: TenderStatus | null, patch?: Partial<Tender>) => void;
+  setStageBulk: (ids: string[], stage: TenderStage, status?: TenderStatus | null, patch?: Partial<Tender>) => Promise<string | null>;
+  /** Approve or reject a parked stage move (the caller must be who the ladder is waiting on). */
+  decideStage: (id: string, action: "APPROVE" | "REJECT", note?: string) => Promise<void>;
+  /** Withdraw a stage move you raised. */
+  cancelStageChange: (id: string) => Promise<void>;
   /** Link a won tender to the Project created from it, recording what was pushed across. */
   linkProject: (id: string, projectId: number, patch?: Partial<TenderHandoff>) => void;
   /** The payload a tender would hand to the Project module — shared by the store and the UI. */
@@ -179,6 +193,70 @@ const snapshot = (tenders: Tender[], ids: Set<string>, label: string): UndoEntry
   tenders: tenders.filter((t) => ids.has(t.id)).map((t) => ({ ...t })),
 });
 
+/**
+ * Human wording for what came back from a stage request.
+ *
+ * <p>An applied move needs no announcement — the pipeline visibly changes. A parked one does: from
+ * the user's side nothing moved, and without this it reads as the button having failed.
+ */
+function stageOutcomeMessage(after: Tender): string | null {
+  if (!after.pendingStage) return null;
+  const who = after.approval?.awaitingRoleNames;
+  return `Stage change to ${after.pendingStage} sent for approval${who ? ` — waiting on ${who}` : ""}.`;
+}
+
+/**
+ * Ask the server to move one or more tenders.
+ *
+ * <p>Any non-stage fields in `patch` are the caller's own edit (a loss reason, a submission date)
+ * and are saved the normal way first; the move itself then goes through the stage endpoint, which
+ * is the only path that consults the transition rules and the approval ladder. Whatever the server
+ * says the tender now looks like — moved, or parked with a `pendingStage` — is what lands in the
+ * store, so the UI never shows a stage the server hasn't agreed to.
+ */
+async function moveStage(
+  get: () => TenderState,
+  set: (fn: (s: TenderState) => Partial<TenderState>) => void,
+  ids: string[],
+  stage: TenderStage,
+  status: TenderStatus | null | undefined,
+  patch: Partial<Tender> | undefined,
+  undoLabel: string,
+): Promise<string | null> {
+  const idSet = new Set(ids);
+  set((s) => ({ lastUndo: snapshot(s.tenders, idSet, undoLabel) }));
+
+  // Offline / seed mode keeps the old optimistic behaviour so the UI still works without a backend.
+  if (!get().backend) {
+    set((s) => ({
+      tenders: s.tenders.map((t) => (idSet.has(t.id) ? { ...t, ...patch, stage, status: status ?? t.status } : t)),
+    }));
+    return null;
+  }
+
+  if (patch && Object.keys(patch).length > 0) {
+    set((s) => ({ tenders: s.tenders.map((t) => (idSet.has(t.id) ? { ...t, ...patch } : t)) }));
+    ids.forEach((id) => persistTender(get, id));
+  }
+
+  let message: string | null = null;
+  let failures = 0;
+  for (const id of ids) {
+    try {
+      const updated = await changeTenderStageApi(id, stage, status ?? null);
+      set((s) => ({ tenders: s.tenders.map((t) => (t.id === id ? { ...t, ...updated } : t)) }));
+      message = stageOutcomeMessage(updated) ?? message;
+    } catch (e) {
+      failures++;
+      const detail = e instanceof Error ? e.message : "";
+      message = detail || "That stage change was refused.";
+      warn("Tender stage change refused")(e);
+    }
+  }
+  if (failures > 1) message = `${failures} of ${ids.length} tenders could not be moved.`;
+  return message;
+}
+
 export const useTenderStore = create<TenderState>()(
   persist(
     (set, get) => ({
@@ -210,37 +288,24 @@ export const useTenderStore = create<TenderState>()(
         }
       },
 
-      setStage: (id, stage, status, patch) => {
-        set((s) => ({
-          lastUndo: snapshot(s.tenders, new Set([id]), "Stage change"),
-          tenders: s.tenders.map((t) =>
-            t.id === id ? { ...t, ...patch, stage, status: status ?? t.status } : t,
-          ),
-        }));
-        persistTender(get, id);
+      setStage: async (id, stage, status, patch) => moveStage(get, set, [id], stage, status, patch, "Stage change"),
+
+      setStatus: async (id, status, patch) =>
+        moveStage(get, set, [id], STATUS_TO_STAGE[status], status, patch, "Status change"),
+
+      setStageBulk: async (ids, stage, status, patch) =>
+        moveStage(get, set, ids, stage, status, patch, `${ids.length} tenders moved`),
+
+      decideStage: async (id, action, note) => {
+        if (!get().backend) return;
+        const updated = await decideTenderStageApi(id, action, note);
+        set((s) => ({ tenders: s.tenders.map((t) => (t.id === id ? { ...t, ...updated } : t)) }));
       },
 
-      setStatus: (id, status, patch) => {
-        set((s) => ({
-          lastUndo: snapshot(s.tenders, new Set([id]), "Status change"),
-          tenders: s.tenders.map((t) =>
-            t.id === id ? { ...t, ...patch, status, stage: STATUS_TO_STAGE[status] } : t,
-          ),
-        }));
-        persistTender(get, id);
-      },
-
-      setStageBulk: (ids, stage, status, patch) => {
-        set((s) => {
-          const idSet = new Set(ids);
-          return {
-            lastUndo: snapshot(s.tenders, idSet, `${ids.length} tenders moved`),
-            tenders: s.tenders.map((t) =>
-              idSet.has(t.id) ? { ...t, ...patch, stage, status: status ?? t.status } : t,
-            ),
-          };
-        });
-        if (get().backend) ids.forEach((id) => persistTender(get, id));
+      cancelStageChange: async (id) => {
+        if (!get().backend) return;
+        const updated = await cancelTenderStageApi(id);
+        set((s) => ({ tenders: s.tenders.map((t) => (t.id === id ? { ...t, ...updated } : t)) }));
       },
 
       handoffPayloadFor: (id) => {

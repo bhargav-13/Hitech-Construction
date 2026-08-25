@@ -18,6 +18,8 @@ import { transitionsFor, stateOf } from "@/lib/tenderStateMachine";
 import { useTenderStore } from "@/lib/tenderStore";
 import { useCompanyProfile, bidFlags, FLAG_TONE_CLASS } from "@/lib/tenderProfile";
 import { TenderFlow } from "@/components/tender/TenderFlow";
+import { TenderActivity } from "@/components/tender/TenderActivity";
+import { ApprovalTrail, ApprovalProgressPill } from "@/components/approval/ApprovalTrail";
 import {
   DEADLINE_TONE_CLASS,
   deadlineLabel,
@@ -30,7 +32,7 @@ import {
   tmoney,
   tval,
 } from "@/lib/tenderHelpers";
-import { ArrowUpRight, ExternalLink, FolderPlus, Paperclip, Pencil, Trash2, Upload } from "lucide-react";
+import { ArrowUpRight, Check, ExternalLink, FolderPlus, History, Hourglass, Paperclip, Pencil, Trash2, Upload, X } from "lucide-react";
 
 /** 2 MB per file — attachments live in localStorage until there is a backend to store them. */
 const MAX_ATTACHMENT_BYTES = 2 * 1024 * 1024;
@@ -53,6 +55,8 @@ export function TenderDetailDrawer({
 }) {
   const setStage = useTenderStore((s) => s.setStage);
   const setStatus = useTenderStore((s) => s.setStatus);
+  const decideStage = useTenderStore((s) => s.decideStage);
+  const cancelStageChange = useTenderStore((s) => s.cancelStageChange);
   const updateTender = useTenderStore((s) => s.updateTender);
   const addAttachment = useTenderStore((s) => s.addAttachment);
   const removeAttachment = useTenderStore((s) => s.removeAttachment);
@@ -62,6 +66,8 @@ export function TenderDetailDrawer({
   const t = live;
 
   const [msg, setMsg] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [decisionNote, setDecisionNote] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
 
   const transitions = transitionsFor(t.stage);
@@ -88,6 +94,31 @@ export function TenderDetailDrawer({
         dataUrl,
       };
       addAttachment(t.id, attachment);
+    }
+  }
+
+  async function decide(action: "APPROVE" | "REJECT") {
+    setBusy(true);
+    try {
+      await decideStage(t.id, action, decisionNote.trim() || undefined);
+      setDecisionNote("");
+      setMsg(action === "APPROVE" ? "Stage change approved." : "Stage change rejected.");
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : "That decision could not be recorded.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function withdraw() {
+    setBusy(true);
+    try {
+      await cancelStageChange(t.id);
+      setMsg("Stage change withdrawn.");
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : "That request could not be withdrawn.");
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -143,17 +174,88 @@ export function TenderDetailDrawer({
           <p className="mt-2 text-xs text-gray-500">{stateOf(t.stage)?.description}</p>
         </div>
 
+        {/* A move that has been proposed and is climbing the ladder. The tender has not moved yet. */}
+        {t.pendingStage && (
+          <div className="rounded-xl border border-amber-200 bg-amber-50/70 p-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <Hourglass size={14} className="text-amber-600" />
+              <span className="text-sm font-semibold text-amber-900">
+                Move to {STAGE_META[t.pendingStage].label} awaiting approval
+              </span>
+              <ApprovalProgressPill approval={t.approval ?? null} />
+            </div>
+            <p className="mt-1 text-xs text-amber-800">
+              {t.approval?.awaitingRoleNames
+                ? `Sitting with ${t.approval.awaitingRoleNames}. The tender stays in ${STAGE_META[t.stage].label} until they sign off.`
+                : `The tender stays in ${STAGE_META[t.stage].label} until this is approved.`}
+            </p>
+
+            {t.approval && (
+              <div className="mt-3 rounded-lg bg-white/70 p-2">
+                <ApprovalTrail approval={t.approval} />
+              </div>
+            )}
+
+            {t.canActNow ? (
+              <div className="mt-3">
+                <textarea
+                  value={decisionNote}
+                  onChange={(e) => setDecisionNote(e.target.value)}
+                  rows={2}
+                  placeholder="Add a note (optional)"
+                  className="w-full resize-none rounded-lg border border-amber-200 bg-white px-2.5 py-2 text-sm outline-none focus:border-amber-400"
+                />
+                <div className="mt-2 flex gap-2">
+                  <button
+                    disabled={busy}
+                    onClick={() => decide("APPROVE")}
+                    className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-50"
+                  >
+                    <Check size={15} /> Approve
+                  </button>
+                  <button
+                    disabled={busy}
+                    onClick={() => decide("REJECT")}
+                    className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-rose-200 bg-white px-3 py-2 text-sm font-semibold text-rose-600 transition hover:bg-rose-50 disabled:opacity-50"
+                  >
+                    <X size={15} /> Reject
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <button
+                disabled={busy}
+                onClick={withdraw}
+                className="mt-3 rounded-lg border border-amber-300 bg-white px-3 py-1.5 text-xs font-semibold text-amber-800 transition hover:bg-amber-100 disabled:opacity-50"
+              >
+                Withdraw request
+              </button>
+            )}
+          </div>
+        )}
+
         {/* What you can do next — generated from the state machine */}
         <div className="flex flex-wrap gap-2">
           {transitions.map((tr) => (
             <button
               key={`${tr.to}-${tr.label}`}
-              onClick={() => {
-                if (tr.to === "LOST" && onRequestLoss) onRequestLoss(t, tr.to, tr.status, tr.label);
-                else if (tr.status) setStatus(t.id, tr.status as TenderStatus);
-                else setStage(t.id, tr.to);
+              disabled={busy || t.pendingStage != null}
+              title={t.pendingStage != null ? "A stage change is already waiting for approval" : undefined}
+              onClick={async () => {
+                if (tr.to === "LOST" && onRequestLoss) return onRequestLoss(t, tr.to, tr.status, tr.label);
+                setBusy(true);
+                try {
+                  // Both paths go to the server now, which may park the move for approval rather
+                  // than applying it — so whatever it reports back is what gets shown.
+                  const note = tr.status
+                    ? await setStatus(t.id, tr.status as TenderStatus)
+                    : await setStage(t.id, tr.to);
+                  setMsg(note);
+                } finally {
+                  setBusy(false);
+                }
               }}
-              className={`rounded-lg px-3 py-1.5 text-sm font-medium transition-all duration-150 active:scale-95 ${
+              className={`rounded-lg px-3 py-1.5 text-sm font-medium transition-all duration-150 active:scale-95 disabled:cursor-not-allowed disabled:opacity-50 ${
                 tr.tone === "primary"
                   ? "bg-brand-accent text-white hover:opacity-90"
                   : tr.tone === "danger"
@@ -243,6 +345,11 @@ export function TenderDetailDrawer({
           <Field label="Next Follow Up">
             <FollowUpBadge value={t.nextFollowUp} />
           </Field>
+          {t.nextFollowUpNote && (
+            <Field label="Follow Up Remarks" wide>
+              {t.nextFollowUpNote}
+            </Field>
+          )}
           <Field label="Duration">
             {tval(t.duration)}
             {t.durationMonths != null && <span className="text-gray-400"> ({t.durationMonths} mo)</span>}
@@ -393,6 +500,15 @@ export function TenderDetailDrawer({
           </Field>
           <Field label="Remarks" wide>{tval(t.remarks)}</Field>
         </Section>
+
+        {/* Last activity — the same feed Taskopad renders on a task, over this tender's own trail. */}
+        <div className="rounded-xl border border-gray-100 bg-white p-3">
+          <div className="mb-2 flex items-center gap-1.5">
+            <History size={13} className="text-gray-400" />
+            <h4 className="text-[11px] font-semibold tracking-wide text-gray-400 uppercase">Last Activity</h4>
+          </div>
+          <TenderActivity tenderId={t.id} approval={t.approval} />
+        </div>
       </div>
     </Drawer>
   );

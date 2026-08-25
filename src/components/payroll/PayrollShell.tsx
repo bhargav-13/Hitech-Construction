@@ -60,17 +60,35 @@ const ICONS: Record<string, React.ComponentType<{ size?: number; className?: str
  * rail scoped to their own records. Pass `requireAdmin` on admin-only pages so a self-service user
  * who lands on one (via a stale link) is bounced to their own dashboard.
  */
-export function PayrollShell({ children, requireAdmin = false }: { children: React.ReactNode; requireAdmin?: boolean }) {
+export function PayrollShell({
+  children,
+  requireAdmin = false,
+  requireApprove = false,
+}: {
+  children: React.ReactNode;
+  requireAdmin?: boolean;
+  /**
+   * Page needs PAYROLL:APPROVE (the leave queue). Someone without it is sent to their own leave
+   * screen rather than shown an "Access is denied" they can do nothing about.
+   */
+  requireApprove?: boolean;
+}) {
   const pathname = usePathname();
   const router = useRouter();
-  const { isAdmin } = usePayrollAccess();
+  const { isAdmin, canApprove } = usePayrollAccess();
   // Wait for the session to hydrate before deciding access — on a hard page load permissions
   // aren't present for a tick, and acting early would wrongly bounce an admin off their own pages.
   const hydrated = useAuthStore((s) => s.hydrated);
   const railCollapsed = useUiStore((s) => s.payrollRailCollapsed);
   const toggleRail = useUiStore((s) => s.togglePayrollRail);
 
-  const nav = isAdmin ? PAYROLL_NAV : PAYROLL_SELF_NAV;
+  // The Leave queue only works for approvers, so it's hidden from admins who lack the right —
+  // they reach their own requests through Self Service instead.
+  const nav = isAdmin
+    ? canApprove
+      ? PAYROLL_NAV
+      : PAYROLL_NAV.filter((n) => n.href !== "/payroll/leave")
+    : PAYROLL_SELF_NAV;
 
   const [open, setOpen] = useState<Record<string, boolean>>(() => {
     const init: Record<string, boolean> = {};
@@ -83,11 +101,14 @@ export function PayrollShell({ children, requireAdmin = false }: { children: Rea
   // Self-service users must not reach admin pages — send them to their own dashboard. Only act
   // once the session has hydrated, so an admin isn't redirected during the pre-hydration tick.
   const denied = hydrated && requireAdmin && !isAdmin;
+  const approvalDenied = hydrated && requireApprove && !canApprove;
   useEffect(() => {
     if (denied) router.replace("/payroll");
-  }, [denied, router]);
+    else if (approvalDenied) router.replace("/payroll/me/leave");
+  }, [denied, approvalDenied, router]);
   // Hold admin content until we know the user is allowed (avoids a flash + the redirect race).
-  const showContent = !requireAdmin || (hydrated && isAdmin);
+  const showContent =
+    (!requireAdmin || (hydrated && isAdmin)) && (!requireApprove || (hydrated && canApprove));
 
   const isActive = (href?: string) =>
     !!href && (href === "/payroll" ? pathname === "/payroll" : pathname.startsWith(href));

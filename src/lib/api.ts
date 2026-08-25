@@ -1044,8 +1044,11 @@ export function listPayrollRuns() {
 export function getPayrollRun(month: string) {
   return request<PayrollRunApi>(`/api/v1/payroll/runs/${month}`);
 }
-export function generatePayrollRun(month: string) {
-  return request<PayrollRunApi>(`/api/v1/payroll/runs/${month}/generate`, { method: "POST" });
+/** How days with no attendance mark are paid when a run is generated. */
+export type UnmarkedDayPolicy = "PRESENT" | "ABSENT";
+
+export function generatePayrollRun(month: string, unmarked: UnmarkedDayPolicy = "PRESENT") {
+  return request<PayrollRunApi>(`/api/v1/payroll/runs/${month}/generate?unmarked=${unmarked}`, { method: "POST" });
 }
 export function editPayslip(month: string, userId: number, body: { gross: number; otherDeductions: number }) {
   return request<PayslipApi>(`/api/v1/payroll/runs/${month}/payslips/${userId}`, { method: "PUT", body });

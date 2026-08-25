@@ -63,8 +63,14 @@ export interface ImportConfig {
   preview: ImportPreviewCol[];
   /** When set, rows are grouped into multi-line documents before commit (see {@link ImportGroup}). */
   group?: ImportGroup;
-  /** Persist the built records; returns how many were created. */
-  commit: (records: Record<string, unknown>[]) => Promise<number>;
+  /**
+   * Persist the built records; returns how many were created.
+   *
+   * @param projectId the project in scope when the import ran, so project-scoped rows (items,
+   *   parties) land under the project the user is looking at. Undefined on "All projects", which
+   *   leaves them shared.
+   */
+  commit: (records: Record<string, unknown>[], projectId?: number) => Promise<number>;
 }
 
 const num = (v: string) => Number(v.replace(/[^\d.-]/g, "")) || 0;
@@ -211,7 +217,7 @@ export function ImportDialog({
     setBusy(true);
     setError("");
     try {
-      setDone(await config.commit(records));
+      setDone(await config.commit(records, projectId));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Import failed.");
     } finally {

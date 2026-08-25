@@ -98,7 +98,7 @@ export default function LeavePage() {
   }
 
   return (
-    <PayrollShell requireAdmin>
+    <PayrollShell requireAdmin requireApprove>
       <div className="space-y-4">
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>

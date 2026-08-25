@@ -466,8 +466,8 @@ export function usePayrollRuns() {
     refresh();
   }, [refresh]);
 
-  const generate = async (month: string) => {
-    const run = await api.generatePayrollRun(month);
+  const generate = async (month: string, unmarked: api.UnmarkedDayPolicy = "PRESENT") => {
+    const run = await api.generatePayrollRun(month, unmarked);
     await refresh();
     return run;
   };

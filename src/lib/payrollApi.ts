@@ -650,6 +650,12 @@ export interface PayrollAccess {
   canView: boolean;
   /** Full HR/admin module: all staff, payroll runs, approvals, everyone's salaries. */
   isAdmin: boolean;
+  /**
+   * Holds PAYROLL:APPROVE specifically. Distinct from `isAdmin` because a member with only
+   * CREATE/EDIT counts as an admin here but is refused by every /leave approval endpoint — showing
+   * them the Leave queue is what produced "Access is denied" with nowhere else to apply for leave.
+   */
+  canApprove: boolean;
   /** VIEW-only: sees only their own attendance, payslips, loans and reimbursements. */
   isSelfService: boolean;
 }
@@ -662,7 +668,8 @@ export function usePayrollAccess(): PayrollAccess {
   const perms = useAuthStore((s) => s.user?.permissions) ?? [];
   const canView = perms.includes("PAYROLL:VIEW");
   const isAdmin = MANAGE_ACTIONS.some((p) => perms.includes(p));
-  return { canView, isAdmin, isSelfService: canView && !isAdmin };
+  const canApprove = perms.includes("PAYROLL:APPROVE");
+  return { canView, isAdmin, canApprove, isSelfService: canView && !isAdmin };
 }
 
 /**

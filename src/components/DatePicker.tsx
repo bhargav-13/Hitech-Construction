@@ -3,6 +3,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { CalendarDays, ChevronDown, ChevronLeft, ChevronRight, Repeat } from "lucide-react";
+import { notifyFormTouched } from "@/lib/formDirty";
 
 export type RecurrenceRule = "NONE" | "CUSTOM" | "WEEKLY" | "MONTHLY" | "QUARTERLY" | "HALF_YEARLY";
 
@@ -148,6 +149,9 @@ export function DatePicker({
 
   function pick(d: Date) {
     onChange(toIso(d));
+    // The calendar is portalled to the document root, so nothing here bubbles to the drawer this
+    // field lives in — raise the touch signal from the trigger button, which does.
+    notifyFormTouched(btnRef.current);
     close();
   }
 
@@ -387,6 +391,7 @@ export function DatePicker({
                           type="button"
                           onClick={() => {
                             onChange("");
+                            notifyFormTouched(btnRef.current);
                             close();
                           }}
                           className="rounded-md px-2 py-1 text-xs font-medium text-gray-400 transition-colors duration-150 hover:text-rose-600"

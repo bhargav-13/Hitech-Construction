@@ -5,6 +5,7 @@ import { Drawer } from "@/components/Drawer";
 import { Select } from "@/components/Select";
 import { DatePicker } from "@/components/DatePicker";
 import * as vyapar from "@/lib/vyaparApi";
+import { useVyaparProjectId } from "@/lib/projectScope";
 import { GST_TYPES, STATES_OF_SUPPLY } from "@/lib/vyaparApi";
 import type { Party } from "@/lib/vyaparApi";
 import { usePartySettings } from "@/lib/usePartySettings";
@@ -32,6 +33,7 @@ export function PartyDialog({
   onSaved: (saved: Party, again: boolean) => void;
 }) {
   const { settings } = usePartySettings();
+  const scopedProjectId = useVyaparProjectId();
   const [tab, setTab] = useState<Tab>("GST & Address");
 
   const [name, setName] = useState(existing?.name ?? initialName ?? "");
@@ -71,6 +73,9 @@ export function PartyDialog({
     const body: Partial<Party> = {
       name: name.trim(),
       bankAccountId: existing ? existing.bankAccountId : null,
+      // A new party joins the directory of whatever project is in scope; on "All projects" it stays
+      // null, which the backend reads as shared. Editing never moves a party between projects.
+      projectId: existing ? existing.projectId : scopedProjectId ?? null,
       partyType,
       gstin: gstin.trim() || null,
       gstType,

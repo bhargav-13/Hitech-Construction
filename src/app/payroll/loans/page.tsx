@@ -6,17 +6,19 @@ import { Drawer } from "@/components/Drawer";
 import { Spinner } from "@/components/Spinner";
 import { Select } from "@/components/Select";
 import { DatePicker } from "@/components/DatePicker";
+import { RowMenu, RowMenuItem } from "@/components/RowMenu";
 import { computeEmi } from "@/lib/payrollApi";
 import { useLoans } from "@/lib/usePayrollLive";
 import { getUsers, ApiError } from "@/lib/api";
 import type { LoanApi, UserResponse } from "@/lib/api";
 import { inr } from "@/lib/format";
-import { HandCoins, Landmark, Plus } from "lucide-react";
+import { HandCoins, Landmark, Pencil, Plus, Trash2 } from "lucide-react";
 
 /** Loans — real backend, keyed by ERP member (user_id). Deducted from payroll runs as EMI. */
 export default function LoansPage() {
-  const { loans, loading, error, create } = useLoans();
-  const [creating, setCreating] = useState(false);
+  const { loans, loading, error, create, update, remove } = useLoans();
+  // null = closed, "new" = add form, a loan = edit that loan.
+  const [dialog, setDialog] = useState<LoanApi | "new" | null>(null);
   const [members, setMembers] = useState<UserResponse[]>([]);
   const [actionError, setActionError] = useState("");
 
@@ -38,7 +40,7 @@ export default function LoansPage() {
             <h2 className="text-lg font-semibold text-gray-800">Loans &amp; Advances</h2>
             <p className="mt-0.5 text-sm text-gray-500">Member loans, their EMI and outstanding principal — deducted from monthly payroll.</p>
           </div>
-          <button onClick={() => setCreating(true)} disabled={members.length === 0} className="flex items-center gap-1.5 rounded-lg bg-brand-accent px-3.5 py-2 text-sm font-semibold text-white transition-all hover:opacity-90 active:scale-95 disabled:opacity-50">
+          <button onClick={() => setDialog("new")} disabled={members.length === 0} className="flex items-center gap-1.5 rounded-lg bg-brand-accent px-3.5 py-2 text-sm font-semibold text-white transition-all hover:opacity-90 active:scale-95 disabled:opacity-50">
             <Plus size={15} /> Add Loan
           </button>
         </div>
@@ -57,22 +59,39 @@ export default function LoansPage() {
             <Spinner size={16} className="text-brand-accent" /> Loading…
           </div>
         ) : loans.length === 0 ? (
-          <PayrollEmpty icon={Landmark} title="No loans yet" hint="Issue a member loan and track its EMI and outstanding." action={<button onClick={() => setCreating(true)} className="rounded-lg bg-brand-accent px-4 py-2 text-sm font-medium text-white hover:opacity-90">+ Add Loan</button>} />
+          <PayrollEmpty icon={Landmark} title="No loans yet" hint="Issue a member loan and track its EMI and outstanding." action={<button onClick={() => setDialog("new")} className="rounded-lg bg-brand-accent px-4 py-2 text-sm font-medium text-white hover:opacity-90">+ Add Loan</button>} />
         ) : (
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {loans.map((l) => <LoanCard key={l.id} loan={l} />)}
+            {loans.map((l) => (
+              <LoanCard
+                key={l.id}
+                loan={l}
+                onEdit={() => setDialog(l)}
+                onDelete={async () => {
+                  if (!confirm(`Delete "${l.name}" for ${l.memberName}? Its EMI stops being deducted from future payroll runs.`)) return;
+                  try {
+                    await remove(l.id);
+                  } catch (err) {
+                    setActionError(err instanceof ApiError ? err.message : "Unable to delete this loan.");
+                  }
+                }}
+              />
+            ))}
           </div>
         )}
       </div>
 
-      {creating && (
+      {dialog && (
         <LoanDialog
+          key={dialog === "new" ? "new" : dialog.id}
           members={members}
-          onClose={() => setCreating(false)}
-          onCreate={async (body) => {
+          existing={dialog === "new" ? undefined : dialog}
+          onClose={() => setDialog(null)}
+          onSubmit={async (body) => {
             try {
-              await create(body);
-              setCreating(false);
+              if (dialog === "new") await create(body);
+              else await update(dialog.id, body);
+              setDialog(null);
             } catch (err) {
               setActionError(err instanceof ApiError ? err.message : "Unable to save this loan.");
             }
@@ -83,16 +102,35 @@ export default function LoansPage() {
   );
 }
 
-function LoanCard({ loan: l }: { loan: LoanApi }) {
+function LoanCard({ loan: l, onEdit, onDelete }: { loan: LoanApi; onEdit: () => void; onDelete: () => void }) {
   const repaid = Number(l.principal) > 0 ? Math.round(((Number(l.principal) - Number(l.outstanding)) / Number(l.principal)) * 100) : 0;
   return (
-    <div className="rounded-xl border border-gray-200 bg-white p-4 transition-shadow hover:shadow-sm">
+    <div
+      onClick={onEdit}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onEdit(); } }}
+      title="Edit this loan"
+      className="cursor-pointer rounded-xl border border-gray-200 bg-white p-4 transition-all duration-150 hover:-translate-y-0.5 hover:border-brand-accent hover:shadow-md active:scale-[0.99]"
+    >
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           <h3 className="truncate text-sm font-semibold text-gray-800">{l.name}</h3>
           <p className="truncate text-xs text-gray-400">{l.memberName}</p>
         </div>
-        <span className="shrink-0 rounded-md bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-500">{l.annualRate}% · {l.interestType}</span>
+        <div className="flex shrink-0 items-center gap-1">
+          <span className="rounded-md bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-500">{l.annualRate}% · {l.interestType}</span>
+          <div onClick={(e) => e.stopPropagation()}>
+            <RowMenu align="right" buttonLabel={`Actions for ${l.name}`}>
+              {(close) => (
+                <>
+                  <RowMenuItem icon={Pencil} label="Edit loan" onClick={() => { close(); onEdit(); }} />
+                  <RowMenuItem icon={Trash2} label="Delete loan" tone="danger" onClick={() => { close(); onDelete(); }} />
+                </>
+              )}
+            </RowMenu>
+          </div>
+        </div>
       </div>
       <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
         <div><div className="text-[11px] tracking-wide text-gray-400 uppercase">Outstanding</div><div className="font-semibold text-rose-600">{inr(l.outstanding)}</div></div>
@@ -108,12 +146,15 @@ function LoanCard({ loan: l }: { loan: LoanApi }) {
 
 function LoanDialog({
   members,
+  existing,
   onClose,
-  onCreate,
+  onSubmit,
 }: {
   members: UserResponse[];
+  /** Present when editing — the form prefills from it and Save updates instead of creating. */
+  existing?: LoanApi;
   onClose: () => void;
-  onCreate: (body: {
+  onSubmit: (body: {
     userId: number;
     name: string;
     description: string | null;
@@ -127,15 +168,18 @@ function LoanDialog({
     outstanding: number;
   }) => Promise<void>;
 }) {
-  const [userId, setUserId] = useState("");
-  const [name, setName] = useState("");
-  const [description, setDescription] = useState("");
-  const [principal, setPrincipal] = useState(0);
-  const [tenure, setTenure] = useState(12);
-  const [annualRate, setAnnualRate] = useState(0);
-  const [interestType, setInterestType] = useState<"FLAT" | "SIMPLE" | "COMPOUND">("FLAT");
-  const [disbursementDate, setDisbursementDate] = useState(new Date().toISOString().slice(0, 10));
-  const [startMonth, setStartMonth] = useState(new Date().toISOString().slice(0, 7));
+  const [userId, setUserId] = useState(existing ? String(existing.userId) : "");
+  const [name, setName] = useState(existing?.name ?? "");
+  const [description, setDescription] = useState(existing?.description ?? "");
+  const [principal, setPrincipal] = useState(Number(existing?.principal ?? 0));
+  const [tenure, setTenure] = useState(Number(existing?.tenureMonths ?? 12));
+  const [annualRate, setAnnualRate] = useState(Number(existing?.annualRate ?? 0));
+  const [interestType, setInterestType] = useState<"FLAT" | "SIMPLE" | "COMPOUND">(existing?.interestType ?? "FLAT");
+  const [disbursementDate, setDisbursementDate] = useState(existing?.disbursementDate ?? new Date().toISOString().slice(0, 10));
+  const [startMonth, setStartMonth] = useState(existing?.startMonth ?? new Date().toISOString().slice(0, 7));
+  // Editable on an existing loan so a part-repayment can be recorded; a new loan starts at its full
+  // principal and the field is derived rather than asked for.
+  const [outstanding, setOutstanding] = useState(Number(existing?.outstanding ?? 0));
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -148,7 +192,7 @@ function LoanDialog({
     setSaving(true);
     setError("");
     try {
-      await onCreate({
+      await onSubmit({
         userId: Number(userId),
         name: name.trim(),
         description: description.trim() || null,
@@ -159,7 +203,7 @@ function LoanDialog({
         disbursementDate,
         startMonth,
         emi,
-        outstanding: principal,
+        outstanding: existing ? Math.max(0, outstanding) : principal,
       });
     } finally {
       setSaving(false);
@@ -167,7 +211,13 @@ function LoanDialog({
   }
 
   return (
-    <Drawer title="New Loan" onClose={onClose} onSave={save} saveLabel={saving ? "Saving…" : "Save Loan"} width="max-w-lg">
+    <Drawer
+      title={existing ? "Edit Loan" : "New Loan"}
+      onClose={onClose}
+      onSave={save}
+      saveLabel={saving ? "Saving…" : existing ? "Save Changes" : "Save Loan"}
+      width="max-w-lg"
+    >
       <div className="space-y-4">
         {error && <div className="rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-600">{error}</div>}
         <F label="Member" required>
@@ -187,6 +237,11 @@ function LoanDialog({
           <F label="Interest Type"><Select value={interestType} onChange={(v) => setInterestType(v as typeof interestType)} options={[{ value: "FLAT", label: "Flat Rate" }, { value: "SIMPLE", label: "Simple Interest" }, { value: "COMPOUND", label: "Reducing Balance" }]} /></F>
           <F label="Disbursement Date"><DatePicker value={disbursementDate} onChange={setDisbursementDate} placeholder="Date" /></F>
           <F label="Instalment Start"><input type="month" value={startMonth} onChange={(e) => setStartMonth(e.target.value)} className="input" /></F>
+          {existing && (
+            <F label="Outstanding (₹)">
+              <input type="number" value={outstanding} onChange={(e) => setOutstanding(Number(e.target.value))} className="input" />
+            </F>
+          )}
         </div>
 
         {principal > 0 && tenure > 0 && (

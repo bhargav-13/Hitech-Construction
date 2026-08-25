@@ -13,6 +13,8 @@ const TABS = [
   { label: "Tasks", href: "/taskopad/tasks" },
   { label: "Approvals", href: "/taskopad/approvals" },
   { label: "Reports", href: "/taskopad/reports" },
+  // Standalone routine board — see app/taskopad/checklist. Deliberately not tied to tasks.
+  { label: "Checklist", href: "/taskopad/checklist" },
 ];
 
 /** Shared chrome for the Taskopad module: breadcrumb + horizontal section tabs. */

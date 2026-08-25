@@ -7,6 +7,7 @@ import { DatePicker } from "@/components/DatePicker";
 import { useItemSettings, DEFAULT_UNITS, TAX_RATES } from "@/lib/useItemSettings";
 import type { ManagedUnit } from "@/lib/useItemMasters";
 import * as vyapar from "@/lib/vyaparApi";
+import { useVyaparProjectId } from "@/lib/projectScope";
 import type { Item } from "@/lib/vyaparApi";
 import { Barcode, ImagePlus, Plus, Search, X } from "lucide-react";
 
@@ -63,6 +64,7 @@ export function ItemDialog({
   onSaved: (saved: Item, again: boolean) => void;
 }) {
   const { settings } = useItemSettings();
+  const scopedProjectId = useVyaparProjectId();
   const [tab, setTab] = useState<Tab>("Pricing");
 
   const [isService, setIsService] = useState(existing?.isService ?? false);
@@ -107,6 +109,9 @@ export function ItemDialog({
     const body: Partial<Item> = {
       name: name.trim(),
       bankAccountId: existing ? existing.bankAccountId : null,
+      // A new item joins the catalogue of whatever project is in scope; on "All projects" it stays
+      // null, which the backend reads as shared. Editing never moves an item between projects.
+      projectId: existing ? existing.projectId : scopedProjectId ?? null,
       hsn: hsn.trim() || null,
       itemCode: itemCode.trim() || null,
       unit: unit || "NONE",

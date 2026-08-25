@@ -2,6 +2,8 @@
 // (Sorting → Research → Applied → Won/Lost); winning hands off to the Project module.
 // Mirrors the client's tender-analysis workbook — see tenderSeed.ts.
 
+import type { ApprovalState } from "./api";
+
 export type TenderSource = "PORTAL" | "GEM";
 
 /**
@@ -76,6 +78,19 @@ export interface Tender {
   deadline?: string | null;
   /** Next chase date on this tender — colour-coded by how far off it is (see followUpTone). */
   nextFollowUp?: string | null;
+  /** What that follow-up is for. A bare date never said who to call or what to ask. */
+  nextFollowUpNote?: string | null;
+
+  /**
+   * A stage move that has been proposed and is climbing the approval ladder. The tender stays in
+   * `stage` until it is approved, so the pipeline only ever shows decided positions.
+   */
+  pendingStage?: TenderStage | null;
+  pendingStatus?: TenderStatus | null;
+  /** Ladder state for that proposal — who it is with, and the trail so far. */
+  approval?: ApprovalState | null;
+  /** True when the signed-in user is the one the proposal is currently waiting on. */
+  canActNow?: boolean;
   dueDate?: string | null;
   submissionDate?: string | null;
   hardcopyDue?: string | null;

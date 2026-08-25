@@ -12,12 +12,8 @@ import {
   ListTree,
   FileText,
   Loader2,
-  CheckCircle2,
   Eye,
   Lock,
-  Image as ImageIcon,
-  MessageSquare,
-  ClipboardCheck,
 } from "lucide-react";
 import { useAppStore } from "@/lib/store";
 import { useAuthStore } from "@/lib/authStore";
@@ -35,6 +31,8 @@ import { Select } from "@/components/Select";
 import { DatePicker } from "@/components/DatePicker";
 import type { RecurrenceRule } from "@/components/DatePicker";
 import { useDrawerDismiss } from "@/lib/useDrawerDismiss";
+// The timeline now lives at components/ActivityTimeline so Tender renders the identical feed.
+import { ActivityTimeline } from "@/components/ActivityTimeline";
 import { useTaskRights } from "@/lib/taskPermissions";
 
 type Panel = "Comment" | "Attachment" | "Log Activity";
@@ -70,16 +68,6 @@ function joinReminder(date: string, time: string, repeating: boolean): string | 
   if (repeating) return time || null;
   if (!date) return null;
   return time ? `${date}T${time}` : date;
-}
-
-type ActivityItem = { id: number | string; text: string; at: string; userId?: string };
-
-function activityIcon(text: string) {
-  const t = text.toLowerCase();
-  if (t.includes("attach")) return ImageIcon;
-  if (t.includes("comment")) return MessageSquare;
-  if (t.includes("creat")) return ClipboardCheck;
-  return CheckCircle2;
 }
 
 /**
@@ -241,46 +229,6 @@ function AttachmentBubble({
     );
   }
   return <span className={`${shell} cursor-default`}>{body}</span>;
-}
-
-/**
- * Single-column vertical activity timeline. Each entry is one row: icon + text + actor + time,
- * connected by a subtle dotted line down the left. No side-alternation, no measured curve.
- */
-function ActivityTimeline({
-  items,
-  userName,
-}: {
-  items: ActivityItem[];
-  userName?: (id: string) => string;
-}) {
-  if (items.length === 0) {
-    return <p className="py-10 text-center text-xs text-gray-400">No activity yet.</p>;
-  }
-  return (
-    <ol className="relative pl-6">
-      <span
-        aria-hidden
-        className="absolute left-[11px] top-3 bottom-3 w-px border-l border-dashed border-cyan-200"
-      />
-      {items.map((a) => {
-        const Icon = activityIcon(a.text);
-        const actor = a.userId && userName ? userName(a.userId) : null;
-        return (
-          <li key={a.id} className="relative py-2.5">
-            <span className="absolute -left-6 top-2.5 flex h-6 w-6 items-center justify-center rounded-full border border-cyan-200 bg-white text-brand-accent shadow-sm">
-              <Icon size={12} />
-            </span>
-            <div className="text-sm leading-snug text-gray-700">{a.text}</div>
-            <div className="mt-0.5 text-[10px] text-gray-400">
-              {actor && <span className="mr-1 font-medium text-gray-500">{actor}</span>}
-              {formatTaskDateTime(a.at)}
-            </div>
-          </li>
-        );
-      })}
-    </ol>
-  );
 }
 
 /**

@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Hammer, Plus, Search } from "lucide-react";
 import { ProcurementShell, ProcurementEmpty, ProcurementHeader } from "@/components/procurement/ProcurementShell";
 import { Spinner } from "@/components/Spinner";
@@ -26,6 +27,7 @@ import { inr } from "@/lib/format";
  *    order as half finished with nearly all the money still in the ground.
  */
 export default function WorkOrderListPage() {
+  const router = useRouter();
   const { workOrders, loading, error } = useWorkOrders();
   const { projects } = useProjects();
 
@@ -163,14 +165,16 @@ export default function WorkOrderListPage() {
                   const billedPct = w.orderValue > 0 ? (w.billedValue / w.orderValue) * 100 : 0;
                   const overBilled = w.billedValue > w.orderValue && w.orderValue > 0;
                   return (
-                    <tr key={w.id} className="align-top transition-colors duration-150 hover:bg-cyan-50/30">
+                    // The whole row opens the work order — the WO number alone was a small target,
+                    // and everything else on the row belongs to the same record.
+                    <tr
+                      key={w.id}
+                      onClick={() => router.push(`/procurement/work-order/${w.id}`)}
+                      title={`Open ${w.woNo}`}
+                      className="cursor-pointer align-top transition-colors duration-150 hover:bg-cyan-50/30"
+                    >
                       <td className="px-4 py-3">
-                        <Link
-                          href={`/procurement/work-order/${w.id}`}
-                          className="font-medium text-brand-accent transition-opacity duration-150 hover:opacity-75"
-                        >
-                          {w.woNo}
-                        </Link>
+                        <span className="font-medium text-brand-accent">{w.woNo}</span>
                         <div className="text-xs text-gray-500">{w.title}</div>
                         <div className="text-[11px] text-gray-400">{w.woDate}</div>
                       </td>

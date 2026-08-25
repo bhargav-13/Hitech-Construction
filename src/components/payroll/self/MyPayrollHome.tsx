@@ -119,6 +119,7 @@ export function MyPayrollHome() {
 
           <div className="space-y-3">
             <ShortcutCard href="/payroll/me/attendance" icon={CalendarDays} title="My Attendance" hint="Your monthly calendar" />
+            <ShortcutCard href="/payroll/me/leave" icon={Plane} title="My Leave" hint="Balance and apply for time off" />
             <ShortcutCard href="/payroll/me/loans" icon={Landmark} title="My Loans" hint={outstanding > 0 ? `${inr(outstanding)} outstanding · ${activeLoans} active` : "No active loans"} />
             <ShortcutCard href="/payroll/me/reimbursements" icon={Receipt} title="My Reimbursements" hint={pendingClaims > 0 ? `${pendingClaims} pending` : "Apply for a claim"} />
             <ShortcutCard href="/payroll/me/profile" icon={IdCard} title="My Profile" hint={profile ? categoryConfig(profile.category).title : "View details"} />

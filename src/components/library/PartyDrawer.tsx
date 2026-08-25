@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { Drawer, DrawerField } from "@/components/Drawer";
+import { PartyProfile } from "@/components/library/PartyProfile";
 import { Select } from "@/components/Select";
 import * as api from "@/lib/api";
 import * as vyapar from "@/lib/vyaparApi";
@@ -25,15 +26,23 @@ import {
 export function PartyDrawer({
   existing,
   roles,
+  rating = 0,
+  onRate,
   onClose,
   onSaved,
 }: {
   existing?: LibraryParty;
   roles: api.RoleResponse[];
+  /** The party's star rating, so the profile can show and change it without leaving the drawer. */
+  rating?: number;
+  onRate?: (stars: number) => void;
   onClose: () => void;
   onSaved: () => void;
 }) {
   const { departments } = useDepartments();
+  // Opening an existing party shows everything we hold about them first; the form is a tab away.
+  // Creating one goes straight to the form — there is nothing to profile yet.
+  const [tab, setTab] = useState<"profile" | "edit">(existing ? "profile" : "edit");
   // The full backing record, so every field the source owns prefills on edit — otherwise saving
   // would overwrite unshown fields (department, payroll, GSTIN, balances) with blanks.
   const rawUser = existing?.raw.source === "member" ? existing.raw.user : undefined;
@@ -137,11 +146,42 @@ export function PartyDrawer({
 
   return (
     <Drawer
-      title={existing ? "Edit Party" : "Add Party"}
+      title={existing ? existing.name : "Add Party"}
       onClose={onClose}
-      onSave={submit}
+      // The profile tab is read-only, so Save only belongs on the form.
+      onSave={tab === "edit" ? submit : undefined}
       saveLabel={saving ? "Saving…" : "Save"}
+      width="max-w-3xl"
     >
+      {existing && (
+        <div className="mb-5 flex gap-5 border-b border-gray-200">
+          {(["profile", "edit"] as const).map((t) => (
+            <button
+              key={t}
+              onClick={() => setTab(t)}
+              className={`relative -mb-px px-0.5 pb-2.5 text-sm font-medium transition-colors duration-150 ${
+                tab === t ? "text-brand-accent" : "text-gray-500 hover:text-gray-800"
+              }`}
+            >
+              {t === "profile" ? "Profile" : "Edit Details"}
+              <span
+                className={`absolute inset-x-0 -bottom-px h-0.5 rounded-full bg-brand-accent transition-all duration-200 ${
+                  tab === t ? "opacity-100" : "opacity-0"
+                }`}
+              />
+            </button>
+          ))}
+        </div>
+      )}
+
+      {existing && tab === "profile" ? (
+        <PartyProfile
+          party={existing}
+          rating={rating}
+          onRate={(n) => onRate?.(n)}
+          onEdit={() => setTab("edit")}
+        />
+      ) : (
       <div className="space-y-4">
         <DrawerField label="Party Type" required>
           <Select
@@ -316,6 +356,7 @@ export function PartyDrawer({
 
         {error && <div className="text-xs font-medium text-rose-600">{error}</div>}
       </div>
+      )}
     </Drawer>
   );
 }

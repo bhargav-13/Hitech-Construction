@@ -406,20 +406,22 @@ export function TenderPipeline({ variant }: { variant: PipelineVariant }) {
   /* ---------- mutations ---------- */
 
   /** Any move into LOST asks why first — that answer is the whole point of tender analysis. */
-  function requestTransition(t: Tender, to: TenderStage, status: TenderStatus | undefined, label: string) {
+  async function requestTransition(t: Tender, to: TenderStage, status: TenderStatus | undefined, label: string) {
     if (to === "LOST") {
       setLossPrompt({ tender: t, to, status, label });
       return;
     }
-    if (status) setStatus(t.id, status);
-    else setStage(t.id, to);
+    // A move can now come back parked for approval or refused outright, so the toast reports what
+    // the server actually did instead of assuming the tender moved.
+    const message = status ? await setStatus(t.id, status) : await setStage(t.id, to);
+    if (message) flash(message);
   }
 
-  function applyBulk(stage: TenderStage, status?: TenderStatus, patch?: Partial<Tender>) {
+  async function applyBulk(stage: TenderStage, status?: TenderStatus, patch?: Partial<Tender>) {
     const ids = visibleChecked;
-    setStageBulk(ids, stage, status ?? null, patch);
+    const message = await setStageBulk(ids, stage, status ?? null, patch);
     setChecked(new Set());
-    flash(`${ids.length} tender${ids.length === 1 ? "" : "s"} moved to ${STAGE_META[stage].label}.`);
+    flash(message ?? `${ids.length} tender${ids.length === 1 ? "" : "s"} moved to ${STAGE_META[stage].label}.`);
   }
 
   /**
@@ -847,11 +849,12 @@ export function TenderPipeline({ variant }: { variant: PipelineVariant }) {
           tender={lossPrompt.tender}
           actionLabel={lossPrompt.label}
           onCancel={() => setLossPrompt(null)}
-          onConfirm={(patch) => {
-            if (lossPrompt.status) setStatus(lossPrompt.tender.id, lossPrompt.status, patch);
-            else setStage(lossPrompt.tender.id, lossPrompt.to, null, patch);
+          onConfirm={async (patch) => {
+            const message = lossPrompt.status
+              ? await setStatus(lossPrompt.tender.id, lossPrompt.status, patch)
+              : await setStage(lossPrompt.tender.id, lossPrompt.to, null, patch);
             setLossPrompt(null);
-            flash("Outcome recorded.");
+            flash(message ?? "Outcome recorded.");
           }}
         />
       )}

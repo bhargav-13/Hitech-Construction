@@ -255,6 +255,8 @@ export function PartyLibrary() {
         <PartyDrawer
           roles={roles}
           existing={drawer.mode === "edit" ? drawer.party : undefined}
+          rating={drawer.mode === "edit" ? ratingOf(drawer.party.key) : 0}
+          onRate={drawer.mode === "edit" ? (n) => setRating(drawer.party.key, n) : undefined}
           onClose={() => setDrawer(null)}
           onSaved={() => {
             setDrawer(null);

@@ -115,7 +115,17 @@ export default function RfqPage() {
             );
 
             return (
-              <div key={r.id} className={`rounded-xl border border-gray-200 bg-white p-4 ${busy === r.rfqNo ? "opacity-50" : ""}`}>
+              // Clicking anywhere on the card opens the enquiry, matching every other list in the
+              // app; the action buttons stop the click so they still do their own thing.
+              <div
+                key={r.id}
+                onClick={() => router.push(`/procurement/rfq/build?id=${r.id}`)}
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => { if (e.key === "Enter") router.push(`/procurement/rfq/build?id=${r.id}`); }}
+                title={`Open ${r.rfqNo}`}
+                className={`cursor-pointer rounded-xl border border-gray-200 bg-white p-4 transition-all duration-150 hover:border-brand-accent hover:shadow-sm ${busy === r.rfqNo ? "opacity-50" : ""}`}
+              >
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
@@ -131,7 +141,7 @@ export default function RfqPage() {
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
                     <button
                       onClick={() => setQuoting({ rfq: r })}
                       className="flex items-center gap-1.5 rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-600 transition-colors duration-150 hover:border-brand-accent hover:text-brand-accent"
@@ -191,7 +201,7 @@ export default function RfqPage() {
 
                 {/* Who has replied, and a way back into each quote to revise it */}
                 {r.quotes.length > 0 && (
-                  <div className="mt-2 flex flex-wrap gap-1.5">
+                  <div className="mt-2 flex flex-wrap gap-1.5" onClick={(e) => e.stopPropagation()}>
                     {r.quotes.map((q) => (
                       <button
                         key={q.id}

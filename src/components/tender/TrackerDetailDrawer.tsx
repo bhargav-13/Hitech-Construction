@@ -51,7 +51,7 @@ export function TrackerDetailDrawer({
   }
 
   return (
-    <Drawer title="Status Tracker" onClose={onClose} width="max-w-xl">
+    <Drawer title="Status Tracker" onClose={onClose} width="max-w-xl" guardOnClose={false}>
       <div className="space-y-5">
         <div>
           <h3 className="text-base font-semibold text-gray-800">{tval(m.nameOfWork)}</h3>
