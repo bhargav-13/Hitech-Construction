@@ -115,7 +115,6 @@ export const VYAPAR_NAV: NavNode[] = [
       { label: "Import Items", href: "/vyapar/utilities/import-items" },
       { label: "Import Parties", href: "/vyapar/utilities/import-parties" },
       { label: "Bulk Update Items", href: "/vyapar/utilities/bulk-items" },
-      { label: "Barcode Generator", href: "/vyapar/utilities/barcode" },
     ],
   },
   { label: "Settings", href: "/vyapar/settings", icon: "settings" },

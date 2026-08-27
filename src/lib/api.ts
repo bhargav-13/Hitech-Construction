@@ -27,6 +27,26 @@ export function clearTokens() {
   localStorage.removeItem(REFRESH_TOKEN_KEY);
 }
 
+// ---- Active company ----
+// The group trades as two firms behind one login. Which one a call is for rides on every request
+// as a header, and it lives here rather than in companyScope.ts for two reasons: `request()` below
+// is not a component and so can't read a hook (same reason the token helpers are here), and
+// companyScope imports `apiRequest` — putting the getter there instead would make the two modules
+// import each other. See lib/companyScope.ts for the store and the switcher.
+const COMPANY_ID_KEY = "hitech.companyId.v1";
+
+export function getActiveCompanyId(): number | null {
+  if (typeof window === "undefined") return null;
+  const raw = localStorage.getItem(COMPANY_ID_KEY);
+  const n = raw ? Number(raw) : NaN;
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+export function setActiveCompanyId(id: number) {
+  if (typeof window === "undefined") return;
+  localStorage.setItem(COMPANY_ID_KEY, String(id));
+}
+
 // ---- DTO shapes (mirror api-contracts/user-management.yaml) ----
 export interface RoleSummary {
   id: number | null;
@@ -190,6 +210,13 @@ async function request<T>(
     if (auth) {
       const token = getAccessToken();
       if (token) headers["Authorization"] = `Bearer ${token}`;
+      // Which of the group's two firms this call is on behalf of. Read from a module variable
+      // rather than a hook because this isn't a component — same reason as getAccessToken above —
+      // so the header is right from the very first request of a page load. The backend validates
+      // it against the caller's grants; absent means "not scoped", which is what every endpoint
+      // did before companies existed. See lib/companyScope.ts.
+      const companyId = getActiveCompanyId();
+      if (companyId != null) headers["X-Company-Id"] = String(companyId);
     }
     return fetch(`${API_BASE_URL}${path}`, {
       method,

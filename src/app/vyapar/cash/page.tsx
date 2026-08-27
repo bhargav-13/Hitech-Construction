@@ -6,7 +6,8 @@ import { TxnTable } from "@/app/vyapar/bank/page";
 import { CashBankEntryDialog } from "@/components/vyapar/CashBankDialogs";
 import { Spinner } from "@/components/Spinner";
 import { inr } from "@/lib/format";
-import { exportRowsToCsv, downloadPdf } from "@/lib/vyaparExport";
+import { downloadPdf } from "@/lib/vyaparExport";
+import { ExportDialog, type ExportColumn } from "@/components/vyapar/ExportDialog";
 import * as vyapar from "@/lib/vyaparApi";
 import type { BankAccount, CashBankTxn } from "@/lib/vyaparApi";
 import { SlidersHorizontal } from "lucide-react";
@@ -19,6 +20,7 @@ export default function CashInHandPage() {
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
   const [adjust, setAdjust] = useState(false);
+  const [exporting, setExporting] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -48,6 +50,18 @@ export default function CashInHandPage() {
     if (!q) return txns;
     return txns.filter((t) => [t.type, t.name, t.date].some((f) => f?.toLowerCase().includes(q)));
   }, [txns, search]);
+
+  const cashExportColumns: ExportColumn<CashBankTxn>[] = [
+    { key: "type", label: "Type", value: (t) => t.type },
+    { key: "name", label: "Name", value: (t) => t.name ?? "" },
+    { key: "date", label: "Date", value: (t) => t.date ?? "" },
+    { key: "direction", label: "Direction", value: (t) => (t.direction === "in" ? "In" : "Out") },
+    { key: "amount", label: "Amount", value: (t) => t.amount },
+    // Signed alongside the raw amount: a cash book that only carries magnitudes can't be summed
+    // in Excel without re-deriving the direction by hand.
+    { key: "signed", label: "Signed Amount", value: (t) => (t.direction === "in" ? t.amount : -t.amount) },
+    { key: "note", label: "Note", value: (t) => t.note ?? "" },
+  ];
 
   const head = ["Type", "Name", "Date", "Amount"];
 
@@ -79,7 +93,7 @@ export default function CashInHandPage() {
             loading={false}
             search={search}
             onSearch={setSearch}
-            onExport={() => exportRowsToCsv("cash-in-hand", head, rows.map((r) => [r.type, r.name ?? "", r.date ?? "", r.amount]))}
+            onExport={() => setExporting(true)}
             onPdf={() =>
               downloadPdf("Cash In Hand", head, rows.map((r) => [r.type, r.name ?? "", r.date ?? "", inr(r.amount)]), {
                 subtitle: `Balance ${inr(balance)}`,
@@ -89,6 +103,16 @@ export default function CashInHandPage() {
           />
         )}
       </div>
+
+      {exporting && (
+        <ExportDialog
+          title="cash book"
+          filename="cash-in-hand"
+          rows={rows}
+          columns={cashExportColumns}
+          onClose={() => setExporting(false)}
+        />
+      )}
 
       {adjust && (
         <CashBankEntryDialog

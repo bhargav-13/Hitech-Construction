@@ -34,6 +34,8 @@ import { useAuthStore } from "@/lib/authStore";
 import { useUiStore } from "@/lib/uiStore";
 import { useTaskNotifications } from "@/lib/taskNotifications";
 import { projectAvatarColor, projectInitials } from "@/lib/projectHelpers";
+import { CompanySwitcher } from "@/components/CompanySwitcher";
+import { useCompanies, companyAccent } from "@/lib/companyScope";
 
 const ICONS: Record<string, React.ComponentType<{ size?: number; className?: string }>> = {
   Dashboard: LayoutGrid,
@@ -84,6 +86,10 @@ export function Sidebar() {
     : NAV_ITEMS;
   // Unread task-notification count, surfaced as a live badge on the Taskopad nav item.
   const { unread: taskUnread } = useTaskNotifications();
+  // The firm currently being worked in. Its accent paints the strip down the sidebar's outer edge:
+  // with two companies behind one login, "which books am I in?" has to be answerable at a glance.
+  const { active: activeCompany } = useCompanies();
+  const accentBar = companyAccent(activeCompany).bar;
 
   async function handleLogout() {
     await authLogout();
@@ -93,27 +99,20 @@ export function Sidebar() {
 
   return (
     <aside
-      className={`flex h-full flex-shrink-0 flex-col border-r border-sidebar-border bg-sidebar-bg text-sidebar-text transition-all duration-200 ${
+      className={`relative flex h-full flex-shrink-0 flex-col border-r border-sidebar-border bg-sidebar-bg text-sidebar-text transition-all duration-200 ${
         collapsed ? "w-[76px]" : "w-64"
       }`}
     >
-      <div className={`flex items-center px-4 py-4 ${collapsed ? "justify-center" : "gap-3"}`}>
-        {!collapsed && (
-          <div className="flex min-w-0 flex-1 items-center gap-3">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src="/logo.png"
-              alt="Hi-Tech Construction"
-              className="h-12 w-12 flex-shrink-0 rounded-xl bg-white object-contain p-1 shadow-sm"
-            />
-            <div className="min-w-0">
-              <div className="truncate text-[15px] font-semibold leading-tight text-white">
-                Hi-Tech Construction
-              </div>
-              <div className="truncate text-xs text-sidebar-text">{displayRole || "Admin"}</div>
-            </div>
-          </div>
-        )}
+      {/* Per-company accent down the outer edge. Cheap, always visible, and the thing that stops
+          someone raising one firm's invoice while looking at the other's books. */}
+      <span aria-hidden className={`absolute inset-y-0 left-0 w-[3px] ${accentBar}`} />
+      {/* The firm's name used to be printed here. It's now the company switcher — the subtitle
+          carries GSTIN/city rather than the user's role, which the user card at the foot of this
+          sidebar already shows. */}
+      <div className={`flex items-center px-3 py-4 ${collapsed ? "flex-col gap-2" : "gap-2"}`}>
+        <div className="min-w-0 flex-1">
+          <CompanySwitcher collapsed={collapsed} />
+        </div>
         <button
           type="button"
           onClick={toggleSidebar}

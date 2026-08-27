@@ -16,6 +16,7 @@ import { itemLedgerHref } from "@/lib/vyaparLinks";
 import { LinkedRow } from "@/components/vyapar/LinkedRow";
 import { inr } from "@/lib/format";
 import { exportRowsToCsv, printRows, downloadPdf } from "@/lib/vyaparExport";
+import { ExportDialog, type ExportColumn } from "@/components/vyapar/ExportDialog";
 import { useItemSettings } from "@/lib/useItemSettings";
 import { useItemMasters, type ManagedUnit } from "@/lib/useItemMasters";
 import { useVyaparProjectId } from "@/lib/projectScope";
@@ -69,6 +70,7 @@ export default function ItemsPage() {
   const [editing, setEditing] = useState<Item | null>(null);
   const [adjusting, setAdjusting] = useState<Item | null>(null);
   const [importing, setImporting] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [categoryDialog, setCategoryDialog] = useState(false);
   const [editingCategory, setEditingCategory] = useState<string | null>(null);
   const [unitDialog, setUnitDialog] = useState(false);
@@ -267,8 +269,34 @@ export default function ItemsPage() {
     removeUnit(unit.short);
   }
 
-  const listHead = ["Item", "Code", "Category", "Unit", "Sale Price", "Purchase Price", "Stock Qty", "Stock Value"];
-  const listRows = filtered.map((i) => [i.name, i.itemCode ?? "", i.category ?? "", i.unit, i.salePrice, i.purchasePrice, i.stockQty, i.stockValue]);
+  /** Every field on the item master, offered to the export picker; all of it ticked by default. */
+  const itemExportColumns: ExportColumn<Item>[] = [
+    { key: "name", label: "Item", value: (i) => i.name },
+    { key: "itemCode", label: "Item Code", value: (i) => i.itemCode ?? "" },
+    { key: "hsn", label: "HSN/SAC", value: (i) => i.hsn ?? "" },
+    { key: "category", label: "Category", value: (i) => i.category ?? "" },
+    { key: "description", label: "Description", value: (i) => i.description ?? "" },
+    { key: "type", label: "Type", value: (i) => (i.isService ? "Service" : "Product") },
+    { key: "unit", label: "Unit", value: (i) => i.unit },
+    { key: "salePrice", label: "Sale Price", value: (i) => i.salePrice },
+    { key: "salePriceWithTax", label: "Sale Price Includes Tax", value: (i) => (i.salePriceWithTax ? "Yes" : "No") },
+    { key: "saleDiscount", label: "Sale Discount", value: (i) => i.saleDiscount },
+    { key: "saleDiscountType", label: "Discount Type", value: (i) => i.saleDiscountType },
+    { key: "wholesalePrice", label: "Wholesale Price", value: (i) => i.wholesalePrice ?? "" },
+    { key: "wholesaleMinQty", label: "Wholesale Min Qty", value: (i) => i.wholesaleMinQty ?? "" },
+    { key: "purchasePrice", label: "Purchase Price", value: (i) => i.purchasePrice },
+    { key: "purchasePriceWithTax", label: "Purchase Price Includes Tax", value: (i) => (i.purchasePriceWithTax ? "Yes" : "No") },
+    { key: "taxPercent", label: "Tax %", value: (i) => i.taxPercent },
+    { key: "stockQty", label: "Stock Qty", value: (i) => i.stockQty },
+    { key: "stockValue", label: "Stock Value", value: (i) => i.stockValue },
+    { key: "openingQty", label: "Opening Qty", value: (i) => i.openingQty },
+    { key: "openingPrice", label: "Opening Price", value: (i) => i.openingPrice },
+    { key: "openingDate", label: "Opening Date", value: (i) => i.openingDate ?? "" },
+    { key: "lowStockAlert", label: "Low Stock Alert", value: (i) => i.lowStockAlert },
+    { key: "lowStock", label: "Low Stock", value: (i) => (i.lowStock ? "Yes" : "No") },
+    { key: "location", label: "Location", value: (i) => i.location ?? "" },
+    { key: "isActive", label: "Active", value: (i) => (i.isActive ? "Yes" : "No") },
+  ];
   const ledgerHead = ["Type", "Invoice/Ref", "Name", "Date", "Quantity", "Price/Unit", "Status"];
 
   return (
@@ -297,7 +325,7 @@ export default function ItemsPage() {
                   <RowMenuItem
                     icon={FileSpreadsheet}
                     label="Export items"
-                    onClick={() => { close(); exportRowsToCsv("items", listHead, listRows); }}
+                    onClick={() => { close(); setExporting(true); }}
                   />
                   <RowMenuItem
                     icon={Printer}
@@ -715,6 +743,16 @@ export default function ItemsPage() {
         <AdjustStockDialog item={adjusting} onClose={() => setAdjusting(null)} onDone={() => { setAdjusting(null); load(); }} />
       )}
       {importing && <ItemImportDialog onClose={() => setImporting(false)} onImported={() => { setImporting(false); load(); }} />}
+
+      {exporting && (
+        <ExportDialog
+          title="items"
+          filename="items"
+          rows={filtered}
+          columns={itemExportColumns}
+          onClose={() => setExporting(false)}
+        />
+      )}
       {categoryDialog && (
         <ItemMasterDialog
           kind="category"

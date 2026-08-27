@@ -135,6 +135,8 @@ export interface InvoiceLine {
   itemId: number | null;
   itemName: string;
   description: string | null;
+  /** HSN/SAC as billed on this line — may differ from the item master's. */
+  hsn: string | null;
   unit: string | null;
   quantity: number;
   rate: number;

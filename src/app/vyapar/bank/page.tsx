@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { VyaparShell, VyaparEmpty } from "@/components/vyapar/VyaparShell";
 import { BankAccountDialog, CashBankEntryDialog } from "@/components/vyapar/CashBankDialogs";
 import { RowMenu, RowMenuDivider, RowMenuItem } from "@/components/RowMenu";
@@ -12,6 +13,7 @@ import { useVyaparProjectId } from "@/lib/projectScope";
 import { LinkedRow } from "@/components/vyapar/LinkedRow";
 import { inr } from "@/lib/format";
 import { exportRowsToCsv, printRows, downloadPdf } from "@/lib/vyaparExport";
+import { ExportDialog, type ExportColumn } from "@/components/vyapar/ExportDialog";
 import { ImportDialog } from "@/components/vyapar/ImportDialog";
 import { bankAccountImportConfig } from "@/lib/vyaparImportConfigs";
 import * as vyapar from "@/lib/vyaparApi";
@@ -32,11 +34,28 @@ import {
 
 type EntryKind = "BANK_TO_CASH" | "CASH_TO_BANK" | "BANK_TO_BANK" | "ADJUST_BANK";
 
+/**
+ * Money moving between the firm's own accounts. These are self-transfers: no counterparty, so they
+ * are booked straight into `vyapar_cash_bank_txns` as a matched out/in pair.
+ */
 const ENTRY_LABELS: { kind: EntryKind; label: string }[] = [
   { kind: "BANK_TO_CASH", label: "Bank to Cash Transfer" },
   { kind: "CASH_TO_BANK", label: "Cash to Bank Transfer" },
   { kind: "BANK_TO_BANK", label: "Bank to Bank Transfer" },
   { kind: "ADJUST_BANK", label: "Adjust Bank Balance" },
+];
+
+/**
+ * Money moving between this account and an outside party — deliberately NOT a cash-bank entry.
+ *
+ * A bank-to-bank transfer only has to move a balance; paying a party has to move the party's
+ * ledger too, and settle the bills it clears. That is exactly what a Payment-Out already is, so
+ * these route to the payment form with this account preselected rather than duplicating the
+ * posting logic. The account's balance follows because a payment carries `bankAccountId`.
+ */
+const PARTY_ENTRIES: { href: "payment-out" | "payment-in"; label: string }[] = [
+  { href: "payment-out", label: "Bank to Party (Pay)" },
+  { href: "payment-in", label: "Party to Bank (Receive)" },
 ];
 
 /** Bank Accounts — Vyapar's master–detail with the Deposit/Withdraw menu. */
@@ -56,6 +75,8 @@ export default function BankAccountsPage() {
   const [creating, setCreating] = useState(false);
   const [importing, setImporting] = useState(false);
   const [editing, setEditing] = useState<BankAccount | null>(null);
+  const [exporting, setExporting] = useState(false);
+  const router = useRouter();
   const [entry, setEntry] = useState<EntryKind | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
 
@@ -106,6 +127,19 @@ export default function BankAccountsPage() {
     return txns.filter((t) => [t.type, t.name, t.date].some((f) => f?.toLowerCase().includes(q)));
   }, [txns, txnSearch]);
 
+  const bankExportColumns: ExportColumn<BankAccount>[] = [
+    { key: "name", label: "Account", value: (a) => a.name },
+    { key: "bankName", label: "Bank", value: (a) => a.bankName ?? "" },
+    { key: "accountNumber", label: "Account No", value: (a) => a.accountNumber ?? "" },
+    { key: "ifsc", label: "IFSC", value: (a) => a.ifsc ?? "" },
+    { key: "accountHolder", label: "Account Holder", value: (a) => a.accountHolder ?? "" },
+    { key: "upiId", label: "UPI ID", value: (a) => a.upiId ?? "" },
+    { key: "openingBalance", label: "Opening Balance", value: (a) => a.openingBalance },
+    { key: "openingDate", label: "Opening Date", value: (a) => a.openingDate ?? "" },
+    { key: "balance", label: "Balance", value: (a) => a.balance },
+    { key: "isActive", label: "Active", value: (a) => (a.isActive ? "Yes" : "No") },
+  ];
+
   const total = accounts.reduce((s, a) => s + a.balance, 0);
   const head = ["Type", "Name", "Date", "Amount"];
   const data = rows.map((r) => [r.type, r.name ?? "", r.date ?? "", r.amount]);
@@ -137,10 +171,7 @@ export default function BankAccountsPage() {
                   <RowMenuItem
                     icon={FileSpreadsheet}
                     label="Export accounts"
-                    onClick={() => {
-                      close();
-                      exportRowsToCsv("bank-accounts", ["Account", "Bank", "Account No", "Balance"], accounts.map((a) => [a.name, a.bankName ?? "", a.accountNumber ?? "", a.balance]));
-                    }}
+                    onClick={() => { close(); setExporting(true); }}
                   />
                   <RowMenuItem
                     icon={FileText}
@@ -280,6 +311,21 @@ export default function BankAccountsPage() {
                                 {e.label}
                               </button>
                             ))}
+                            <div className="my-1 border-t border-gray-100" />
+                            {PARTY_ENTRIES.map((e) => (
+                              <button
+                                key={e.href}
+                                onClick={() => {
+                                  setMenuOpen(false);
+                                  router.push(
+                                    `/vyapar/${e.href}?new=1&account=${encodeURIComponent(selected.name)}`
+                                  );
+                                }}
+                                className="block w-full rounded-lg px-3 py-2 text-left text-sm text-gray-700 transition-colors duration-150 hover:bg-cyan-50 hover:text-brand-accent"
+                              >
+                                {e.label}
+                              </button>
+                            ))}
                           </div>
                         </>
                       )}
@@ -336,6 +382,16 @@ export default function BankAccountsPage() {
           onDone={() => { setEntry(null); load(); if (selectedId) vyapar.getAccountTxns(selectedId).then(setTxns).catch(() => {}); }}
         />
       )}
+      {exporting && (
+        <ExportDialog
+          title="bank accounts"
+          filename="bank-accounts"
+          rows={accounts}
+          columns={bankExportColumns}
+          onClose={() => setExporting(false)}
+        />
+      )}
+
       {importing && (
         <ImportDialog
           config={bankAccountImportConfig}

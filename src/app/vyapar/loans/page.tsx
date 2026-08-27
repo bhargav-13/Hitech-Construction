@@ -6,7 +6,8 @@ import { Drawer } from "@/components/Drawer";
 import { DatePicker } from "@/components/DatePicker";
 import { Spinner } from "@/components/Spinner";
 import { inr } from "@/lib/format";
-import { exportRowsToCsv, downloadPdf } from "@/lib/vyaparExport";
+import { downloadPdf } from "@/lib/vyaparExport";
+import { ExportDialog, type ExportColumn } from "@/components/vyapar/ExportDialog";
 import { ImportDialog } from "@/components/vyapar/ImportDialog";
 import { loanAccountImportConfig } from "@/lib/vyaparImportConfigs";
 import * as vyapar from "@/lib/vyaparApi";
@@ -20,6 +21,7 @@ export default function LoanAccountsPage() {
   const [error, setError] = useState("");
   const [creating, setCreating] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [exporting, setExporting] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -39,8 +41,19 @@ export default function LoanAccountsPage() {
 
   const totalOutstanding = loans.reduce((s, l) => s + l.balance, 0);
   const totalEmi = loans.reduce((s, l) => s + l.emiAmount, 0);
+  const loanExportColumns: ExportColumn<LoanAccount>[] = [
+    { key: "name", label: "Loan", value: (l) => l.name },
+    { key: "lender", label: "Lender", value: (l) => l.lender ?? "" },
+    { key: "accountNumber", label: "Account No", value: (l) => l.accountNumber ?? "" },
+    { key: "loanAmount", label: "Loan Amount", value: (l) => l.loanAmount },
+    { key: "balance", label: "Outstanding", value: (l) => l.balance },
+    { key: "interestRate", label: "Rate %", value: (l) => l.interestRate },
+    { key: "termMonths", label: "Term (months)", value: (l) => l.termMonths },
+    { key: "startDate", label: "Start Date", value: (l) => l.startDate ?? "" },
+    { key: "emiAmount", label: "EMI", value: (l) => l.emiAmount },
+  ];
+
   const head = ["Loan", "Lender", "Account No", "Loan Amount", "Outstanding", "Rate %", "EMI"];
-  const data = loans.map((l) => [l.name, l.lender ?? "", l.accountNumber ?? "", l.loanAmount, l.balance, l.interestRate, l.emiAmount]);
 
   return (
     <VyaparShell>
@@ -55,7 +68,7 @@ export default function LoanAccountsPage() {
           </div>
           <div className="flex items-center gap-2">
             <button
-              onClick={() => exportRowsToCsv("loan-accounts", head, data)}
+              onClick={() => setExporting(true)}
               disabled={loans.length === 0}
               className="flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-600 transition-all duration-150 hover:bg-gray-50 active:scale-95 disabled:opacity-50"
             >
@@ -147,6 +160,16 @@ export default function LoanAccountsPage() {
           config={loanAccountImportConfig}
           onClose={() => setImporting(false)}
           onImported={() => { setImporting(false); load(); }}
+        />
+      )}
+
+      {exporting && (
+        <ExportDialog
+          title="loan accounts"
+          filename="loan-accounts"
+          rows={loans}
+          columns={loanExportColumns}
+          onClose={() => setExporting(false)}
         />
       )}
     </VyaparShell>

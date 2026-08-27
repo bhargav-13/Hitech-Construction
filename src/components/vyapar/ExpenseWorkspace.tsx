@@ -12,15 +12,16 @@ import { SortTh } from "@/components/vyapar/SortTh";
 import { useTableSort } from "@/lib/useTableSort";
 import { TAX_RATES } from "@/lib/useItemSettings";
 import { inr } from "@/lib/format";
-import { usePaymentTypeOptions } from "@/lib/bankScope";
+import { usePaymentTypeOptions, useBankAccountResolver } from "@/lib/bankScope";
 import { useVyaparProjectId } from "@/lib/projectScope";
 import { useProjects } from "@/lib/useProjects";
 import { downloadPdf } from "@/lib/vyaparExport";
+import { ExportDialog, type ExportColumn } from "@/components/vyapar/ExportDialog";
 import { ImportDialog } from "@/components/vyapar/ImportDialog";
 import { documentImportConfig } from "@/lib/vyaparImportConfigs";
 import * as vyapar from "@/lib/vyaparApi";
-import type { Invoice, Party } from "@/lib/vyaparApi";
-import { FileText, Pencil, Plus, Receipt, Search, Trash2, Upload, X } from "lucide-react";
+import type { Invoice, InvoiceLine, Party } from "@/lib/vyaparApi";
+import { Download, FileText, Pencil, Plus, Receipt, Search, Trash2, Upload, X } from "lucide-react";
 const UNCATEGORISED = "Uncategorised";
 
 /**
@@ -41,6 +42,7 @@ export function ExpenseWorkspace() {
   const [selectedCat, setSelectedCat] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<Invoice | null>(null);
+  const [exporting, setExporting] = useState(false);
   const [importing, setImporting] = useState(false);
 
   const load = useCallback(async () => {
@@ -114,6 +116,41 @@ export function ExpenseWorkspace() {
 
   const rows = useMemo(() => expenses.filter((e) => catOf(e) === selectedCat), [expenses, selectedCat]);
 
+  /** The whole expense record for the export picker — category included, which the PDF also shows. */
+  const expenseColumns: ExportColumn<Invoice>[] = useMemo(
+    () => [
+      { key: "date", label: "Date", value: (e) => e.invoiceDate ?? "" },
+      { key: "category", label: "Category", value: (e) => e.notes?.trim() || UNCATEGORISED },
+      { key: "number", label: "Expense No.", value: (e) => e.invoiceNo },
+      { key: "party", label: "Party", value: (e) => e.partyName ?? e.billingName ?? "" },
+      { key: "subTotal", label: "Sub Total", value: (e) => e.subTotal },
+      { key: "taxAmount", label: "Tax Amount", value: (e) => e.taxAmount },
+      { key: "total", label: "Amount", value: (e) => e.total },
+      { key: "paid", label: "Paid", value: (e) => e.paidAmount },
+      { key: "balance", label: "Balance", value: (e) => e.balance },
+      { key: "status", label: "Status", value: (e) => e.status },
+      { key: "paymentType", label: "Payment Type", value: (e) => e.paymentType },
+      { key: "paymentReference", label: "Reference", value: (e) => e.paymentReference ?? "" },
+      { key: "description", label: "Description", value: (e) => e.description ?? "" },
+    ],
+    []
+  );
+
+  const expenseLineColumns: ExportColumn<InvoiceLine>[] = useMemo(
+    () => [
+      { key: "itemName", label: "Item", value: (l) => l.itemName },
+      { key: "itemDescription", label: "Item Description", value: (l) => l.description ?? "" },
+      { key: "quantity", label: "Qty", value: (l) => l.quantity },
+      { key: "unit", label: "Unit", value: (l) => l.unit ?? "" },
+      { key: "rate", label: "Rate", value: (l) => l.rate },
+      { key: "taxCode", label: "Tax", value: (l) => l.taxCode ?? "" },
+      { key: "taxPercent", label: "Tax %", value: (l) => l.taxPercent },
+      { key: "lineTax", label: "Item Tax Amount", value: (l) => l.taxAmount },
+      { key: "lineAmount", label: "Item Amount", value: (l) => l.amount },
+    ],
+    []
+  );
+
   const { sorted, sortKey, sortDir, toggle } = useTableSort<Invoice>(
     rows,
     {
@@ -160,6 +197,13 @@ export function ExpenseWorkspace() {
           </p>
         </div>
         <div className="flex gap-2">
+          <button
+            onClick={() => setExporting(true)}
+            disabled={expenses.length === 0}
+            className="flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-600 transition-all duration-150 hover:bg-gray-50 active:scale-95 disabled:opacity-50"
+          >
+            <Download size={14} /> Export
+          </button>
           <button
             onClick={() =>
               downloadPdf(
@@ -337,6 +381,24 @@ export function ExpenseWorkspace() {
           onImported={() => { setImporting(false); load(); }}
         />
       )}
+
+      {exporting && (
+        <ExportDialog
+          title="Expenses"
+          filename="expenses"
+          // Every expense, not just the category on screen: the left rail is a way of reading the
+          // list, not a filter someone means to carry into a spend report.
+          rows={expenses}
+          columns={expenseColumns}
+          detail={{
+            label: "Include expense line details",
+            hint: "One row per line, with the expense's own columns repeated against each.",
+            lines: (e: Invoice): InvoiceLine[] => e.lines,
+            columns: expenseLineColumns,
+          }}
+          onClose={() => setExporting(false)}
+        />
+      )}
     </div>
   );
 }
@@ -400,6 +462,7 @@ function ExpenseForm({
     existing?.projectId != null ? String(existing.projectId) : projectId != null ? String(projectId) : ""
   );
   const paymentTypeOptions = usePaymentTypeOptions();
+  const bankAccountFor = useBankAccountResolver();
 
   const calc = useMemo(() => {
     let net = 0;
@@ -446,6 +509,9 @@ function ExpenseForm({
         paidAmount: Math.min(paidDisplay, calc.total),
         isCash: paidDisplay >= calc.total,
         paymentType: paymentMode,
+        // Same reason as the invoice builder: the account's balance and statement key off
+        // bankAccountId, not off the free-text payment type. See bankScope.
+        bankAccountId: bankAccountFor(paymentMode),
         lines: clean.map((l) => ({
           itemId: null,
           itemName: l.itemName.trim() || category.trim(),

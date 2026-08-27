@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { create } from "zustand";
 import * as vyapar from "./vyaparApi";
 import type { BankAccount } from "./vyaparApi";
@@ -69,4 +69,28 @@ export function usePaymentTypeOptions(): { value: string; label: string }[] {
     { value: "Cash", label: "Cash In Hand" },
     ...accounts.filter((a) => a.isActive).map((a) => ({ value: a.name, label: a.name })),
   ];
+}
+
+/**
+ * Resolves a Payment Type back to the bank account it names, so a document can be saved with a real
+ * `bankAccountId` and not just the free-text label.
+ *
+ * This matters more than it looks. An account's balance and its statement are both derived from
+ * `bank_account_id` on the payments and documents settled through it — `WHERE bankAccountId IS NOT
+ * NULL`. The forms only ever sent the account's *name* in `mode`/`paymentType`, so anything
+ * recorded in the app landed with a null id and never moved the balance the user had just chosen.
+ * (The books imported from Vyapar look right only because V47 backfilled the ids afterwards.)
+ *
+ * "Cash" is the cash drawer, not a bank account, and correctly resolves to null.
+ */
+export function useBankAccountResolver(): (paymentType: string | null | undefined) => number | null {
+  const { accounts } = useBankAccounts();
+  return useCallback(
+    (paymentType) => {
+      const name = (paymentType ?? "").trim().toLowerCase();
+      if (!name || name === "cash") return null;
+      return accounts.find((a) => a.name.trim().toLowerCase() === name)?.id ?? null;
+    },
+    [accounts]
+  );
 }

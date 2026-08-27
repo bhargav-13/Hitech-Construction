@@ -19,8 +19,10 @@ import { inr, bookDate } from "@/lib/format";
 import { useVyaparProjectId } from "@/lib/projectScope";
 import { takePoDraft, type PoDraft } from "@/lib/poHandoff";
 import { downloadInvoicePdf, downloadPdf, printRows } from "@/lib/vyaparExport";
+import { ExportDialog, type ExportColumn } from "@/components/vyapar/ExportDialog";
+import { useProjects } from "@/lib/useProjects";
 import * as vyapar from "@/lib/vyaparApi";
-import type { DocType, Invoice, Item, Party } from "@/lib/vyaparApi";
+import type { DocType, Invoice, InvoiceLine, Item, Party } from "@/lib/vyaparApi";
 import { Download, FileText, Plus, Search, Upload } from "lucide-react";
 
 const PAYMENT_TYPES = ["Cash", "Credit", "Bank", "UPI", "Cheque"];
@@ -84,6 +86,8 @@ export function InvoiceWorkspace({
   /** The file chosen in Upload Bill, held until the Purchase form opens and takes it. */
   const [uploadedBill, setUploadedBill] = useState<BillAttachment | null>(null);
   const [history, setHistory] = useState<Invoice | null>(null);
+  const [exporting, setExporting] = useState(false);
+  const { projects } = useProjects();
   // Vyapar opens every transaction list on the current year, not on everything ever recorded.
   const [range, setRange] = useState<DateRange>(() => defaultRange("This Year"));
 
@@ -266,20 +270,69 @@ export function InvoiceWorkspace({
 
   const partyOf = (inv: Invoice) => parties.find((p) => p.id === inv.partyId);
 
-  function exportCsv() {
-    const head = ["Date", "Invoice no", "Party", "Payment Type", "Total", "Paid", "Balance", "Status"];
-    const lines = filtered.map((i) => [
-      i.invoiceDate ?? "", i.invoiceNo, i.partyName ?? "", i.paymentType,
-      i.total, i.paidAmount, i.balance, i.status,
-    ]);
-    const csv = [head, ...lines].map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\n");
-    const url = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `${docType.toLowerCase()}-${new Date().toISOString().slice(0, 10)}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
-  }
+  /**
+   * Every field the document carries, offered to the export picker. This used to be eight
+   * hand-picked columns with no line items at all, so an exported sales register couldn't tell you
+   * what had actually been sold. HSN is resolved off the item catalogue, as it is for the PDF —
+   * it lives on the item master, not on the line.
+   */
+  const exportColumns: ExportColumn<Invoice>[] = useMemo(() => {
+    const cols: ExportColumn<Invoice>[] = [
+      { key: "date", label: "Date", value: (i) => i.invoiceDate ?? "" },
+      { key: "no", label: numberColLabel, value: (i) => i.invoiceNo },
+      { key: "party", label: "Party", value: (i) => i.partyName ?? i.billingName ?? "" },
+      { key: "partyPhone", label: "Party Phone", value: (i) => partyOf(i)?.phone ?? "" },
+      { key: "partyGstin", label: "Party GSTIN", value: (i) => partyOf(i)?.gstin ?? "" },
+      { key: "billingAddress", label: "Billing Address", value: (i) => partyOf(i)?.billingAddress ?? i.billingAddress ?? "" },
+      { key: "state", label: "Place of Supply", value: (i) => i.stateOfSupply ?? "" },
+      { key: "project", label: "Project", value: (i) => projects.find((p) => p.id === String(i.projectId))?.name ?? "" },
+      { key: "subTotal", label: "Sub Total", value: (i) => i.subTotal },
+      { key: "discount", label: "Discount", value: (i) => i.discount },
+      { key: "discountPercent", label: "Discount %", value: (i) => i.discountPercent },
+      { key: "taxAmount", label: "Tax Amount", value: (i) => i.taxAmount },
+      { key: "roundOff", label: "Round Off", value: (i) => i.roundOff },
+      { key: "total", label: "Total", value: (i) => i.total },
+    ];
+    // Payment columns are meaningless on an estimate or an order — those never settle.
+    if (!NON_PAYMENT) {
+      cols.push(
+        { key: "paid", label: docType === "PURCHASE" ? "Paid" : "Received", value: (i) => i.paidAmount },
+        { key: "balance", label: "Balance", value: (i) => i.balance },
+        { key: "status", label: "Status", value: (i) => i.status },
+        { key: "paymentType", label: "Payment Type", value: (i) => i.paymentType },
+        { key: "paymentReference", label: "Payment Reference", value: (i) => i.paymentReference ?? "" },
+        { key: "dueDate", label: "Due Date", value: (i) => i.dueDate ?? "" }
+      );
+    }
+    cols.push(
+      { key: "cancelled", label: "Cancelled", value: (i) => (i.cancelled ? "Yes" : "No") },
+      { key: "terms", label: "Terms", value: (i) => i.terms ?? "" },
+      { key: "description", label: "Description", value: (i) => i.description ?? "" },
+      { key: "notes", label: "Notes", value: (i) => i.notes ?? "" }
+    );
+    return cols;
+  }, [items, parties, projects, NON_PAYMENT, docType, numberColLabel]);
+
+  const exportLineColumns: ExportColumn<InvoiceLine>[] = useMemo(
+    () => [
+      { key: "itemName", label: "Item", value: (l) => l.itemName },
+      { key: "itemDescription", label: "Item Description", value: (l) => l.description ?? "" },
+      // The line's own HSN wins; the item master is the fallback for documents saved before
+      // the line carried one.
+      { key: "hsn", label: "HSN/SAC", value: (l) => l.hsn?.trim() || (l.itemId == null ? "" : (items.find((it) => it.id === l.itemId)?.hsn ?? "")) },
+      { key: "quantity", label: "Qty", value: (l) => l.quantity },
+      { key: "unit", label: "Unit", value: (l) => l.unit ?? "" },
+      { key: "rate", label: "Rate", value: (l) => l.rate },
+      { key: "lineDiscountPercent", label: "Item Discount %", value: (l) => l.discountPercent },
+      { key: "lineDiscount", label: "Item Discount", value: (l) => l.discountAmount },
+      { key: "taxCode", label: "Tax", value: (l) => l.taxCode ?? "" },
+      { key: "taxPercent", label: "Tax %", value: (l) => l.taxPercent },
+      { key: "lineTax", label: "Item Tax Amount", value: (l) => l.taxAmount },
+      { key: "itc", label: "ITC Eligibility", value: (l) => l.itcEligibility ?? "" },
+      { key: "lineAmount", label: "Item Amount", value: (l) => l.amount },
+    ],
+    [items]
+  );
 
   const addBtn = accent === "rose" ? "bg-rose-600 hover:bg-rose-700" : "bg-brand-accent hover:opacity-90";
 
@@ -289,7 +342,7 @@ export function InvoiceWorkspace({
         <h2 className="text-base font-semibold text-gray-800">{title}</h2>
         <div className="flex gap-2">
           <button
-            onClick={exportCsv}
+            onClick={() => setExporting(true)}
             disabled={filtered.length === 0}
             className="flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-600 transition-all duration-150 hover:bg-gray-50 active:scale-95 disabled:opacity-50"
           >
@@ -563,6 +616,22 @@ export function InvoiceWorkspace({
       )}
 
       {history && <InvoiceHistoryDialog invoice={history} onClose={() => setHistory(null)} />}
+
+      {exporting && (
+        <ExportDialog
+          title={`${noun} list`}
+          filename={docType.toLowerCase()}
+          rows={filtered}
+          columns={exportColumns}
+          detail={{
+            label: "Include item details",
+            hint: "One row per line item, with the document's own columns repeated against each — what was sold, at what rate and at what tax.",
+            lines: (i: Invoice): InvoiceLine[] => i.lines,
+            columns: exportLineColumns,
+          }}
+          onClose={() => setExporting(false)}
+        />
+      )}
 
       {paying && (
         <PaymentDrawer

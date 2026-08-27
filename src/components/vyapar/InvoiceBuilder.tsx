@@ -1,20 +1,22 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Drawer } from "@/components/Drawer";
 import { Select } from "@/components/Select";
 import { DatePicker } from "@/components/DatePicker";
 import { TypeaheadPicker } from "@/components/vyapar/TypeaheadPicker";
 import { ItemDialog } from "@/components/vyapar/ItemDialog";
+import { ItemMasterDialog } from "@/components/vyapar/ItemMasterDialog";
 import { PartyDialog } from "@/components/vyapar/PartyDialog";
 import { LinkPaymentDialog } from "@/components/vyapar/LinkPaymentDialog";
 // Aliased: `calc` below uses a local `qty` accumulator, and shadowing the formatter would be a trap.
 import { inr, qty as formatQty } from "@/lib/format";
-import { usePaymentTypeOptions } from "@/lib/bankScope";
+import { usePaymentTypeOptions, useBankAccountResolver } from "@/lib/bankScope";
 import { GST_RATE_OPTIONS, ITC_ELIGIBILITY, ITC_DEFAULT, gstCodeForPercent, gstPercent } from "@/lib/gstRates";
 import { downloadInvoicePdf } from "@/lib/vyaparExport";
 import { shareInvoice } from "@/components/vyapar/TxnRowActions";
 import { useVyaparSettings } from "@/lib/useVyaparSettings";
+import { useItemMasters, type ManagedUnit } from "@/lib/useItemMasters";
 import type { PoDraft } from "@/lib/poHandoff";
 import { useVyaparProjectId } from "@/lib/projectScope";
 import { useProjects } from "@/lib/useProjects";
@@ -35,7 +37,12 @@ import {
   X,
 } from "lucide-react";
 
-const UNITS = ["NONE", "PCS", "NOS", "KG", "TON", "MTR", "SQM", "CUM", "BAG", "BOX", "LTR", "HOUR"];
+/**
+ * Sentinel value for the "⊕ Add New Unit" row at the foot of the unit picker. It can never collide
+ * with a real short code — the unit form trims and stores what the user types, and `__add__` would
+ * have to be typed deliberately, brackets and all.
+ */
+const ADD_UNIT = "__add__";
 
 /** Downscale an image in the browser and hand back a data URL — same helper shape as ItemDialog. */
 function readImageAsDataUrl(file: File, maxPx = 900): Promise<string> {
@@ -98,6 +105,8 @@ type LineDraft = {
   itemId: number | null;
   itemName: string;
   description: string;
+  /** HSN/SAC as billed on this line. Seeded from the item, editable per document. */
+  hsn: string;
   unit: string;
   quantity: number;
   rate: number;
@@ -112,6 +121,7 @@ const emptyLine = (isPurchase: boolean): LineDraft => ({
   itemId: null,
   itemName: "",
   description: "",
+  hsn: "",
   unit: "NONE",
   quantity: 1,
   rate: 0,
@@ -164,9 +174,14 @@ export function InvoiceBuilder({
   const projectId = useVyaparProjectId(projectOverride);
   const { projects } = useProjects();
   const paymentTypeOptions = usePaymentTypeOptions();
+  const bankAccountFor = useBankAccountResolver();
   // The form's shape follows Settings, as it does in Vyapar: due dates, round-off behaviour and
   // which grid columns exist are all switches, not hardcoded decisions.
   const { settings } = useVyaparSettings();
+  // The unit picker reads the same Units master the Items screen manages, so a unit added here
+  // shows up there and vice-versa — it used to be a hardcoded twelve, which is why the client
+  // couldn't bill in anything the list didn't already know about.
+  const { masters, addUnit } = useItemMasters();
   const isPurchase = docType === "PURCHASE";
   // Estimates, proformas, sale orders and delivery challans are planning docs: they don't move stock
   // or party balance (see vyapar-service POSTED). So: no cash/credit toggle, no received amount.
@@ -227,6 +242,8 @@ export function InvoiceBuilder({
   // Inline creation, so an unknown item or party doesn't force the document to be abandoned.
   const [creatingItem, setCreatingItem] = useState<{ idx: number; name: string } | null>(null);
   const [creatingParty, setCreatingParty] = useState<string | null>(null);
+  /** Which line asked for a new unit — the created unit drops straight back into it. */
+  const [creatingUnit, setCreatingUnit] = useState<number | null>(null);
   // Other open bills this document's receipt also settles.
   const [linkingPayment, setLinkingPayment] = useState(false);
   const [paymentLinks, setPaymentLinks] = useState<{ invoiceId: number; amount: number }[]>([]);
@@ -286,6 +303,7 @@ export function InvoiceBuilder({
           itemId: l.itemId,
           itemName: l.itemName,
           description: l.description ?? "",
+          hsn: l.hsn ?? "",
           unit: l.unit ?? "NONE",
           quantity: l.quantity,
           rate: l.rate,
@@ -300,6 +318,9 @@ export function InvoiceBuilder({
             itemId: l.itemId,
             itemName: l.itemName,
             description: l.description,
+            // An RFQ line carries no HSN. Left blank rather than guessed: the print and the export
+            // both fall back to the item master when a line's own HSN is empty, so nothing is lost.
+            hsn: "",
             unit: l.unit,
             quantity: l.quantity,
             rate: l.rate,
@@ -323,6 +344,18 @@ export function InvoiceBuilder({
   );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  /**
+   * The error banner sits at the top of the form, but Save sits at the bottom of a tall one. A
+   * rejected save — a duplicate document number, most often — would otherwise look like nothing
+   * happened at all, so bring the message into view.
+   */
+  const errorRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (error) errorRef.current?.scrollIntoView({ block: "center", behavior: "smooth" });
+  }, [error]);
+  /** A clash is about the number field, so mark it rather than making the reader hunt for it. */
+  const numberClash = /number .*already used|already used/i.test(error);
+
 
   /**
    * A signature of everything the user can edit. Comparing it against the value captured on mount
@@ -388,6 +421,31 @@ export function InvoiceBuilder({
   const balanceDue = Math.max(0, calc.total - displayReceived);
   const selectedParty = parties.find((p) => String(p.id) === partyId) ?? null;
 
+  /**
+   * The unit dropdown's options: NONE, the managed master, and anything already sitting on a line.
+   * That last part matters on an old document — a unit deleted from the master since it was billed
+   * would otherwise vanish from its own invoice the moment someone opened it to look.
+   */
+  const unitOptions = useMemo(() => {
+    const seen = new Set(["NONE"]);
+    const opts = [{ value: "NONE", label: "NONE" }];
+    for (const u of masters.units) {
+      const short = u.short.trim();
+      if (!short || seen.has(short)) continue;
+      seen.add(short);
+      // Short code only: the picker sits in a narrow grid cell, and the closed control renders the
+      // option's label, so "RMT — Running Metre" would overflow it. Full names live on Items ▸ Units.
+      opts.push({ value: short, label: short });
+    }
+    for (const l of lines) {
+      const short = (l.unit ?? "").trim();
+      if (!short || seen.has(short)) continue;
+      seen.add(short);
+      opts.push({ value: short, label: short });
+    }
+    return [...opts, { value: ADD_UNIT, label: "⊕ Add New Unit" }];
+  }, [masters.units, lines]);
+
   function setLine(idx: number, patch: Partial<LineDraft>) {
     setLines((prev) => prev.map((l, i) => (i === idx ? { ...l, ...patch } : l)));
   }
@@ -416,6 +474,9 @@ export function InvoiceBuilder({
     setLine(idx, {
       itemId: item.id,
       itemName: item.name,
+      // Seeded, not linked: the line keeps its own copy so a later edit to the master doesn't
+      // silently rewrite the HSN on an invoice that has already been issued.
+      hsn: item.hsn ?? "",
       unit: item.unit || "NONE",
       rate: isPurchase ? item.purchasePrice : item.salePrice,
       // The catalogue stores a bare rate, so read it as intra-state GST — the picker can be
@@ -463,6 +524,10 @@ export function InvoiceBuilder({
         paidAmount: noPayment ? 0 : Math.min(displayReceived, calc.total),
         isCash: noPayment ? false : isCash,
         paymentType: noPayment ? "Credit" : displayReceived > 0 ? paymentMode : "Credit",
+        // The account behind that Payment Type. The bank balance and statement are derived from
+        // bankAccountId, so a settled document that only carried the account's *name* never showed
+        // up against the account the user picked. See bankScope.useBankAccountResolver.
+        bankAccountId: noPayment || displayReceived <= 0 ? null : bankAccountFor(paymentMode),
         paymentReference: displayReceived > 0 ? paymentReference || null : null,
         // Only meaningful on a cash bill with no party — otherwise the party carries the address.
         billingName: !partyId && partyText.trim() ? partyText.trim() : null,
@@ -483,6 +548,7 @@ export function InvoiceBuilder({
             itemId: l.itemId,
             itemName: l.itemName.trim(),
             description: l.description || null,
+            hsn: l.hsn.trim() || null,
             unit: l.unit === "NONE" ? null : l.unit,
             quantity: Number(l.quantity) || 1,
             rate,
@@ -512,6 +578,7 @@ export function InvoiceBuilder({
           partyId: Number(partyId),
           amount: displayReceived,
           mode: paymentMode,
+          bankAccountId: bankAccountFor(paymentMode),
           reference: paymentReference || null,
           paymentDate: invoiceDate,
           projectId: selectedProjectId ? Number(selectedProjectId) : null,
@@ -532,6 +599,7 @@ export function InvoiceBuilder({
           partyId: Number(partyId),
           amount: p.amount,
           mode: p.mode,
+          bankAccountId: bankAccountFor(p.mode),
           reference: p.reference || null,
           paymentDate: invoiceDate,
           projectId: selectedProjectId ? Number(selectedProjectId) : null,
@@ -648,7 +716,11 @@ export function InvoiceBuilder({
       }
     >
       <div className="space-y-5">
-        {error && <div className="rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-600">{error}</div>}
+        {error && (
+          <div ref={errorRef} className="rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-600">
+            {error}
+          </div>
+        )}
 
         {/* Credit ↔ Cash toggle, exactly like Vyapar's form header (payment docs only) */}
         <div className="flex items-center gap-3">
@@ -738,7 +810,7 @@ export function InvoiceBuilder({
                   value={invoiceNo}
                   onChange={(e) => setInvoiceNo(e.target.value)}
                   placeholder="Auto"
-                  className="input"
+                  className={`input ${numberClash ? "border-rose-400 bg-rose-50/40" : ""}`}
                 />
               </Field>
             ) : (
@@ -757,7 +829,7 @@ export function InvoiceBuilder({
                     value={invoiceNo}
                     onChange={(e) => setInvoiceNo(e.target.value)}
                     placeholder="Auto"
-                    className="input flex-1"
+                    className={`input flex-1 ${numberClash ? "border-rose-400 bg-rose-50/40" : ""}`}
                   />
                 </div>
               </Field>
@@ -785,12 +857,12 @@ export function InvoiceBuilder({
 
         {/* Line grid */}
         <div className="overflow-x-auto rounded-xl border border-gray-200">
-          <table className={`w-full ${isPurchase ? "min-w-[1120px]" : "min-w-[1000px]"} border-collapse text-sm`}>
+          <table className={`w-full ${isPurchase ? "min-w-[1220px]" : "min-w-[1100px]"} border-collapse text-sm`}>
             <thead>
               {/* Vyapar groups the grid header: DISCOUNT and TAX each span a % and an Amount
                   column, so the two pairs read as one concept rather than four loose columns. */}
               <tr className="border-b border-gray-100 bg-gray-50 text-center text-[11px] font-medium tracking-wide text-gray-500 uppercase">
-                <th colSpan={6} className="px-2 pt-2" />
+                <th colSpan={7} className="px-2 pt-2" />
                 <th colSpan={2} className="border-l border-gray-200 px-2 pt-2">Discount</th>
                 <th colSpan={2} className="border-l border-gray-200 px-2 pt-2">Tax</th>
                 <th colSpan={2} className="px-2 pt-2" />
@@ -799,6 +871,9 @@ export function InvoiceBuilder({
                 <th className="w-8 px-2 py-2 text-center">#</th>
                 <th className="px-2 py-2">Item</th>
                 <th className="px-2 py-2">Description</th>
+                {/* HSN/SAC sits beside the description because that's where the person entering a
+                    line is already looking, and a GST invoice is not compliant without it. */}
+                <th className="w-24 px-2 py-2">HSN/SAC</th>
                 <th className="w-20 px-2 py-2 text-right">Qty</th>
                 <th className="w-24 px-2 py-2">Unit</th>
                 <th className="w-32 px-2 py-2 text-right">
@@ -873,9 +948,22 @@ export function InvoiceBuilder({
                       className="w-full rounded-md border border-gray-200 px-2 py-1 text-sm outline-none focus:border-cyan-500"
                     />
                   </td>
+                  <td className="px-2 py-1.5">
+                    <input
+                      value={l.hsn}
+                      onChange={(e) => setLine(idx, { hsn: e.target.value })}
+                      placeholder="HSN"
+                      className="w-full rounded-md border border-gray-200 px-2 py-1 text-sm outline-none focus:border-cyan-500"
+                    />
+                  </td>
                   <Num value={l.quantity} onChange={(v) => setLine(idx, { quantity: v })} />
                   <td className="px-2 py-1.5">
-                    <Select value={l.unit} onChange={(v) => setLine(idx, { unit: v })} size="sm" options={UNITS.map((u) => ({ value: u, label: u }))} />
+                    <Select
+                      value={l.unit}
+                      onChange={(v) => (v === ADD_UNIT ? setCreatingUnit(idx) : setLine(idx, { unit: v }))}
+                      size="sm"
+                      options={unitOptions}
+                    />
                   </td>
                   <Num value={l.rate} onChange={(v) => setLine(idx, { rate: v })} />
                   <Num value={l.discountPercent} onChange={(v) => setLine(idx, { discountPercent: v })} />
@@ -1276,6 +1364,20 @@ export function InvoiceBuilder({
             onItemCreated?.(saved);
             applyItem(creatingItem.idx, saved);
             setCreatingItem(null);
+          }}
+        />
+      )}
+
+      {creatingUnit !== null && (
+        <ItemMasterDialog
+          kind="unit"
+          taken={masters.units.map((u) => u.short)}
+          onClose={() => setCreatingUnit(null)}
+          onSubmit={(value) => {
+            const unit = value as ManagedUnit;
+            addUnit(unit);
+            setLine(creatingUnit, { unit: unit.short });
+            setCreatingUnit(null);
           }}
         />
       )}

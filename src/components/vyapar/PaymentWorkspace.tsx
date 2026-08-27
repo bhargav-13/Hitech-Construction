@@ -13,14 +13,15 @@ import { LinkPaymentDialog } from "@/components/vyapar/LinkPaymentDialog";
 import { TxnRowActions } from "@/components/vyapar/TxnRowActions";
 import { useTableSort } from "@/lib/useTableSort";
 import { inr } from "@/lib/format";
-import { usePaymentTypeOptions } from "@/lib/bankScope";
+import { usePaymentTypeOptions, useBankAccountResolver } from "@/lib/bankScope";
 import { useVyaparProjectId } from "@/lib/projectScope";
 import { useProjects } from "@/lib/useProjects";
+import { ExportDialog, type ExportColumn } from "@/components/vyapar/ExportDialog";
 import { downloadPdf } from "@/lib/vyaparExport";
 import { ImportDialog } from "@/components/vyapar/ImportDialog";
 import { paymentInImportConfig, paymentOutImportConfig } from "@/lib/vyaparImportConfigs";
 import * as vyapar from "@/lib/vyaparApi";
-import type { Party, Payment } from "@/lib/vyaparApi";
+import type { Party, Payment, PaymentLink } from "@/lib/vyaparApi";
 import { Download, FileText, Link2, Plus, Search, Upload, Wallet } from "lucide-react";
 
 /**
@@ -54,6 +55,8 @@ export function PaymentWorkspace({
   // Re-linking a payment that's already saved — Vyapar reopens the same dialog from the row menu.
   const [relinking, setRelinking] = useState<Payment | null>(null);
   const [range, setRange] = useState<DateRange>(() => defaultRange("This Year"));
+  const [exporting, setExporting] = useState(false);
+  const { projects } = useProjects();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -79,11 +82,16 @@ export function PaymentWorkspace({
   // ?new= opens the create form. The flag is stripped from the URL as soon as it's consumed:
   // leaving it there means the next Alt+<key> press (or another click on "Add Sale") pushes an
   // identical URL, `params` never changes, this effect never re-runs, and the shortcut looks dead.
+  // `?account=<name>` additionally preselects the Payment Type — how the Bank screen's
+  // "Bank to Party" / "Party to Bank" shortcuts hand the account over to this form.
+  const [presetAccount, setPresetAccount] = useState<string | null>(null);
   useEffect(() => {
     if (!params?.get("new")) return;
+    setPresetAccount(params.get("account"));
     setCreating(true);
     const rest = new URLSearchParams(params.toString());
     rest.delete("new");
+    rest.delete("account");
     const qs = rest.toString();
     router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
   }, [params, router, pathname]);
@@ -142,17 +150,36 @@ export function PaymentWorkspace({
     );
   }
 
-  function exportCsv() {
-    const head = ["Date", "Party", "Amount", "Payment Type", "Reference"];
-    const lines = rows.map((p) => [p.paymentDate ?? "", p.partyName ?? "", p.amount, p.mode, p.reference ?? ""]);
-    const csv = [head, ...lines].map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\n");
-    const url = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `payment-${direction.toLowerCase()}-${new Date().toISOString().slice(0, 10)}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
-  }
+  /**
+   * The receipt's full field set for the export picker. The settled-documents detail matters most
+   * here: a receipt that cleared four bills exported as one anonymous amount, with no way to see
+   * which invoices it had been applied to.
+   */
+  const exportColumns: ExportColumn<Payment>[] = useMemo(() => {
+    const partyOf = (p: Payment) => parties.find((x) => x.id === p.partyId);
+    return [
+      { key: "date", label: "Date", value: (p) => p.paymentDate ?? "" },
+      { key: "party", label: "Party", value: (p) => p.partyName ?? "" },
+      { key: "partyPhone", label: "Party Phone", value: (p) => partyOf(p)?.phone ?? "" },
+      { key: "partyGstin", label: "Party GSTIN", value: (p) => partyOf(p)?.gstin ?? "" },
+      { key: "amount", label: "Amount", value: (p) => p.amount },
+      { key: "mode", label: "Payment Type", value: (p) => p.mode },
+      { key: "reference", label: "Reference", value: (p) => p.reference ?? "" },
+      { key: "linked", label: "Settled Amount", value: (p) => p.linkedAmount },
+      { key: "unused", label: "Unused / Advance", value: (p) => p.unusedAmount },
+      { key: "project", label: "Project", value: (p) => projects.find((x) => x.id === String(p.projectId))?.name ?? "" },
+      { key: "notes", label: "Notes", value: (p) => p.notes ?? "" },
+    ];
+  }, [parties, projects]);
+
+  const exportLinkColumns: ExportColumn<PaymentLink>[] = useMemo(
+    () => [
+      { key: "invoiceNo", label: "Settled Document", value: (l) => l.invoiceNo ?? "" },
+      { key: "docType", label: "Document Type", value: (l) => l.docType ?? "" },
+      { key: "linkAmount", label: "Applied Amount", value: (l) => l.amount },
+    ],
+    []
+  );
 
   return (
     <div className="animate-fade-in space-y-4">
@@ -160,7 +187,7 @@ export function PaymentWorkspace({
         <h2 className="text-base font-semibold text-gray-800">{title}</h2>
         <div className="flex gap-2">
           <button
-            onClick={exportCsv}
+            onClick={() => setExporting(true)}
             disabled={rows.length === 0}
             className="flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-600 transition-all duration-150 hover:bg-gray-50 active:scale-95 disabled:opacity-50"
           >
@@ -311,7 +338,8 @@ export function PaymentWorkspace({
           direction={direction}
           title={title}
           parties={parties}
-          onClose={() => setCreating(false)}
+          initialMode={presetAccount}
+          onClose={() => { setCreating(false); setPresetAccount(null); }}
           onSaved={() => { setCreating(false); load(); }}
         />
       )}
@@ -321,6 +349,22 @@ export function PaymentWorkspace({
           config={isIn ? paymentInImportConfig : paymentOutImportConfig}
           onClose={() => setImporting(false)}
           onImported={() => { setImporting(false); load(); }}
+        />
+      )}
+
+      {exporting && (
+        <ExportDialog
+          title={title}
+          filename={`payment-${direction.toLowerCase()}`}
+          rows={rows}
+          columns={exportColumns}
+          detail={{
+            label: "Include settled documents",
+            hint: "One row per document this receipt was applied to, with the receipt's own columns repeated against each.",
+            lines: (p: Payment): PaymentLink[] => p.links,
+            columns: exportLinkColumns,
+          }}
+          onClose={() => setExporting(false)}
         />
       )}
 
@@ -352,18 +396,21 @@ function PaymentForm({
   direction,
   title,
   parties,
+  initialMode,
   onClose,
   onSaved,
 }: {
   direction: "IN" | "OUT";
   title: string;
   parties: Party[];
+  /** Payment Type to open on — the bank account a "Bank to Party" shortcut came from. */
+  initialMode?: string | null;
   onClose: () => void;
   onSaved: () => void;
 }) {
   const [partyId, setPartyId] = useState("");
   const [amount, setAmount] = useState(0);
-  const [mode, setMode] = useState("Cash");
+  const [mode, setMode] = useState(initialMode || "Cash");
   const [reference, setReference] = useState("");
   const [paymentDate, setPaymentDate] = useState(new Date().toISOString().slice(0, 10));
   const [saving, setSaving] = useState(false);
@@ -372,6 +419,7 @@ function PaymentForm({
   const { projects } = useProjects();
   const [selectedProjectId, setSelectedProjectId] = useState(projectId != null ? String(projectId) : "");
   const paymentTypeOptions = usePaymentTypeOptions();
+  const bankAccountFor = useBankAccountResolver();
   // Which bills this receipt settles. Empty = the whole amount sits as an advance ("Unused").
   const [links, setLinks] = useState<{ invoiceId: number; amount: number }[]>([]);
   const [linking, setLinking] = useState(false);
@@ -405,6 +453,9 @@ function PaymentForm({
         links,
         amount: Number(amount) || 0,
         mode,
+        // The account behind the chosen Payment Type. Without it the receipt is invisible to that
+        // account's balance and statement, both of which key off bankAccountId. See bankScope.
+        bankAccountId: bankAccountFor(mode),
         reference: reference || null,
         paymentDate,
         projectId: selectedProjectId ? Number(selectedProjectId) : null,

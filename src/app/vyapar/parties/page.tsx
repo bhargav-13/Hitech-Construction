@@ -14,6 +14,8 @@ import { useTableSort } from "@/lib/useTableSort";
 import { partyLedgerHref } from "@/lib/vyaparLinks";
 import { LinkedRow } from "@/components/vyapar/LinkedRow";
 import { exportRowsToCsv, printRows, downloadPdf } from "@/lib/vyaparExport";
+import { ExportDialog, type ExportColumn } from "@/components/vyapar/ExportDialog";
+import { DateRangeFilter, defaultRange, inRange, type DateRange } from "@/components/vyapar/DateRangeFilter";
 import * as vyapar from "@/lib/vyaparApi";
 import type { Party, PartyLedgerRow } from "@/lib/vyaparApi";
 import * as api from "@/lib/api";
@@ -70,7 +72,11 @@ export default function PartiesPage() {
   const [editing, setEditing] = useState<Party | null>(null);
   const [creating, setCreating] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [ledgerSearch, setLedgerSearch] = useState("");
+  // Same default as every other transaction list in the module, so the ledger opens on the current
+  // year rather than on everything ever recorded.
+  const [range, setRange] = useState<DateRange>(() => defaultRange("This Year"));
   const projectId = useVyaparProjectId();
 
   // A member's money lives in the payroll-service. Loaded in bulk so the list can show each staff
@@ -163,9 +169,12 @@ export default function PartiesPage() {
 
   const ledgerRows = useMemo(() => {
     const q = ledgerSearch.trim().toLowerCase();
-    if (!q) return ledger;
-    return ledger.filter((r) => [r.type, r.number, r.date].some((f) => f?.toLowerCase().includes(q)));
-  }, [ledger, ledgerSearch]);
+    return ledger.filter((r) => {
+      if (!inRange(r.date, range)) return false;
+      if (!q) return true;
+      return [r.type, r.number, r.date].some((f) => f?.toLowerCase().includes(q));
+    });
+  }, [ledger, ledgerSearch, range]);
 
   // Vyapar puts a funnel on every ledger column, not just a sort arrow.
   const ledgerColumns = useMemo(
@@ -245,6 +254,58 @@ export default function PartiesPage() {
     setTab("details");
   }
 
+  /** Every field on the party master, offered to the export picker; all of it ticked by default. */
+  const partyExportColumns: ExportColumn<Party>[] = [
+    { key: "name", label: "Name", value: (p) => p.name },
+    { key: "type", label: "Type", value: (p) => p.partyType },
+    { key: "phone", label: "Phone", value: (p) => p.phone ?? "" },
+    { key: "email", label: "Email", value: (p) => p.email ?? "" },
+    { key: "gstin", label: "GSTIN", value: (p) => p.gstin ?? "" },
+    { key: "gstType", label: "GST Type", value: (p) => p.gstType ?? "" },
+    { key: "state", label: "State", value: (p) => p.state ?? "" },
+    { key: "city", label: "City", value: (p) => p.city ?? "" },
+    { key: "billingAddress", label: "Billing Address", value: (p) => p.billingAddress ?? "" },
+    { key: "shippingAddress", label: "Shipping Address", value: (p) => p.shippingAddress ?? "" },
+    { key: "group", label: "Group", value: (p) => p.partyGroup ?? "" },
+    { key: "openingBalance", label: "Opening Balance", value: (p) => p.openingBalance },
+    { key: "openingDate", label: "Opening Date", value: (p) => p.openingDate ?? "" },
+    { key: "creditLimit", label: "Credit Limit", value: (p) => p.creditLimit ?? "" },
+    { key: "balance", label: "Balance", value: (p) => p.balance },
+    { key: "field1", label: "Field 1", value: (p) => p.field1 ?? "" },
+    { key: "field2", label: "Field 2", value: (p) => p.field2 ?? "" },
+    { key: "field3", label: "Field 3", value: (p) => p.field3 ?? "" },
+    { key: "field4", label: "Field 4", value: (p) => p.field4 ?? "" },
+    { key: "isActive", label: "Active", value: (p) => (p.isActive ? "Yes" : "No") },
+  ];
+
+  /**
+   * The identity block the ledger export carries above its table — the same facts the PDF prints
+   * in its header. Without it an exported statement is a bare grid of numbers with no way to tell
+   * whose account it is once the file has been renamed or emailed on.
+   */
+  const ledgerHeading = selected
+    ? {
+        title: `${selected.name} — Statement`,
+        meta: [
+          ["Party", selected.name],
+          ["Type", selected.partyType === "SUPPLIER" ? "Supplier" : "Customer"],
+          ["Phone", selected.phone ?? ""],
+          ["Email", selected.email ?? ""],
+          ["GSTIN", selected.gstin ?? ""],
+          ["GST Type", selected.gstType ?? ""],
+          ["State", selected.state ?? ""],
+          ["City", selected.city ?? ""],
+          ["Billing Address", selected.billingAddress ?? ""],
+          ["Group", selected.partyGroup ?? ""],
+          ["Credit Limit", selected.creditLimit ?? ""],
+          ["Opening Balance", selected.openingBalance],
+          ["Closing Balance", selected.balance],
+          ["Period", range.from || range.to ? `${range.from || "start"} to ${range.to || "today"}` : "All dates"],
+          ["Generated", new Date().toLocaleString("en-IN")],
+        ] as [string, string | number][],
+      }
+    : undefined;
+
   const ledgerHead = ["Type", "Number", "Date", "Total", "Balance/Unused", "Status"];
   const ledgerData = sortedLedger.map((r) => [
     r.type,
@@ -280,14 +341,7 @@ export default function PartiesPage() {
                   <RowMenuItem
                     icon={FileSpreadsheet}
                     label="Export all parties"
-                    onClick={() => {
-                      close();
-                      exportRowsToCsv(
-                        "all-parties",
-                        ["Name", "Type", "Phone", "GSTIN", "State", "Group", "Balance"],
-                        parties.map((p) => [p.name, p.partyType, p.phone ?? "", p.gstin ?? "", p.state ?? "", p.partyGroup ?? "", p.balance])
-                      );
-                    }}
+                    onClick={() => { close(); setExporting(true); }}
                   />
                   <RowMenuItem
                     icon={FileText}
@@ -350,6 +404,14 @@ export default function PartiesPage() {
               )}
             </button>
           ))}
+
+          {/* Period filter, on the same line as the tabs — the transaction lists put theirs in the
+              same place, and it only bites on the Details tab's ledger. */}
+          {tab === "details" && (
+            <div className="ml-auto pb-1">
+              <DateRangeFilter value={range} onChange={setRange} />
+            </div>
+          )}
         </div>
 
         {error && <div className="rounded-lg bg-rose-50 px-4 py-2 text-sm text-rose-600">{error}</div>}
@@ -621,7 +683,7 @@ export default function PartiesPage() {
                             <RowMenuItem
                               icon={FileSpreadsheet}
                               label="Export ledger"
-                              onClick={() => { close(); exportRowsToCsv(`${selected.name}-ledger`, ledgerHead, ledgerData); }}
+                              onClick={() => { close(); exportRowsToCsv(`${selected.name}-ledger`, ledgerHead, ledgerData, ledgerHeading); }}
                             />
                             <RowMenuItem
                               icon={Printer}
@@ -697,7 +759,7 @@ export default function PartiesPage() {
                         <FileText size={15} />
                       </button>
                       <button
-                        onClick={() => exportRowsToCsv(`${selected.name}-ledger`, ledgerHead, ledgerData)}
+                        onClick={() => exportRowsToCsv(`${selected.name}-ledger`, ledgerHead, ledgerData, ledgerHeading)}
                         title="Export to Excel"
                         className="rounded-lg p-1.5 text-emerald-600 transition-colors duration-150 hover:bg-emerald-50"
                       >
@@ -806,6 +868,16 @@ export default function PartiesPage() {
             setImporting(false);
             load();
           }}
+        />
+      )}
+
+      {exporting && (
+        <ExportDialog
+          title="parties"
+          filename="all-parties"
+          rows={parties}
+          columns={partyExportColumns}
+          onClose={() => setExporting(false)}
         />
       )}
     </VyaparShell>

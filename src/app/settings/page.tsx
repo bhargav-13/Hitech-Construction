@@ -3,6 +3,7 @@
 import { type ChangeEvent, type ComponentType, useEffect, useMemo, useState } from "react";
 import { AppShell } from "@/components/AppShell";
 import { MultiLevelApproval } from "@/components/settings/MultiLevelApproval";
+import { CompanySettings } from "@/components/settings/CompanySettings";
 import { Drawer, DrawerField } from "@/components/Drawer";
 import { Spinner } from "@/components/Spinner";
 import { Select } from "@/components/Select";
@@ -29,7 +30,7 @@ import { useDepartments } from "@/lib/useDepartments";
 // Roles & Access is the only built Settings section. Unimplemented sections used to be listed here
 // as "Coming soon" placeholders — that's been removed. The "coming soon" hint now lives in the
 // New/Manage Role permission matrix (RoleDrawer), against modules whose feature isn't built yet.
-const SECTIONS = ["Roles & Access", "Multi Level Approval"] as const;
+const SECTIONS = ["Roles & Access", "Multi Level Approval", "Companies"] as const;
 type Section = (typeof SECTIONS)[number];
 
 // Backend module codes that map to a real, usable feature. Everything else is flagged "Coming soon"
@@ -46,7 +47,17 @@ const IMPLEMENTED_MODULES = new Set([
 ]);
 
 export default function SettingsPage() {
-  const [section, setSection] = useState<Section>("Roles & Access");
+  // `?section=Companies` deep-links a tab — how the sidebar's company switcher gets here.
+  //
+  // Read straight off `window.location` rather than with `useSearchParams`. This page is fully
+  // client-rendered, and `useSearchParams` opts the route out of static prerendering unless it is
+  // wrapped in a Suspense boundary — without one, `next build` fails outright on /settings. The
+  // Parties screen reads its own `?tab=` the same way, for the same reason.
+  const [section, setSection] = useState<Section>(() => {
+    if (typeof window === "undefined") return "Roles & Access";
+    const requested = new URLSearchParams(window.location.search).get("section");
+    return SECTIONS.includes(requested as Section) ? (requested as Section) : "Roles & Access";
+  });
 
   return (
     <AppShell title="Setting">
@@ -84,7 +95,13 @@ export default function SettingsPage() {
         </div>
 
         <div className="min-w-0 flex-1">
-          {section === "Roles & Access" ? <RolesAndAccess /> : <MultiLevelApproval />}
+          {section === "Roles & Access" ? (
+            <RolesAndAccess />
+          ) : section === "Companies" ? (
+            <CompanySettings />
+          ) : (
+            <MultiLevelApproval />
+          )}
         </div>
       </div>
     </AppShell>

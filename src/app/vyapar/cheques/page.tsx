@@ -7,7 +7,8 @@ import { RowMenu, RowMenuItem } from "@/components/RowMenu";
 import { SortTh } from "@/components/vyapar/SortTh";
 import { useTableSort } from "@/lib/useTableSort";
 import { inr } from "@/lib/format";
-import { exportRowsToCsv, downloadPdf } from "@/lib/vyaparExport";
+import { downloadPdf } from "@/lib/vyaparExport";
+import { ExportDialog, type ExportColumn } from "@/components/vyapar/ExportDialog";
 import * as vyapar from "@/lib/vyaparApi";
 import type { Cheque } from "@/lib/vyaparApi";
 import { CheckCircle2, FileSpreadsheet, FileText, RotateCcw, Search, Wallet } from "lucide-react";
@@ -26,6 +27,7 @@ export default function ChequesPage() {
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
   const [tab, setTab] = useState<"OPEN" | "CLOSED">("OPEN");
+  const [exporting, setExporting] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -83,8 +85,18 @@ export default function ChequesPage() {
     }
   }
 
+  const chequeExportColumns: ExportColumn<Cheque>[] = [
+    { key: "chequeNo", label: "Cheque No", value: (c) => c.chequeNo },
+    { key: "party", label: "Party", value: (c) => c.partyName ?? "" },
+    { key: "invoiceNo", label: "Reference Document", value: (c) => c.invoiceNo ?? "" },
+    { key: "direction", label: "Direction", value: (c) => c.direction },
+    { key: "amount", label: "Amount", value: (c) => c.amount },
+    { key: "chequeDate", label: "Cheque Date", value: (c) => c.chequeDate ?? "" },
+    { key: "transferDate", label: "Transfer Date", value: (c) => c.transferDate ?? "" },
+    { key: "status", label: "Status", value: (c) => c.status },
+  ];
+
   const head = ["Cheque No", "Party", "Ref", "Direction", "Date", "Amount", "Status"];
-  const data = rows.map((c) => [c.chequeNo, c.partyName ?? "", c.invoiceNo ?? "", c.direction, c.chequeDate ?? "", c.amount, c.status]);
 
   return (
     <VyaparShell>
@@ -100,7 +112,7 @@ export default function ChequesPage() {
           <RowMenu align="right" buttonLabel="Cheque export">
             {(close) => (
               <>
-                <RowMenuItem icon={FileSpreadsheet} label="Export cheques" onClick={() => { close(); exportRowsToCsv("cheques", head, data); }} />
+                <RowMenuItem icon={FileSpreadsheet} label="Export cheques" onClick={() => { close(); setExporting(true); }} />
                 <RowMenuItem
                   icon={FileText}
                   iconClassName="text-rose-600"
@@ -192,6 +204,16 @@ export default function ChequesPage() {
           </div>
         )}
       </div>
+
+      {exporting && (
+        <ExportDialog
+          title="cheques"
+          filename="cheques"
+          rows={rows}
+          columns={chequeExportColumns}
+          onClose={() => setExporting(false)}
+        />
+      )}
     </VyaparShell>
   );
 }
