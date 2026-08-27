@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { SortTh } from "@/components/vyapar/SortTh";
 import { RowMenu, RowMenuItem, RowMenuDivider } from "@/components/RowMenu";
 import { Select } from "@/components/Select";
@@ -38,9 +38,15 @@ import { TenderForm } from "@/components/tender/TenderForm";
 import { ImportDrawer } from "@/components/tender/ImportDrawer";
 import { LossReasonModal } from "@/components/tender/LossReasonModal";
 import { ConfirmDialog } from "@/components/tender/ConfirmDialog";
+import { TenderHealthChip } from "@/components/tender/TenderHealthChip";
+import { HandoffDialog } from "@/components/tender/HandoffDialog";
+import { useProjectBoqStore, type HandoffOptions } from "@/lib/projectBoqStore";
+import { findAnalysis, useAnalysisStore } from "@/lib/tenderAnalysisStore";
+import { analysisTotals } from "@/lib/tenderAnalysisCalc";
 import { TenderEmpty } from "@/components/tender/TenderShell";
 import {
   ArrowRight,
+  ClipboardList,
   ArrowUpRight,
   Bookmark,
   Building2,
@@ -69,6 +75,23 @@ type Col = {
   align?: "right";
   sort: (t: Tender) => string | number | null | undefined;
   cell: (t: Tender) => React.ReactNode;
+};
+
+/**
+ * The bid verdict, as a sortable column.
+ *
+ * <p>Sorting reads the analysis store imperatively because column definitions are module-level
+ * data, not components — the cell itself subscribes properly, so the chip still updates live.
+ * Un-analysed tenders sort last, which is what `null` does in useTableSort.
+ */
+const healthCol: Col = {
+  key: "health",
+  label: "Health",
+  sort: (t) => {
+    const a = findAnalysis(useAnalysisStore.getState().analyses, t);
+    return a && a.boqLines.length > 0 ? analysisTotals(a).profitPctAtBid : null;
+  },
+  cell: (t) => <TenderHealthChip tender={t} showBid={false} />,
 };
 
 const nameCell = (t: Tender) => (
@@ -110,6 +133,7 @@ const COLS: Record<PipelineVariant, Col[]> = {
     { key: "department", label: "Department", sort: (t) => t.department, cell: (t) => tval(t.department) },
     { key: "tenderId", label: "Tender ID", sort: (t) => t.tenderId, cell: (t) => tval(t.tenderId) },
     { key: "nameOfWork", label: "Name of Work", sort: (t) => t.nameOfWork, cell: nameCell },
+    healthCol,
     { key: "estimatedCost", label: "Est. Cost", align: "right", sort: (t) => t.estimatedCost, cell: (t) => tmoney(t.estimatedCost) },
     { key: "deadline", label: "Deadline", sort: (t) => t.deadline, cell: (t) => dateCell(t.deadline) },
     { key: "nextFollowUp", label: "Next Follow Up", sort: (t) => t.nextFollowUp, cell: (t) => <FollowUpCell t={t} /> },
@@ -122,6 +146,7 @@ const COLS: Record<PipelineVariant, Col[]> = {
     { key: "department", label: "Department", sort: (t) => t.department, cell: (t) => tval(t.department) },
     { key: "tenderId", label: "Tender ID", sort: (t) => t.tenderId, cell: (t) => tval(t.tenderId) },
     { key: "nameOfWork", label: "Name of Work", sort: (t) => t.nameOfWork, cell: nameCell },
+    healthCol,
     { key: "estimatedCost", label: "Est. Cost", align: "right", sort: (t) => t.estimatedCost, cell: (t) => tmoney(t.estimatedCost) },
     { key: "deadline", label: "Deadline", sort: (t) => t.deadline, cell: (t) => dateCell(t.deadline) },
     { key: "nextFollowUp", label: "Next Follow Up", sort: (t) => t.nextFollowUp, cell: (t) => <FollowUpCell t={t} /> },
@@ -155,6 +180,7 @@ const COLS: Record<PipelineVariant, Col[]> = {
     { key: "department", label: "Department", sort: (t) => t.department, cell: (t) => tval(t.department) },
     { key: "tenderId", label: "Tender ID", sort: (t) => t.tenderId, cell: (t) => tval(t.tenderId) },
     { key: "nameOfWork", label: "Name of Work", sort: (t) => t.nameOfWork, cell: nameCell },
+    healthCol,
     { key: "estimatedCost", label: "Est. Cost", align: "right", sort: (t) => t.estimatedCost, cell: (t) => tmoney(t.estimatedCost) },
     { key: "contractValue", label: "Contract Value", align: "right", sort: (t) => t.contractValue, cell: (t) => tmoney(t.contractValue) },
     { key: "variancePct", label: "Var %", align: "right", sort: (t) => t.variancePct, cell: (t) => (t.variancePct == null ? "—" : `${t.variancePct}%`) },
@@ -207,12 +233,14 @@ const DEFAULT_SORT: Record<PipelineVariant, { key: string; dir: "asc" | "desc" }
 
 export function TenderPipeline({ variant }: { variant: PipelineVariant }) {
   const params = useSearchParams();
+  const router = useRouter();
   const tenders = useTenderStore((s) => s.tenders);
   const setStage = useTenderStore((s) => s.setStage);
   const setStatus = useTenderStore((s) => s.setStatus);
   const setStageBulk = useTenderStore((s) => s.setStageBulk);
   const linkProject = useTenderStore((s) => s.linkProject);
   const handoffPayloadFor = useTenderStore((s) => s.handoffPayloadFor);
+  const createFromAnalysis = useProjectBoqStore((s) => s.createFromAnalysis);
   const lastUndo = useTenderStore((s) => s.lastUndo);
   const undo = useTenderStore((s) => s.undo);
   const clearUndo = useTenderStore((s) => s.clearUndo);
@@ -425,12 +453,28 @@ export function TenderPipeline({ variant }: { variant: PipelineVariant }) {
   }
 
   /**
+   * Convert the tender's analysis into the project's BOQ and targets. Returns a fragment for the
+   * flash message, so the user is told what actually landed rather than just "project created".
+   */
+  function buildBoq(t: Tender, projectId: number, handoff: HandoffOptions | null): string {
+    // Say what happened either way. Silently creating an empty project when the user ticked
+    // "create the BOQ" is the failure they cannot diagnose from the outside.
+    if (!handoff) return " — no BOQ, because this tender has no health analysis";
+    const analysis = findAnalysis(useAnalysisStore.getState().analyses, t);
+    if (!analysis) return " — but its health analysis could not be found, so the BOQ was not created";
+    if (analysis.boqLines.length === 0) return " — its health analysis has no items yet, so the BOQ is empty";
+    const boq = createFromAnalysis(projectId, analysis, handoff);
+    const targets = boq.targets.length;
+    return ` with ${boq.items.length} BOQ items${targets > 0 ? ` and ${targets} targets` : " (no targets — add them on the project's BOQ tab)"}`;
+  }
+
+  /**
    * Hand a won tender over to the **Project module** — this module does not keep its own project
    * list. `createProject` only accepts name/address/city, so the commercial detail the client
    * actually tracks (contract value, work order date, completion date, customer) goes across in a
    * follow-up update. If that second call fails the handoff is marked unsynced rather than lost.
    */
-  async function createProject(t: Tender) {
+  async function createProject(t: Tender, handoff: HandoffOptions | null) {
     setBusyId(t.id);
     const payload = handoffPayloadFor(t.id);
     try {
@@ -455,16 +499,18 @@ export function TenderPipeline({ variant }: { variant: PipelineVariant }) {
       }
       linkProject(t.id, res.id, { synced });
       setCreatedProjectId(res.id);
+      const built = buildBoq(t, res.id, handoff);
       flash(
         synced
-          ? `Project #${res.id} created in the Project module.`
-          : `Project #${res.id} created, but its contract details did not save — open it to finish.`,
+          ? `Project #${res.id} created${built}.`
+          : `Project #${res.id} created${built}, but its contract details did not save — open it to finish.`,
       );
     } catch {
       // No project backend reachable — keep the handoff locally so the conversion is not lost, and
       // say so plainly rather than reporting a success that did not happen.
       const localId = -Math.floor(Date.now() / 1000);
       linkProject(t.id, localId, { synced: false });
+      buildBoq(t, localId, handoff);
       flash("Project module unreachable — the handoff is saved locally and can be pushed later.");
     } finally {
       setBusyId(null);
@@ -797,6 +843,7 @@ export function TenderPipeline({ variant }: { variant: PipelineVariant }) {
                           onCreateProject={() => setProjectPrompt(t)}
                           onView={() => setSelectedId(t.id)}
                           onEdit={() => setEditing(t)}
+                          onAnalyse={() => router.push(`/tender/analysis/${t.id}`)}
                         />
                       </td>
                     </tr>
@@ -879,21 +926,11 @@ export function TenderPipeline({ variant }: { variant: PipelineVariant }) {
       )}
 
       {projectPrompt && (
-        <ConfirmDialog
-          title="Hand over to the Project module"
-          confirmLabel="Create project"
+        <HandoffDialog
+          tender={projectPrompt}
           busy={busyId === projectPrompt.id}
-          body={
-            <>
-              <strong>{projectPrompt.nameOfWork ?? projectPrompt.tenderId}</strong> will be created in the Project
-              module with a contract value of {tmoney(projectPrompt.contractValue ?? projectPrompt.estimatedCost)}
-              {projectPrompt.duration ? `, a ${projectPrompt.duration} completion period` : ""} and{" "}
-              {projectPrompt.department ?? "the department"} as the customer. Execution is tracked there from then on;
-              the tender keeps a link to it.
-            </>
-          }
           onCancel={() => setProjectPrompt(null)}
-          onConfirm={() => void createProject(projectPrompt)}
+          onConfirm={(opts) => void createProject(projectPrompt, opts)}
         />
       )}
     </div>
@@ -1122,6 +1159,7 @@ function RowActions({
   onCreateProject,
   onView,
   onEdit,
+  onAnalyse,
 }: {
   t: Tender;
   busy: boolean;
@@ -1131,6 +1169,7 @@ function RowActions({
   onCreateProject: () => void;
   onView: () => void;
   onEdit: () => void;
+  onAnalyse: () => void;
 }) {
   const transitions = transitionsFor(t.stage);
   return (
@@ -1139,6 +1178,11 @@ function RowActions({
         <>
           <RowMenuItem icon={ExternalLink} label="View details" onClick={() => { close(); onView(); }} />
           <RowMenuItem icon={Pencil} label="Edit" onClick={() => { close(); onEdit(); }} />
+          <RowMenuItem
+            icon={ClipboardList}
+            label={findAnalysis(useAnalysisStore.getState().analyses, t) ? "Open health analysis" : "Run health analysis"}
+            onClick={() => { close(); onAnalyse(); }}
+          />
           <RowMenuDivider />
           {transitions.map((tr) => (
             <RowMenuItem

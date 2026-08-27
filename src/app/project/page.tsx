@@ -48,6 +48,7 @@ const FILTERS: { key: "ALL" | ProjectStatus; label: string }[] = [
 ];
 
 export default function ProjectsPage() {
+  const router = useRouter();
   const [projects, setProjects] = useState<ProjectResponse[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -189,7 +190,7 @@ export default function ProjectsPage() {
       ) : (
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
           {filtered.map((p) => (
-            <ProjectCard key={p.id} project={p} finance={finance[String(p.id)]} onOpen={() => setSelected(p)} />
+            <ProjectCard key={p.id} project={p} finance={finance[String(p.id)]} onOpen={() => router.push(`/project/${p.id}`)} />
           ))}
         </div>
       )}

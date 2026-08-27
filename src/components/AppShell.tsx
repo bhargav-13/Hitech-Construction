@@ -12,9 +12,16 @@ import { useAuthStore } from "@/lib/authStore";
 export function AppShell({
   title,
   children,
+  /**
+   * Drop the global module rail. Set on screens that are a workspace in their own right — the
+   * project detail page runs its own tab bar across the full width, and a second level of
+   * navigation beside it only takes room away from the BOQ tables that need it.
+   */
+  hideSidebar = false,
 }: {
   title: string;
   children: React.ReactNode;
+  hideSidebar?: boolean;
 }) {
   const router = useRouter();
   const rehydrateAuth = useAppStore((s) => s.rehydrateAuth);
@@ -40,7 +47,7 @@ export function AppShell({
 
   return (
     <div className="flex h-screen w-full overflow-hidden">
-      <Sidebar />
+      {!hideSidebar && <Sidebar />}
       <div className="flex min-w-0 flex-1 flex-col">
         <Topbar title={title} />
         <main className="min-w-0 flex-1 overflow-x-hidden overflow-y-auto bg-background p-6">

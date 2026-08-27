@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
@@ -18,7 +18,6 @@ import {
 } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { ProjectSettingModal } from "@/components/ProjectSettingModal";
-import { TaskWorkspace } from "@/components/task/TaskWorkspace";
 import { ProjectMembers } from "@/components/ProjectMembers";
 import { ProjectAttendance } from "@/components/project/ProjectAttendance";
 import { ProjectTransactions } from "@/components/project/ProjectTransactions";
@@ -26,6 +25,9 @@ import { ProjectParties } from "@/components/project/ProjectParties";
 import { ProjectMaterials } from "@/components/project/ProjectMaterials";
 import { ProjectStaff } from "@/components/project/ProjectStaff";
 import { ProjectSite } from "@/components/project/ProjectSite";
+import { ProjectBoq } from "@/components/project/ProjectBoq";
+import { ProjectTargets } from "@/components/project/ProjectTargets";
+import { boqTotals, useProjectBoqStore } from "@/lib/projectBoqStore";
 import { ProjectTender } from "@/components/project/ProjectTender";
 import { ProjectActivity } from "@/components/project/ProjectActivity";
 import * as api from "@/lib/api";
@@ -52,10 +54,11 @@ import { inr } from "@/lib/format";
 const TABS = [
   "Dashboard",
   "Site",
+  "BOQ",
+  "Target",
   "Transaction",
   "Party",
   "Material",
-  "Task",
   "Staff",
   "Attendance",
   "Members",
@@ -113,7 +116,7 @@ export default function ProjectDetailPage() {
 
   if (loading) {
     return (
-      <AppShell title="Projects">
+      <AppShell title="Projects" hideSidebar>
         <div className="space-y-4">
           <div className="h-16 animate-pulse rounded-xl border border-gray-200 bg-white" />
           <div className="h-64 animate-pulse rounded-xl border border-gray-200 bg-white" />
@@ -124,7 +127,7 @@ export default function ProjectDetailPage() {
 
   if (error || !project) {
     return (
-      <AppShell title="Projects">
+      <AppShell title="Projects" hideSidebar>
         <div className="flex flex-col items-center justify-center rounded-xl border border-rose-200 bg-rose-50/60 py-16 text-center">
           <AlertTriangle size={24} className="mb-2 text-rose-500" />
           <p className="text-sm font-medium text-rose-700">{error ?? "Project not found."}</p>
@@ -139,7 +142,7 @@ export default function ProjectDetailPage() {
   const address = [project.address, project.city].filter(Boolean).join(", ");
 
   return (
-    <AppShell title="Projects">
+    <AppShell title="Projects" hideSidebar>
       <Link href="/project" className="mb-3 inline-flex items-center gap-1 text-sm text-gray-500 hover:text-brand-accent">
         <ChevronLeft size={15} />
         Back to Projects
@@ -195,15 +198,11 @@ export default function ProjectDetailPage() {
       {/* Each tab mounts only when opened, so a project page is one request rather than fourteen. */}
       {tab === "Dashboard" && <ProjectDashboard project={project} />}
       {tab === "Site" && <ProjectSite project={project} />}
+      {tab === "BOQ" && <ProjectBoq projectId={projectId} />}
       {tab === "Transaction" && <ProjectTransactions projectId={projectId} />}
       {tab === "Party" && <ProjectParties projectId={projectId} />}
       {tab === "Material" && <ProjectMaterials projectId={projectId} />}
-      {tab === "Task" && (
-        // TaskWorkspace reads query params, which needs a boundary for the production build.
-        <Suspense fallback={null}>
-          <TaskWorkspace projectId={params.id} />
-        </Suspense>
-      )}
+      {tab === "Target" && <ProjectTargets projectId={projectId} />}
       {tab === "Staff" && <ProjectStaff projectId={projectId} />}
       {tab === "Attendance" && <ProjectAttendance projectId={params.id} />}
       {tab === "Members" && <ProjectMembers projectId={params.id} />}
@@ -224,6 +223,10 @@ export default function ProjectDetailPage() {
  * whatever someone last typed.
  */
 function ProjectDashboard({ project }: { project: ProjectResponse }) {
+  // Targets are the project's own record of what is built; the summary endpoint does not know
+  // about them yet, so read them where they live.
+  const boq = useProjectBoqStore((s) => s.boqs.find((b) => b.projectId === project.id) ?? null);
+  const boqStats = boq ? boqTotals(boq) : null;
   const [summary, setSummary] = useState<ProjectSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -275,9 +278,7 @@ function ProjectDashboard({ project }: { project: ProjectResponse }) {
   }
 
   const finance = summary?.finance ?? null;
-  const tasks = summary?.tasks ?? null;
   const manpower = summary?.manpower ?? null;
-  const progress = summary?.progress;
 
   return (
     <div className="space-y-4">
@@ -287,8 +288,7 @@ function ProjectDashboard({ project }: { project: ProjectResponse }) {
           tint="bg-cyan-50 text-cyan-600"
           label="Progress (reported)"
           value={`${project.progress}%`}
-          note={progress && tasks ? `${progress.derivedFromTasks}% of tasks done` : undefined}
-          warn={progress?.diverges}
+          note={boq ? `${boqStats!.progressPct.toFixed(1)}% measured from targets` : undefined}
         />
         <StatCard
           icon={<ArrowDownRight size={16} />}
@@ -307,10 +307,9 @@ function ProjectDashboard({ project }: { project: ProjectResponse }) {
         <StatCard
           icon={<ListTodo size={16} />}
           tint="bg-amber-50 text-amber-600"
-          label="Open tasks"
-          value={tasks ? String(tasks.open) : "—"}
-          note={tasks ? `${tasks.overdue} overdue · ${tasks.dueThisWeek} due this week` : "No Taskopad access"}
-          warn={!!tasks && tasks.overdue > 0}
+          label="Targets complete"
+          value={boq ? `${boqStats!.targetsComplete}/${boqStats!.targetCount}` : "—"}
+          note={boq ? `${boqStats!.progressPct.toFixed(1)}% of BOQ value built` : "No BOQ on this project yet"}
         />
       </div>
 
@@ -355,11 +354,12 @@ function ProjectDashboard({ project }: { project: ProjectResponse }) {
         <div className="h-2 w-full overflow-hidden rounded-full bg-slate-100">
           <div className="h-full rounded-full bg-cyan-500" style={{ width: `${project.progress}%` }} />
         </div>
-        {progress?.diverges && (
+        {/* The same divergence check, against measured quantity rather than task ticks. */}
+        {boqStats && Math.abs(project.progress - boqStats.progressPct) > 10 && (
           <p className="mt-2 flex items-center gap-1.5 text-xs text-amber-600">
             <TriangleAlert size={13} />
-            Tasks say {progress.derivedFromTasks}% complete. Percent-complete on site is a judgement
-            call, but a gap this wide is worth a second look.
+            Targets measure {boqStats.progressPct.toFixed(1)}% built by value. Percent-complete on site is a
+            judgement call, but a gap this wide is worth a second look.
           </p>
         )}
       </div>
