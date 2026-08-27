@@ -18,6 +18,7 @@ import { transitionsFor, stateOf } from "@/lib/tenderStateMachine";
 import { useTenderStore } from "@/lib/tenderStore";
 import { useCompanyProfile, bidFlags, FLAG_TONE_CLASS } from "@/lib/tenderProfile";
 import { TenderFlow } from "@/components/tender/TenderFlow";
+import { TenderHealthLink } from "@/components/tender/TenderHealthChip";
 import { TenderActivity } from "@/components/tender/TenderActivity";
 import { ApprovalTrail, ApprovalProgressPill } from "@/components/approval/ApprovalTrail";
 import {
@@ -151,6 +152,12 @@ export function TenderDetailDrawer({
           </div>
           <h3 className="mt-2 text-base font-semibold text-gray-800">{tval(t.nameOfWork)}</h3>
           <p className="text-sm text-gray-500">{tval(t.department)}</p>
+        </div>
+
+        {/* The bid verdict. First thing worth knowing about a tender, so it sits above the detail. */}
+        <div className="flex flex-wrap items-center gap-2 rounded-xl border border-gray-100 bg-gray-50/60 px-3 py-2.5">
+          <span className="text-xs font-medium text-gray-500">Bid health</span>
+          <TenderHealthLink tender={t} />
         </div>
 
         {/* Eligibility warnings, computed against our own registration and turnover */}

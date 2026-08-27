@@ -13,6 +13,7 @@ import type { TenderNavNode } from "@/lib/tenderConfig";
 import {
   Boxes,
   CalendarDays,
+  ClipboardList,
   CheckSquare,
   FileText,
   Filter,
@@ -37,6 +38,7 @@ const ICONS: Record<string, React.ComponentType<{ size?: number; className?: str
   file: FileText,
   truck: Truck,
   boxes: Boxes,
+  clipboard: ClipboardList,
   settings: Settings,
 };
 

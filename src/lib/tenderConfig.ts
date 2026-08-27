@@ -27,6 +27,9 @@ export const TENDER_NAV: TenderNavNode[] = [
   // execution, and the handoff is a link on the won tender rather than a second project list.
   { label: "Sorting", href: "/tender/sorting", icon: "filter", section: "Pipeline", badge: "due:SORTING" },
   { label: "Research", href: "/tender/research", icon: "search", badge: "due:RESEARCH" },
+  // Costing sits inside the pipeline rather than beside it: analysis *is* the research step, and
+  // the bid percentage it produces is what the Applied stage records.
+  { label: "Health Analysis", href: "/tender/analysis", icon: "clipboard" },
   { label: "Applied", href: "/tender/applied", icon: "send" },
 
   // Time and money.
