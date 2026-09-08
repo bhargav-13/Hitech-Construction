@@ -273,19 +273,40 @@ export const useTenderStore = create<TenderState>()(
       backend: false,
 
       hydrateFromBackend: async () => {
-        try {
-          const [tenders, milestones, documents, hardcopy, materials] = await Promise.all([
-            listTenders(),
-            listMilestonesApi(),
-            listDocumentsApi(),
-            listHardcopyApi(),
-            listMaterialsApi(),
-          ]);
-          set({ tenders, milestones, documents, hardcopy, materials, backend: true, lastUndo: null });
-        } catch (e) {
-          // Backend unreachable / not logged in — keep the seeded local data (offline-friendly).
-          warn("Tender backend unavailable — using local data")(e);
+        // Settled, not all: these are five independent reads, and `Promise.all` threw the tender
+        // list away whenever any one tracker endpoint failed. The screen then showed seed data that
+        // looks completely real, so a tender someone had just created appeared to have vanished.
+        const [tenders, milestones, documents, hardcopy, materials] = await Promise.allSettled([
+          listTenders(),
+          listMilestonesApi(),
+          listDocumentsApi(),
+          listHardcopyApi(),
+          listMaterialsApi(),
+        ]);
+
+        if (tenders.status === "rejected") {
+          // Without tenders there is nothing to show, so stay on seed data and say why.
+          warn("Tender backend unavailable — using local data")(tenders.reason);
+          return;
         }
+        for (const [name, r] of [
+          ["milestones", milestones],
+          ["documents", documents],
+          ["hardcopy", hardcopy],
+          ["materials", materials],
+        ] as const) {
+          if (r.status === "rejected") warn(`Tender ${name} failed to load — that tab will be empty`)(r.reason);
+        }
+
+        set((s) => ({
+          tenders: tenders.value,
+          milestones: milestones.status === "fulfilled" ? milestones.value : s.milestones,
+          documents: documents.status === "fulfilled" ? documents.value : s.documents,
+          hardcopy: hardcopy.status === "fulfilled" ? hardcopy.value : s.hardcopy,
+          materials: materials.status === "fulfilled" ? materials.value : s.materials,
+          backend: true,
+          lastUndo: null,
+        }));
       },
 
       setStage: async (id, stage, status, patch) => moveStage(get, set, [id], stage, status, patch, "Stage change"),
