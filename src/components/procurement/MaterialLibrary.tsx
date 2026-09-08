@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { DISCARD_PROMPT } from "@/lib/formDirty";
 import { Plus, Search, X } from "lucide-react";
 import { Select } from "@/components/Select";
 import type { Item } from "@/lib/vyaparApi";
@@ -48,8 +49,20 @@ export function MaterialLibrary({
 
   const on = new Set(alreadyPicked);
 
+  /**
+   * Guarded on the *selection*, not on any keystroke.
+   *
+   * This is a picker: typing in its search box costs nothing to lose, and prompting for that would
+   * be the kind of noise that teaches people to click through confirmations. Ticking twenty
+   * materials and losing them to a backdrop click is the real cost, so that is what is asked about.
+   */
+  const dismiss = () => {
+    if (picked.size > 0 && !confirm(DISCARD_PROMPT)) return;
+    onClose();
+  };
+
   return (
-    <div className="fixed inset-0 z-50 flex justify-end bg-black/40" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex justify-end bg-black/40" onClick={dismiss}>
       <div
         className="animate-slide-in-right flex h-full w-full max-w-md flex-col bg-white shadow-2xl"
         onClick={(e) => e.stopPropagation()}
@@ -57,7 +70,7 @@ export function MaterialLibrary({
         <div className="flex items-center justify-between border-b border-gray-100 px-5 py-4">
           <div className="flex items-center gap-3">
             <button
-              onClick={onClose}
+              onClick={dismiss}
               aria-label="Close"
               className="rounded-full p-1 text-gray-400 transition-colors duration-150 hover:bg-gray-100 hover:text-gray-600"
             >

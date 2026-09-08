@@ -6,13 +6,16 @@ import { Drawer } from "@/components/Drawer";
 import { Spinner } from "@/components/Spinner";
 import { Select } from "@/components/Select";
 import { DatePicker } from "@/components/DatePicker";
-import { RowMenu, RowMenuItem } from "@/components/RowMenu";
+import { RowMenu, RowMenuDivider, RowMenuItem } from "@/components/RowMenu";
 import { useReimbursements } from "@/lib/usePayrollLive";
 import { getUsers, ApiError } from "@/lib/api";
 import type { ReimbursementApi, ReimbStatus, UserResponse } from "@/lib/api";
 import { inr } from "@/lib/format";
 import { formatDateTimeIST } from "@/lib/datetime";
-import { Banknote, CalendarDays, Check, CircleCheck, Clock, Plus, Receipt, UserRound, Wallet, X } from "lucide-react";
+import { Banknote, CalendarDays, Check, CircleCheck, Clock, Eye, Plus, Receipt, RotateCcw, UserRound, Wallet, X } from "lucide-react";
+
+/** What can be done to a claim. REOPEN clears a decision and sends it back to the pending queue. */
+type ReimbAction = "APPROVE" | "REJECT" | "PAY" | "REOPEN";
 
 const STATUS_STYLE: Record<ReimbStatus, string> = {
   PENDING: "bg-amber-50 text-amber-700",
@@ -48,7 +51,7 @@ export default function ReimbursementsPage() {
 
   const visible = tab === "ALL" ? rows : rows.filter((r) => r.status === tab);
 
-  async function act(id: number, action: "APPROVE" | "REJECT" | "PAY") {
+  async function act(id: number, action: ReimbAction) {
     try {
       await decide(id, action);
     } catch (err) {
@@ -126,11 +129,25 @@ export default function ReimbursementsPage() {
                     <td className="px-4 py-2.5 text-right" onClick={(e) => e.stopPropagation()}>
                       <div className="inline-flex">
                         <RowMenu align="right" buttonLabel={`Actions for ${r.claimId}`}>
+                          {/* Every status offers something. A rejected or paid claim used to open
+                              an empty menu — the ⋮ was there, clicking it did nothing, which reads
+                              as broken rather than as "no actions here". */}
                           {(close) => (
                             <>
+                              <RowMenuItem icon={Eye} label="View claim" onClick={() => { close(); setOpenClaim(r); }} />
                               {r.status === "PENDING" && <RowMenuItem icon={Check} label="Approve" onClick={() => { close(); act(r.id, "APPROVE"); }} />}
                               {r.status === "PENDING" && <RowMenuItem icon={X} label="Reject" tone="danger" onClick={() => { close(); act(r.id, "REJECT"); }} />}
                               {r.status === "APPROVED" && <RowMenuItem icon={Banknote} label="Mark paid" onClick={() => { close(); act(r.id, "PAY"); }} />}
+                              {(r.status === "REJECTED" || r.status === "APPROVED") && (
+                                <>
+                                  <RowMenuDivider />
+                                  <RowMenuItem
+                                    icon={RotateCcw}
+                                    label="Reopen — decide again"
+                                    onClick={() => { close(); act(r.id, "REOPEN"); }}
+                                  />
+                                </>
+                              )}
                             </>
                           )}
                         </RowMenu>
@@ -184,10 +201,10 @@ function ClaimDetailDrawer({
 }: {
   claim: ReimbursementApi;
   onClose: () => void;
-  onAct: (action: "APPROVE" | "REJECT" | "PAY") => Promise<void>;
+  onAct: (action: ReimbAction) => Promise<void>;
 }) {
   const [busy, setBusy] = useState(false);
-  const run = async (action: "APPROVE" | "REJECT" | "PAY") => {
+  const run = async (action: ReimbAction) => {
     setBusy(true);
     try { await onAct(action); } finally { setBusy(false); }
   };
@@ -232,6 +249,21 @@ function ClaimDetailDrawer({
             >
               <X size={15} /> Reject
             </button>
+          </div>
+        )}
+        {(claim.status === "REJECTED" || claim.status === "APPROVED") && (
+          <div className="border-t border-gray-100 pt-4">
+            <button
+              disabled={busy}
+              onClick={() => run("REOPEN")}
+              className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-gray-300 px-3 py-2 text-sm font-semibold text-gray-700 transition hover:border-brand-accent hover:text-brand-accent disabled:opacity-50"
+            >
+              <RotateCcw size={15} /> Reopen — decide again
+            </button>
+            <p className="mt-2 text-[11px] text-gray-400">
+              Clears the decision and puts the claim back in the pending queue. A paid claim can&apos;t be
+              reopened here — that is an accounting entry, not a status change.
+            </p>
           </div>
         )}
         {claim.status === "APPROVED" && (

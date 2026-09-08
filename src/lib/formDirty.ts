@@ -1,5 +1,7 @@
 "use client";
 
+import { useCallback, useEffect, useRef } from "react";
+
 /**
  * "The user has started filling this in" — the signal behind the discard confirmation on drawers
  * and modals.
@@ -41,3 +43,37 @@ export function watchFormTouches(el: HTMLElement, onTouch: () => void): () => vo
 
 /** The one wording used everywhere a half-filled form is about to be thrown away. */
 export const DISCARD_PROMPT = "Current changes will be discarded. Do you wish to continue?";
+
+/**
+ * The whole guard in one call, for any panel that closes on a backdrop click.
+ *
+ * `Drawer` and `Modal` had this wired by hand and every hand-rolled overlay in the app did not — so
+ * a half-filled payslip edit, material issue or link-payment dialog was still thrown away by a
+ * mis-aimed click, which is the complaint this answers. Attach `panelRef` to the panel and call
+ * `confirmDiscard()` before closing:
+ *
+ *     const { panelRef, confirmDiscard } = useDiscardGuard();
+ *     <div className="fixed inset-0 …" onClick={() => confirmDiscard() && onClose()}>
+ *       <div ref={panelRef} onClick={(e) => e.stopPropagation()}>…</div>
+ *
+ * Returns true when it is safe to close: nothing was touched, or the user said discard it.
+ */
+export function useDiscardGuard(enabled = true) {
+  const panelRef = useRef<HTMLDivElement>(null);
+  const touched = useRef(false);
+
+  useEffect(() => {
+    const el = panelRef.current;
+    if (!el) return;
+    return watchFormTouches(el, () => {
+      touched.current = true;
+    });
+  }, []);
+
+  const confirmDiscard = useCallback(
+    () => !(enabled && touched.current) || confirm(DISCARD_PROMPT),
+    [enabled],
+  );
+
+  return { panelRef, confirmDiscard };
+}

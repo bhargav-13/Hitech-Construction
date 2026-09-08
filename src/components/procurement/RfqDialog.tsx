@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { Plus, X } from "lucide-react";
 import { Drawer, DrawerField } from "@/components/Drawer";
 import { Select } from "@/components/Select";
+import { UnitSelect } from "@/components/procurement/UnitSelect";
 import { DatePicker } from "@/components/DatePicker";
 import { TypeaheadPicker } from "@/components/vyapar/TypeaheadPicker";
 import { useProjects } from "@/lib/useProjects";
@@ -11,8 +12,6 @@ import { inr, qty as formatQty } from "@/lib/format";
 import * as procurement from "@/lib/procurementApi";
 import type { Rfq } from "@/lib/procurementApi";
 import type { Item } from "@/lib/vyaparApi";
-
-const UNITS = ["Nos", "Bag", "Kg", "MT", "Mtr", "Sqm", "Cum", "Litre", "Set", "Box"];
 
 /**
  * Raise or edit an enquiry.
@@ -196,12 +195,7 @@ export function RfqDialog({
                     />
                   </td>
                   <td className="px-2 py-1.5">
-                    <Select
-                      value={l.unit}
-                      onChange={(v) => setLine(i, { unit: v })}
-                      size="sm"
-                      options={UNITS.map((u) => ({ value: u, label: u }))}
-                    />
+                    <UnitSelect value={l.unit} onChange={(v) => setLine(i, { unit: v })} />
                   </td>
                   <td className="px-2 py-1.5">
                     <input

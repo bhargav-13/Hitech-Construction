@@ -8,7 +8,8 @@ import { Spinner } from "@/components/Spinner";
 import { useVyaparSettings } from "@/lib/useVyaparSettings";
 import { usePartySettings } from "@/lib/usePartySettings";
 import { useItemSettings } from "@/lib/useItemSettings";
-import type { VyaparSettings } from "@/lib/vyaparApi";
+import { DOC_LABEL } from "@/lib/vyaparApi";
+import type { DocType, VyaparSettings } from "@/lib/vyaparApi";
 import { Boxes, ChevronRight, Printer, Users } from "lucide-react";
 
 /**
@@ -221,7 +222,65 @@ function TransactionTab({ draft, set }: { draft: VyaparSettings; set: Setter }) 
           onChange={(v) => set("linkPaymentsEnabled", v)}
         />
       </Section>
+
+      <div className="md:col-span-2">
+        <PrefixSection draft={draft} set={set} />
+      </div>
     </div>
+  );
+}
+
+/** Document types that carry a prefix. The rest use a plain reference number of their own. */
+const PREFIXED_DOCS: DocType[] = ["SALE", "SALE_ORDER", "ESTIMATE", "PROFORMA", "DELIVERY_CHALLAN"];
+
+/**
+ * Invoice number prefixes, per document type.
+ *
+ * The client numbers their bills by series — "HTB/25-26/", "HTB/26-27/" — and the number restarts
+ * inside each one, which is how one year's invoice 22 is told from the next year's. The setting
+ * existed in the backend and had no screen, so no prefix could be entered: every document came out
+ * of one unbroken run of numbers and the series distinguished nothing.
+ *
+ * Stored as a JSON map of doc type to a comma-separated list, matching what the invoice form reads.
+ * Several per type on purpose — the old year's prefix has to stay available while late bills for it
+ * are still being entered.
+ */
+function PrefixSection({ draft, set }: { draft: VyaparSettings; set: Setter }) {
+  const byType: Record<string, string> = (() => {
+    if (!draft.prefixes) return {};
+    try {
+      return JSON.parse(draft.prefixes) as Record<string, string>;
+    } catch {
+      return {};
+    }
+  })();
+
+  const write = (docType: DocType, value: string) =>
+    set("prefixes", JSON.stringify({ ...byType, [docType]: value }));
+
+  return (
+    <Section
+      title="Invoice Number Prefixes"
+      hint="Numbering restarts inside each prefix, so the same number can appear once per series."
+    >
+      <div className="space-y-3">
+        {PREFIXED_DOCS.map((d) => (
+          <label key={d} className="grid grid-cols-1 gap-1.5 sm:grid-cols-[160px_1fr] sm:items-center sm:gap-3">
+            <span className="text-sm text-gray-600">{DOC_LABEL[d]}</span>
+            <input
+              value={byType[d] ?? ""}
+              onChange={(e) => write(d, e.target.value)}
+              placeholder="e.g. HTB/26-27/, HTB/25-26/"
+              className="input font-mono text-sm"
+            />
+          </label>
+        ))}
+        <p className="text-xs text-gray-400">
+          Separate several with commas — all of them are offered on the form, so a late bill can still
+          go into last year&apos;s series. Leave blank for no prefix.
+        </p>
+      </div>
+    </Section>
   );
 }
 

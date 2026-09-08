@@ -194,6 +194,17 @@ export const REPORT_BUILDERS: Record<string, (ctx: ReportContext) => ReportData>
 };
 
 /** Reports without a dedicated dataset yet fall back to a member roster so the export still works. */
+/** True when this report has a real builder — see the fallback in {@link buildReport}. */
+export const isReportBuilt = (name: string) => name in REPORT_BUILDERS;
+
+/**
+ * Build one report.
+ *
+ * A name with no builder falls back to the staff directory, which is honest only because the
+ * caller is expected to have checked {@link isReportBuilt} first and said so: producing a member
+ * list under the heading "Goals & OKRs" and letting someone file it would be worse than producing
+ * nothing. The reports screen marks those cards rather than offering a PDF of the wrong thing.
+ */
 export function buildReport(name: string, ctx: ReportContext): ReportData {
   const builder = REPORT_BUILDERS[name];
   if (builder) return builder(ctx);

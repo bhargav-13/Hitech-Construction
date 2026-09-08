@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { Suspense, createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import {
   Bar,
@@ -12,15 +12,19 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { VyaparShell, VyaparEmpty } from "@/components/vyapar/VyaparShell";
+import { VyaparShell } from "@/components/vyapar/VyaparShell";
 import { VYAPAR_REPORTS, REPORT_GROUPS } from "@/lib/vyaparConfig";
 import { Spinner } from "@/components/Spinner";
 import { DatePicker } from "@/components/DatePicker";
-import { inr, bookDate, toIsoDate } from "@/lib/format";
+import { Select } from "@/components/Select";
+// `ReportDetail` is aliased: this file already has a component of that name (the report shell).
+import { ReportTable, type ReportColumn, type ReportDetail as ReportLineDetail } from "@/components/vyapar/ReportTable";
+import { inr, qty, bookDate, toIsoDate } from "@/lib/format";
 import { useVyaparProjectId } from "@/lib/projectScope";
 import * as vyapar from "@/lib/vyaparApi";
+import { fullInvoiceNo } from "@/lib/vyaparApi";
 import type { CashBankTxn, Invoice, InvoiceLine, Item, Party, Payment } from "@/lib/vyaparApi";
-import { ChevronLeft, ChevronRight, Download, FileText } from "lucide-react";
+import { ChevronLeft, ChevronRight, Download } from "lucide-react";
 
 type ReportId = string;
 
@@ -117,6 +121,16 @@ function ReportDetail({ id, onBack }: { id: ReportId; onBack: () => void }) {
   const effFrom = isDaybook && !usingRange ? day : from;
   const effTo = isDaybook && !usingRange ? day : to;
   const projectId = useVyaparProjectId();
+  /**
+   * Whose entries the report covers — Vyapar's "All Users" picker.
+   *
+   * Every document records who keyed it, and on a shared login that is the only way to answer "what
+   * did the site clerk book last month" or to check one person's entries. There is no equivalent
+   * "All Firms" control here on purpose: a firm *is* a company in this app, the switcher in the
+   * header already scopes every request to one, and a second control that could only ever show the
+   * current firm would be a lie.
+   */
+  const [user, setUser] = useState("all");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -170,8 +184,28 @@ function ReportDetail({ id, onBack }: { id: ReportId; onBack: () => void }) {
     [effFrom, effTo]
   );
 
-  const sales = useMemo(() => invoices.filter((i) => i.docType === "SALE" && inRange(i.invoiceDate)), [invoices, inRange]);
-  const purchases = useMemo(() => invoices.filter((i) => i.docType === "PURCHASE" && inRange(i.invoiceDate)), [invoices, inRange]);
+  /** Documents this report may see at all: the user filter, applied before anything else. */
+  const scoped = useMemo(
+    () => (user === "all" ? invoices : invoices.filter((i) => String(i.createdBy ?? "") === user)),
+    [invoices, user],
+  );
+  /** Who has actually entered something, so the picker never offers an empty choice. */
+  const userOptions = useMemo(() => {
+    const byId = new Map<string, string>();
+    for (const i of invoices) {
+      if (i.createdBy == null) continue;
+      byId.set(String(i.createdBy), i.createdByName ?? `User ${i.createdBy}`);
+    }
+    return [
+      { value: "all", label: "All Users" },
+      ...[...byId.entries()]
+        .map(([value, label]) => ({ value, label }))
+        .sort((a, b) => a.label.localeCompare(b.label)),
+    ];
+  }, [invoices]);
+
+  const sales = useMemo(() => scoped.filter((i) => i.docType === "SALE" && inRange(i.invoiceDate)), [scoped, inRange]);
+  const purchases = useMemo(() => scoped.filter((i) => i.docType === "PURCHASE" && inRange(i.invoiceDate)), [scoped, inRange]);
   const paysInRange = useMemo(() => payments.filter((p) => inRange(p.paymentDate)), [payments, inRange]);
 
   function download(rows: (string | number)[][], head: string[]) {
@@ -237,6 +271,12 @@ function ReportDetail({ id, onBack }: { id: ReportId; onBack: () => void }) {
             </span>
             <DatePicker value={to} onChange={setTo} min={from || undefined} placeholder="To" className="min-w-[150px] py-1.5" />
           </label>
+          {userOptions.length > 1 && (
+            <label className="block">
+              <span className="mb-1 block text-[11px] font-medium tracking-wide text-gray-400 uppercase">User</span>
+              <Select value={user} onChange={setUser} options={userOptions} className="min-w-[150px]" />
+            </label>
+          )}
           {isDaybook && usingRange && (
             <button
               onClick={() => { setFrom(""); setTo(""); }}
@@ -253,17 +293,21 @@ function ReportDetail({ id, onBack }: { id: ReportId; onBack: () => void }) {
           <Spinner size={16} className="text-brand-accent" /> Loading…
         </div>
       ) : (
-        <ReportBody
-          id={id}
-          sales={sales}
-          purchases={purchases}
-          parties={parties}
-          items={items}
-          payments={paysInRange}
-          allInvoices={invoices.filter((i) => inRange(i.invoiceDate))}
-          bankTxns={bankTxns.filter((t) => inRange(t.date))}
-          onDownload={download}
-        />
+        <ReportMetaContext.Provider
+          value={{ title: meta.title, filename: meta.title.toLowerCase().replace(/[^a-z0-9]+/g, "-") }}
+        >
+          <ReportBody
+            id={id}
+            sales={sales}
+            purchases={purchases}
+            parties={parties}
+            items={items}
+            payments={paysInRange}
+            allInvoices={scoped.filter((i) => inRange(i.invoiceDate))}
+            bankTxns={bankTxns.filter((t) => inRange(t.date))}
+            onDownload={download}
+          />
+        </ReportMetaContext.Provider>
       )}
     </div>
   );
@@ -341,7 +385,7 @@ function ReportBody({
           ]}
           onDownload={() =>
             onDownload(
-              rows.map((i) => [i.invoiceDate ?? "", i.invoiceNo, i.partyName ?? "", i.total, i.paidAmount, i.balance, i.status]),
+              rows.map((i) => [i.invoiceDate ?? "", fullInvoiceNo(i), i.partyName ?? "", i.total, i.paidAmount, i.balance, i.status]),
               ["Date", "Invoice", "Party", "Total", "Paid", "Balance", "Status"]
             )
           }
@@ -355,10 +399,13 @@ function ReportBody({
             <Bar dataKey="value" fill={id === "sale" ? "#e11d48" : "#6366f1"} radius={[5, 5, 0, 0]} maxBarSize={40} />
           </BarChart>
         </ChartCard>
-        <SimpleTable
-          head={["Date", "Invoice", "Party", "Total", "Paid", "Balance", "Status"]}
-          rows={rows.map((i) => [fmt(i.invoiceDate), i.invoiceNo, i.partyName ?? "—", inr(i.total), inr(i.paidAmount), inr(i.balance), i.status])}
-          alignRight={[3, 4, 5]}
+        <ReportTable
+          title={id === "sale" ? "Sale Report" : "Purchase Report"}
+          filename={id}
+          minWidth={1100}
+          columns={txnReportColumns(id, parties)}
+          rows={rows}
+          detail={txnReportDetail(itemById)}
         />
       </>
     );
@@ -372,7 +419,7 @@ function ReportBody({
         date: i.invoiceDate,
         type: vyapar.DOC_LABEL[i.docType],
         name: i.partyName ?? "—",
-        ref: i.invoiceNo,
+        ref: fullInvoiceNo(i),
         in: i.docType === "SALE" || i.docType === "PURCHASE_RETURN" ? i.total : 0,
         out: i.docType === "PURCHASE" || i.docType === "SALE_RETURN" || i.docType === "EXPENSE" ? i.total : 0,
       })),
@@ -476,7 +523,7 @@ function ReportBody({
             { label: "Cost of goods", value: inr(sum(rows.map((r) => r.cost))) },
             { label: "Profit", value: inr(totalProfit) },
           ]}
-          onDownload={() => onDownload(rows.map((r) => [r.inv.invoiceDate ?? "", r.inv.invoiceNo, r.inv.partyName ?? "", r.revenue, r.cost, r.profit]), ["Date", "Invoice", "Party", "Revenue", "Cost", "Profit"])}
+          onDownload={() => onDownload(rows.map((r) => [r.inv.invoiceDate ?? "", fullInvoiceNo(r.inv), r.inv.partyName ?? "", r.revenue, r.cost, r.profit]), ["Date", "Invoice", "Party", "Revenue", "Cost", "Profit"])}
         />
         {known.length < rows.length && (
           <p className="px-1 text-xs text-amber-600">
@@ -485,7 +532,7 @@ function ReportBody({
         )}
         <SimpleTable
           head={["Date", "Invoice", "Party", "Revenue", "Cost", "Profit"]}
-          rows={rows.map((r) => [fmt(r.inv.invoiceDate), r.inv.invoiceNo, r.inv.partyName ?? "—", inr(r.revenue), inr(r.cost), inr(r.profit)])}
+          rows={rows.map((r) => [fmt(r.inv.invoiceDate), fullInvoiceNo(r.inv), r.inv.partyName ?? "—", inr(r.revenue), inr(r.cost), inr(r.profit)])}
           alignRight={[3, 4, 5]}
         />
       </>
@@ -636,7 +683,7 @@ function ReportBody({
           ]}
           onDownload={() =>
             onDownload(
-              expenses.map((e) => [e.invoiceDate ?? "", catOf(e), e.invoiceNo, e.partyName ?? "", e.total, e.paidAmount, e.balance, e.status]),
+              expenses.map((e) => [e.invoiceDate ?? "", catOf(e), fullInvoiceNo(e), e.partyName ?? "", e.total, e.paidAmount, e.balance, e.status]),
               ["Date", "Category", "Exp No.", "Party", "Total", "Paid", "Balance", "Status"]
             )
           }
@@ -654,7 +701,7 @@ function ReportBody({
         )}
         <SimpleTable
           head={["Date", "Category", "Exp No.", "Party", "Total", "Balance", "Status"]}
-          rows={expenses.map((e) => [fmt(e.invoiceDate), catOf(e), e.invoiceNo || "—", e.partyName ?? "—", inr(e.total), inr(e.balance), e.status])}
+          rows={expenses.map((e) => [fmt(e.invoiceDate), catOf(e), fullInvoiceNo(e) || "—", e.partyName ?? "—", inr(e.total), inr(e.balance), e.status])}
           alignRight={[4, 5]}
         />
       </>
@@ -825,14 +872,14 @@ function ReportBody({
             { label: "Taxable value", value: inr(taxable) },
             { label: "Total tax", value: inr(tax) },
           ]}
-          onDownload={() => onDownload(rows.map((r) => [r.gstin, r.inv.partyName ?? "", r.inv.invoiceNo, r.inv.invoiceDate ?? "", r.inv.total, r.state, taxableOf(r.inv), r.inv.taxAmount]), ["GSTIN", "Party", "Invoice", "Date", "Invoice Value", "Place of Supply", "Taxable Value", "Tax"])}
+          onDownload={() => onDownload(rows.map((r) => [r.gstin, r.inv.partyName ?? "", fullInvoiceNo(r.inv), r.inv.invoiceDate ?? "", r.inv.total, r.state, taxableOf(r.inv), r.inv.taxAmount]), ["GSTIN", "Party", "Invoice", "Date", "Invoice Value", "Place of Supply", "Taxable Value", "Tax"])}
         />
         <SimpleTable
           head={["GSTIN", "Party", "Invoice", "Date", "Place of Supply", "Taxable Value", "Tax", "Invoice Value"]}
           rows={rows.map((r) => [
             r.gstin || "—",
             r.inv.partyName ?? "—",
-            r.inv.invoiceNo,
+            fullInvoiceNo(r.inv),
             fmt(r.inv.invoiceDate),
             r.state || "—",
             inr(taxableOf(r.inv)),
@@ -1152,34 +1199,7 @@ function ReportBody({
   // ---------------------------------------------------------------- Business status
 
   if (id === "bank-statement") {
-    const rows = [...bankTxns].sort((a, b) => (b.date ?? "").localeCompare(a.date ?? ""));
-    const inSum = sum(rows.filter((t) => t.direction === "in").map((t) => t.amount));
-    const outSum = sum(rows.filter((t) => t.direction === "out").map((t) => t.amount));
-    return (
-      <>
-        <SummaryStrip
-          stats={[
-            { label: "Entries", value: String(rows.length) },
-            { label: "Deposits", value: inr(inSum) },
-            { label: "Withdrawals", value: inr(outSum) },
-            { label: "Net", value: inr(inSum - outSum) },
-          ]}
-          onDownload={() => onDownload(rows.map((t) => [t.date ?? "", t.accountName, t.type, t.name ?? "", t.direction, t.amount]), ["Date", "Account", "Type", "Description", "Direction", "Amount"])}
-        />
-        <SimpleTable
-          head={["Date", "Account", "Type", "Description", "Deposit", "Withdrawal"]}
-          rows={rows.map((t) => [
-            fmt(t.date),
-            t.accountName,
-            t.type,
-            t.name ?? "—",
-            t.direction === "in" ? inr(t.amount) : "—",
-            t.direction === "out" ? inr(t.amount) : "—",
-          ])}
-          alignRight={[4, 5]}
-        />
-      </>
-    );
+    return <BankStatementReport txns={bankTxns} />;
   }
 
   if (id === "discount-report") {
@@ -1191,11 +1211,11 @@ function ReportBody({
             { label: "Documents with discount", value: String(rows.length) },
             { label: "Total discount", value: inr(sum(rows.map((i) => i.discount))) },
           ]}
-          onDownload={() => onDownload(rows.map((i) => [i.invoiceDate ?? "", vyapar.DOC_LABEL[i.docType], i.invoiceNo, i.partyName ?? "", i.discount, i.total]), ["Date", "Type", "Invoice", "Party", "Discount", "Total"])}
+          onDownload={() => onDownload(rows.map((i) => [i.invoiceDate ?? "", vyapar.DOC_LABEL[i.docType], fullInvoiceNo(i), i.partyName ?? "", i.discount, i.total]), ["Date", "Type", "Invoice", "Party", "Discount", "Total"])}
         />
         <SimpleTable
           head={["Date", "Type", "Invoice", "Party", "Discount", "Total"]}
-          rows={rows.map((i) => [fmt(i.invoiceDate), vyapar.DOC_LABEL[i.docType], i.invoiceNo, i.partyName ?? "—", inr(i.discount), inr(i.total)])}
+          rows={rows.map((i) => [fmt(i.invoiceDate), vyapar.DOC_LABEL[i.docType], fullInvoiceNo(i), i.partyName ?? "—", inr(i.discount), inr(i.total)])}
           alignRight={[4, 5]}
         />
       </>
@@ -1272,15 +1292,193 @@ function ReportBody({
           { label: "Sales", value: inr(sum(sales.map((i) => i.total))) },
           { label: "Purchases", value: inr(sum(purchases.map((i) => i.total))) },
         ]}
-        onDownload={() => onDownload(allInvoices.map((i) => [i.invoiceDate ?? "", i.docType, i.invoiceNo, i.partyName ?? "", i.total, i.status]), ["Date", "Type", "Invoice", "Party", "Total", "Status"])}
+        onDownload={() => onDownload(allInvoices.map((i) => [i.invoiceDate ?? "", i.docType, fullInvoiceNo(i), i.partyName ?? "", i.total, i.status]), ["Date", "Type", "Invoice", "Party", "Total", "Status"])}
       />
       <SimpleTable
         head={["Date", "Type", "Invoice", "Party", "Total", "Status"]}
-        rows={allInvoices.map((i) => [fmt(i.invoiceDate), vyapar.DOC_LABEL[i.docType], i.invoiceNo, i.partyName ?? "—", inr(i.total), i.status])}
+        rows={allInvoices.map((i) => [fmt(i.invoiceDate), vyapar.DOC_LABEL[i.docType], fullInvoiceNo(i), i.partyName ?? "—", inr(i.total), i.status])}
         alignRight={[4]}
       />
     </>
   );
+}
+
+/**
+ * Bank Statement — one account at a time, with a running balance.
+ *
+ * A statement is not a list of movements: it is the movements *plus what the account stood at after
+ * each one*, which is the number anyone reconciling against a passbook is actually reading. Ours
+ * had no running balance and no way to pick an account, so every account's entries were interleaved
+ * — a shape that cannot be reconciled against anything.
+ *
+ * The balance is accumulated oldest-first (a running balance only means anything in that order) and
+ * the rows are then shown newest-first, which is how a passbook prints and how the rest of this
+ * module lists things.
+ */
+function BankStatementReport({ txns }: { txns: BankLedgerRow[] }) {
+  const accounts = useMemo(
+    () => [...new Set(txns.map((t) => t.accountName))].sort((a, b) => a.localeCompare(b)),
+    [txns],
+  );
+  const [account, setAccount] = useState("all");
+
+  // Fall back to "all" if the chosen account leaves the range — derived, not synced in an effect.
+  const picked = account !== "all" && accounts.includes(account) ? account : "all";
+
+  const rows = useMemo(() => {
+    const mine = picked === "all" ? txns : txns.filter((t) => t.accountName === picked);
+    const oldestFirst = [...mine].sort((a, b) => (a.date ?? "").localeCompare(b.date ?? "") || a.id - b.id);
+    // Accumulated with reduce rather than a mutable counter — the React compiler rejects a variable
+    // reassigned across a map during render, and this reads no worse.
+    const withBalance = oldestFirst.reduce<((typeof oldestFirst)[number] & { balance: number })[]>((acc, t) => {
+      const previous = acc.length ? acc[acc.length - 1].balance : 0;
+      acc.push({ ...t, balance: previous + (t.direction === "in" ? t.amount : -t.amount) });
+      return acc;
+    }, []);
+    return withBalance.reverse();
+  }, [txns, picked]);
+
+  const total = (ns: number[]) => ns.reduce((a, b) => a + b, 0);
+  const inSum = total(rows.filter((t) => t.direction === "in").map((t) => t.amount));
+  const outSum = total(rows.filter((t) => t.direction === "out").map((t) => t.amount));
+
+  const columns: ReportColumn<(typeof rows)[number]>[] = [
+    { key: "date", label: "Date", value: (t) => fmt(t.date), sortValue: (t) => toIsoDate(t.date ?? "") },
+    { key: "account", label: "Bank", value: (t) => t.accountName, type: "select" },
+    { key: "type", label: "Transaction Details", value: (t) => `[${t.type}] ${t.name ?? ""}`.trim() },
+    // The free-text note against the entry — "NAVAGAM AGREEMENT", "ONLINE" — which is what tells
+    // one ₹5,000 withdrawal from another when reconciling.
+    { key: "description", label: "Description", value: (t) => t.note ?? "—" },
+    {
+      key: "withdrawal",
+      label: "Withdrawal",
+      value: (t) => (t.direction === "out" ? inr(t.amount) : "—"),
+      sortValue: (t) => (t.direction === "out" ? t.amount : 0),
+      type: "number",
+      align: "right",
+    },
+    {
+      key: "deposit",
+      label: "Deposit",
+      value: (t) => (t.direction === "in" ? inr(t.amount) : "—"),
+      sortValue: (t) => (t.direction === "in" ? t.amount : 0),
+      type: "number",
+      align: "right",
+    },
+    {
+      key: "balance",
+      label: "Balance",
+      value: (t) => inr(t.balance),
+      sortValue: (t) => t.balance,
+      type: "number",
+      align: "right",
+    },
+  ];
+
+  return (
+    <>
+      <div className="flex flex-wrap items-end justify-between gap-3 rounded-xl border border-gray-200 bg-white p-4">
+        <div className="flex flex-wrap gap-6">
+          <Stat label="Entries" value={String(rows.length)} />
+          <Stat label="Deposits" value={inr(inSum)} />
+          <Stat label="Withdrawals" value={inr(outSum)} />
+          <Stat label="Closing balance" value={inr(rows[0]?.balance ?? 0)} />
+        </div>
+        <label className="block">
+          <span className="mb-1 block text-[11px] font-medium tracking-wide text-gray-400 uppercase">Bank name</span>
+          <Select
+            value={picked}
+            onChange={setAccount}
+            className="min-w-[200px]"
+            options={[
+              { value: "all", label: "All accounts" },
+              ...accounts.map((a) => ({ value: a, label: a })),
+            ]}
+          />
+        </label>
+      </div>
+      <ReportTable
+        title={picked === "all" ? "Bank Statement" : `Bank Statement — ${picked}`}
+        subtitle={picked === "all" ? "Every cash and bank account" : undefined}
+        filename="bank-statement"
+        minWidth={980}
+        columns={columns}
+        rows={rows}
+      />
+    </>
+  );
+}
+
+function Stat({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <div className="text-xs text-gray-500">{label}</div>
+      <div className="mt-0.5 text-lg font-semibold text-gray-800">{value}</div>
+    </div>
+  );
+}
+
+/**
+ * The Sale / Purchase report as the client's own Vyapar prints it.
+ *
+ * Their statement carries the party's GSTIN and phone because it doubles as the list they reconcile
+ * against; ours had seven columns and neither, so it could not be used for the job. Which of these
+ * reach the paper is the print picker's business — the screen shows them all.
+ *
+ * One column from their print-out is deliberately absent: **Order No.** Nothing in this app links a
+ * bill back to the order it came from, so the column could only ever print blank, and a blank column
+ * on a statement reads as "this bill has no order" rather than "we do not record that".
+ */
+function txnReportColumns(id: "sale" | "purchase", parties: Party[]): ReportColumn<Invoice>[] {
+  const partyOf = (i: Invoice) => parties.find((p) => p.id === i.partyId);
+  return [
+    { key: "date", label: "Date", value: (i) => fmt(i.invoiceDate), sortValue: (i) => toIsoDate(i.invoiceDate ?? "") },
+    { key: "invoiceNo", label: "Invoice No.", value: (i) => fullInvoiceNo(i) },
+    { key: "party", label: "Party Name", value: (i) => i.partyName ?? "—" },
+    { key: "gstin", label: "GSTIN", value: (i) => partyOf(i)?.gstin ?? "—" },
+    { key: "phone", label: "Party Phone No.", value: (i) => partyOf(i)?.phone ?? "—" },
+    { key: "total", label: "Total", value: (i) => inr(i.total), sortValue: (i) => i.total, type: "number", align: "right" },
+    { key: "paymentType", label: "Payment Type", value: (i) => i.paymentType, type: "select" },
+    {
+      key: "received",
+      label: id === "sale" ? "Received" : "Paid",
+      value: (i) => inr(i.paidAmount),
+      sortValue: (i) => i.paidAmount,
+      type: "number",
+      align: "right",
+    },
+    { key: "balance", label: "Balance Due", value: (i) => inr(i.balance), sortValue: (i) => i.balance, type: "number", align: "right" },
+    { key: "status", label: "Payment Status", value: (i) => i.status, type: "select" },
+    { key: "user", label: "Entered By", value: (i) => i.createdByName ?? "—", type: "select", printOptional: true },
+    { key: "description", label: "Description", value: (i) => i.description ?? "—", printOptional: true },
+  ];
+}
+
+/** The item lines printed under each document, with its sub-total and round-off beneath them. */
+function txnReportDetail(itemById: Map<number, Item>): ReportLineDetail<Invoice> {
+  return {
+    label: "Item Details",
+    defaultOn: true,
+    head: ["#", "Item Name", "HSN / SAC", "Quantity", "Price / Unit", "GST", "Amount"],
+    alignRightFrom: 3,
+    rows: (i) =>
+      i.lines.map((l, n) => [
+        n + 1,
+        l.itemName,
+        l.hsn?.trim() || (l.itemId != null ? (itemById.get(l.itemId)?.hsn ?? "—") : "—"),
+        qty(l.quantity),
+        inr(l.rate),
+        l.taxPercent ? `${inr(l.taxAmount)} (${l.taxPercent}%)` : "—",
+        inr(l.amount),
+      ]),
+    footer: (i) => {
+      const out: [string, string][] = [["Sub Total", inr(i.subTotal)]];
+      if (i.discount) out.push(["Discount", `- ${inr(i.discount)}`]);
+      if (i.roundOff) out.push(["Round off", `${i.roundOff < 0 ? "- " : ""}${inr(Math.abs(i.roundOff))}`]);
+      out.push(["Total", inr(i.total)]);
+      return out;
+    },
+  };
 }
 
 function SummaryStrip({ stats, onDownload }: { stats: { label: string; value: string }[]; onDownload: () => void }) {
@@ -1317,32 +1515,47 @@ function ChartCard({ title, children }: { title: string; children: React.ReactEl
   );
 }
 
+/**
+ * The report currently on screen, so a table built from bare rows can still name its own PDF.
+ *
+ * `SimpleTable` is called from twenty-odd places with nothing but a head and rows; threading a
+ * title through every one of them to feed the print-out would be churn for no reading benefit.
+ */
+const ReportMetaContext = createContext<{ title: string; filename: string }>({
+  title: "Report",
+  filename: "report",
+});
+
+/**
+ * A report's table.
+ *
+ * Now a thin adapter over {@link ReportTable}, so every report — not only the handful rewritten
+ * with typed columns — gets per-column filters, sorting, a print-column picker and a preview.
+ * The client's point was that a report had less than the transaction list it was built from.
+ *
+ * The rows arrive already formatted ("₹1,23,456"), so sorting a money column has to look through
+ * the formatting: {@link sortableValue} pulls the number back out when a cell is one, and leaves
+ * anything else as text.
+ */
 function SimpleTable({ head, rows, alignRight = [] }: { head: string[]; rows: (string | number)[][]; alignRight?: number[] }) {
-  if (rows.length === 0) return <VyaparEmpty icon={FileText} title="Nothing in this range" hint="Adjust the date filter to see more." />;
-  return (
-    <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white">
-      <table className="w-full min-w-[720px] border-collapse text-sm">
-        <thead>
-          <tr className="border-b border-gray-100 bg-gray-50 text-left text-gray-500">
-            {head.map((h, i) => (
-              <th key={h} className={`px-4 py-2 font-medium ${alignRight.includes(i) ? "text-right" : ""}`}>{h}</th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((r, ri) => (
-            <tr key={ri} className="border-b border-gray-50 last:border-b-0 even:bg-gray-50/40">
-              {r.map((c, ci) => (
-                <td key={ci} className={`px-4 py-2.5 ${alignRight.includes(ci) ? "text-right font-medium text-gray-800" : "text-gray-600"}`}>
-                  {c}
-                </td>
-              ))}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
+  const meta = useContext(ReportMetaContext);
+  const columns: ReportColumn<(string | number)[]>[] = head.map((h, i) => ({
+    key: `c${i}`,
+    label: h,
+    value: (r) => r[i] ?? "",
+    sortValue: (r) => sortableValue(r[i]),
+    type: alignRight.includes(i) ? "number" : "text",
+    align: alignRight.includes(i) ? "right" : "left",
+  }));
+  return <ReportTable title={meta.title} filename={meta.filename} columns={columns} rows={rows} />;
+}
+
+/** "₹1,23,456.78" → 123456.78; "- ₹500" → -500; anything not a number is left as text. */
+function sortableValue(cell: string | number | undefined): string | number {
+  if (typeof cell === "number") return cell;
+  const raw = String(cell ?? "");
+  const cleaned = raw.replace(/[₹,\s]/g, "").replace(/^−/, "-");
+  return cleaned !== "" && !Number.isNaN(Number(cleaned)) ? Number(cleaned) : raw;
 }
 
 function fmt(iso: string | null): string {

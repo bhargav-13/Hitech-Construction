@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useDiscardGuard } from "@/lib/formDirty";
 import { useRouter } from "next/navigation";
 import { AppShell } from "@/components/AppShell";
 import * as api from "@/lib/api";
@@ -203,7 +204,9 @@ export default function ProjectsPage() {
 
 function NewProjectDialog({ onClose }: { onClose: () => void }) {
   const router = useRouter();
-  const { closing, requestClose } = useDrawerDismiss(onClose);
+  // A typed-in project name and address shouldn't go to a mis-aimed click on the backdrop.
+  const { panelRef, confirmDiscard } = useDiscardGuard();
+  const { closing, requestClose } = useDrawerDismiss(onClose, undefined, confirmDiscard);
   const [name, setName] = useState("");
   const [address, setAddress] = useState("");
   const [city, setCity] = useState("");
@@ -243,6 +246,7 @@ function NewProjectDialog({ onClose }: { onClose: () => void }) {
         onClick={requestClose}
       />
       <div
+        ref={panelRef}
         className={`relative w-full max-w-md overflow-hidden rounded-2xl bg-white shadow-2xl ${
           closing ? "animate-fade-out-scale" : "animate-[fade-in-scale_.15s_ease-out]"
         }`}

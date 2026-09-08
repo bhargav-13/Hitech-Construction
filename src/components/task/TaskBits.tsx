@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Check, ChevronDown, Plus, Search, UserRound, X } from "lucide-react";
 import { projectAvatarColor } from "@/lib/projectHelpers";
-import { PRIORITY_STYLE, STATUS_STYLE, TASK_PRIORITIES, TASK_STATUSES } from "@/lib/taskTypes";
+import { ASSIGNABLE_TASK_STATUSES, PRIORITY_STYLE, STATUS_STYLE, TASK_PRIORITIES } from "@/lib/taskTypes";
 import type { TaskPriority, TaskStatus } from "@/lib/taskTypes";
 
 /**
@@ -105,6 +105,16 @@ export function PriorityChip({ priority }: { priority: TaskPriority }) {
 }
 
 /**
+ * What this task's status menu offers: the assignable statuses, with the task's own added when it is
+ * in a derived state (Awaiting Approval) that nobody may pick.
+ */
+function statusChoices(status: TaskStatus): TaskStatus[] {
+  return (ASSIGNABLE_TASK_STATUSES as string[]).includes(status)
+    ? ASSIGNABLE_TASK_STATUSES
+    : [status, ...ASSIGNABLE_TASK_STATUSES];
+}
+
+/**
  * Chip that doubles as an inline picker — lets users change status straight from the list/main view
  * without opening the task. A transparent native <select> overlays the chip for accessible keyboard
  * + click behaviour; the chip underneath provides the styling.
@@ -133,7 +143,9 @@ export function StatusSelect({
           {status}
         </>
       }
-      options={TASK_STATUSES.map((o) => ({
+      // Awaiting Approval is never offered as a choice, but a task already in it must still show
+      // its own status in the chip's menu rather than appearing to be one of the options below.
+      options={statusChoices(status).map((o) => ({
         value: o,
         node: (
           <>

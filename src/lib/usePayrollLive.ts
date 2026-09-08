@@ -404,7 +404,11 @@ export function useReimbursements() {
     await refresh();
     return created;
   };
-  const decide = async (id: number, action: "APPROVE" | "REJECT" | "PAY", approvedAmount?: number) => {
+  const decide = async (
+    id: number,
+    action: "APPROVE" | "REJECT" | "PAY" | "REOPEN",
+    approvedAmount?: number,
+  ) => {
     const decided = await api.decideReimbursementApi(id, { action, approvedAmount });
     await refresh();
     return decided;

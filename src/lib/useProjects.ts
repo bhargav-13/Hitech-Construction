@@ -6,6 +6,9 @@ import * as api from "./api";
 export interface ProjectOption {
   id: string;
   name: string;
+  /** The site's address, for forms that deliver somewhere — a purchase order's Ship To. */
+  address: string | null;
+  city: string | null;
 }
 
 /**
@@ -21,7 +24,11 @@ export function useProjects(): { projects: ProjectOption[]; loading: boolean } {
     (async () => {
       try {
         const res = await api.getProjects({ page: 0, size: 200 });
-        if (!cancelled) setProjects(res.content.map((p) => ({ id: String(p.id), name: p.name })));
+        if (!cancelled) {
+          setProjects(
+            res.content.map((p) => ({ id: String(p.id), name: p.name, address: p.address, city: p.city })),
+          );
+        }
       } catch {
         if (!cancelled) setProjects([]);
       } finally {

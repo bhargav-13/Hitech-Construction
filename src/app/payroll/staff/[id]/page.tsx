@@ -6,6 +6,7 @@ import { useParams, useRouter } from "next/navigation";
 import { PayrollShell } from "@/components/payroll/PayrollShell";
 import { Spinner } from "@/components/Spinner";
 import { Select } from "@/components/Select";
+import { CreatableSelect } from "@/components/CreatableSelect";
 import { DatePicker } from "@/components/DatePicker";
 import { profileProgress } from "@/lib/payrollApi";
 import { useShifts, useHolidayPolicies, useLeavePolicies, usePayrollProfiles } from "@/lib/usePayrollSetup";
@@ -136,6 +137,7 @@ function WizardForm({
   const [leavePolicyId, setLeavePolicyId] = useState<string>(existing?.leavePolicyId != null ? String(existing.leavePolicyId) : leavePolicies[0] ? String(leavePolicies[0].id) : "");
   const [monthlyCtc, setMonthlyCtc] = useState(existing?.salary.monthlyCtc ?? 0);
   const [workType, setWorkType] = useState<"DAILY" | "HOURLY" | "PIECE">(existing?.salary.workType ?? "DAILY");
+  const [salaryBasis, setSalaryBasis] = useState<"SHIFT" | "PUNCH">(existing?.salary.salaryBasis ?? "SHIFT");
   const [workRate, setWorkRate] = useState(existing?.salary.workRate ?? 0);
   // Dynamic salary components (earnings + deductions). Seeded from the saved profile, else the
   // org-wide default template (fetched below), else the built-in defaults.
@@ -237,6 +239,7 @@ function WizardForm({
       hra: isWork ? 0 : hra,
       otherAllowances: isWork ? 0 : (Number(monthlyCtc) || 0) - basic - hra,
       workType: isWork ? workType : null,
+      salaryBasis,
       workRate: isWork ? Number(workRate) || 0 : 0,
       // Legacy booleans kept in sync from the components (other code still reads them).
       pf: hasDeduction(/pf|provident/i),
@@ -258,7 +261,7 @@ function WizardForm({
   const progress = useMemo(
     () => profileProgress(buildProfile()),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [category, designation, joiningDate, shiftId, holidayPolicyId, leavePolicyId, monthlyCtc, workRate, workType, components, documents, bankAccount, ifsc, bankName]
+    [category, designation, joiningDate, shiftId, holidayPolicyId, leavePolicyId, monthlyCtc, workRate, workType, salaryBasis, components, documents, bankAccount, ifsc, bankName]
   );
 
   async function persist(): Promise<boolean> {
@@ -371,7 +374,14 @@ function WizardForm({
               </div>
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <Field label="Designation">
-                  <Select value={designation} onChange={setDesignation} options={DESIGNATIONS.map((d) => ({ value: d, label: d }))} />
+                  <CreatableSelect
+                    value={designation}
+                    onChange={setDesignation}
+                    masterKey="payroll.designation"
+                    builtIns={DESIGNATIONS}
+                    createLabel="Add designation"
+                    placeholder="Pick a designation"
+                  />
                 </Field>
                 <Field label="Joining Date">
                   <DatePicker value={joiningDate} onChange={setJoiningDate} placeholder="Joining date" />
@@ -391,6 +401,11 @@ function WizardForm({
 
           {step === 2 && (
             <div className="space-y-4">
+              <SalaryBasisField
+                value={salaryBasis}
+                onChange={setSalaryBasis}
+                shiftHours={shifts.find((sh) => String(sh.id) === shiftId)?.fullDayHours ?? null}
+              />
               {isWork ? (
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   <Field label="Work Type">
@@ -531,6 +546,71 @@ function WizardForm({
         </div>
       </div>
     </PayrollShell>
+  );
+}
+
+/**
+ * How this member's days turn into pay.
+ *
+ * Payroll counts marked days, which is right for someone on a fixed shift and wrong for site staff
+ * whose hours vary — a day marked Present pays the same whether they were there for ten hours or
+ * two. Choosing "Punch difference" values a worked day at the hours between their punch-in and
+ * punch-out instead. Leave and week-offs stay whole days on either setting; nobody punches on a
+ * day off, and reading that as zero hours would cancel the leave the policy just granted.
+ */
+function SalaryBasisField({
+  value,
+  onChange,
+  shiftHours,
+}: {
+  value: "SHIFT" | "PUNCH";
+  onChange: (v: "SHIFT" | "PUNCH") => void;
+  shiftHours: number | null;
+}) {
+  const options = [
+    {
+      key: "PUNCH" as const,
+      title: "Punch difference",
+      hint: shiftHours
+        ? `A day is worth its worked hours out of ${shiftHours}.`
+        : "A day is worth its worked hours out of the shift length.",
+    },
+    { key: "SHIFT" as const, title: "Shift wise", hint: "A day marked Present is a full day's pay." },
+  ];
+  return (
+    <div className="rounded-xl border border-gray-200 p-3">
+      <span className="mb-2 block text-xs font-medium text-gray-500">Salary to be calculated by</span>
+      <div className="grid gap-2 sm:grid-cols-2">
+        {options.map((o) => (
+          <button
+            key={o.key}
+            type="button"
+            onClick={() => onChange(o.key)}
+            className={`rounded-lg border px-3 py-2.5 text-left transition-colors duration-150 ${
+              value === o.key ? "border-brand-accent bg-cyan-50/60" : "border-gray-200 hover:bg-gray-50"
+            }`}
+          >
+            <span className="flex items-center gap-2">
+              <span
+                className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full border ${
+                  value === o.key ? "border-brand-accent" : "border-gray-300"
+                }`}
+              >
+                {value === o.key && <span className="h-2 w-2 rounded-full bg-brand-accent" />}
+              </span>
+              <span className="text-sm font-medium text-gray-800">{o.title}</span>
+            </span>
+            <span className="mt-1 block pl-6 text-xs text-gray-500">{o.hint}</span>
+          </button>
+        ))}
+      </div>
+      {value === "PUNCH" && !shiftHours && (
+        <p className="mt-2 text-xs text-amber-700">
+          Assign a shift on the previous step — the shift&apos;s full-day hours are what a punched day
+          is measured against.
+        </p>
+      )}
+    </div>
   );
 }
 

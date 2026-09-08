@@ -14,6 +14,39 @@ import { ArrowLeft, CalendarDays, Pencil, Plus, Trash2, X } from "lucide-react";
 
 const totalLeaves = (types: LeaveTypeResponse[]) => types.reduce((a, t) => a + (Number(t.annualCount) || 0), 0);
 
+/**
+ * How many days a cycle is worth, and how many of them land in a month.
+ *
+ * The counts on a policy are per *cycle*, and the cycle is either a year or a month — so a flat
+ * "30 days" said nothing about which, and read as a monthly allowance on a yearly policy. What
+ * anyone actually wants to know is the monthly figure, because that is what accrues into a balance
+ * and what a part-year joiner is entitled to.
+ *
+ * A type that accrues MONTHLY contributes its count spread over the cycle; one granted ALL_AT_ONCE
+ * arrives whole at the start and contributes nothing per month, which is why the two are added
+ * separately rather than dividing the total by twelve.
+ */
+const CYCLE_MONTHS: Record<LeavePolicyResponse["cycle"], number> = { YEARLY: 12, MONTHLY: 1 };
+
+function leaveTotals(types: LeaveTypeResponse[], cycle: LeavePolicyResponse["cycle"]) {
+  const months = CYCLE_MONTHS[cycle];
+  const perCycle = totalLeaves(types);
+  const perMonth = types.reduce(
+    (a, t) => a + (t.accrual === "MONTHLY" ? (Number(t.annualCount) || 0) / months : 0),
+    0,
+  );
+  return { perCycle, perMonth, months, upfront: perCycle - perMonth * months };
+}
+
+/** 2.5 → "2.5", 1 → "1" — no trailing ".00" on counts that are whole, which most are. */
+const days = (n: number) => n.toLocaleString("en-IN", { maximumFractionDigits: 2 });
+
+/** The per-month rate of one leave type, or null when it is granted in one go. */
+function monthlyRate(t: LeaveTypeResponse, cycle: LeavePolicyResponse["cycle"]): number | null {
+  if (t.accrual !== "MONTHLY") return null;
+  return (Number(t.annualCount) || 0) / CYCLE_MONTHS[cycle];
+}
+
 export default function LeavePolicyPage() {
   const { leavePolicies, loading, error, create, update, remove } = useLeavePolicies();
   const [editing, setEditing] = useState<LeavePolicyResponse | null>(null);
@@ -66,7 +99,13 @@ export default function LeavePolicyPage() {
                     <div className="flex h-9 w-9 items-center justify-center rounded-full bg-cyan-50 text-brand-accent"><CalendarDays size={16} /></div>
                     <div>
                       <div className="font-medium text-gray-800">{p.name}</div>
-                      <div className="text-xs text-gray-400">{p.cycle === "YEARLY" ? "Yearly" : "Monthly"} · {totalLeaves(p.types)} days / cycle</div>
+                      <div className="text-xs text-gray-400">
+                        {p.cycle === "YEARLY" ? "Yearly" : "Monthly"} · {days(leaveTotals(p.types, p.cycle).perCycle)} days /{" "}
+                        {p.cycle === "YEARLY" ? "year" : "month"}
+                        {p.cycle === "YEARLY" && leaveTotals(p.types, p.cycle).perMonth > 0 && (
+                          <> · {days(leaveTotals(p.types, p.cycle).perMonth)} / month</>
+                        )}
+                      </div>
                     </div>
                   </div>
                   <div onClick={(e) => e.stopPropagation()}>
@@ -94,9 +133,15 @@ export default function LeavePolicyPage() {
                   </div>
                 </div>
                 <div className="mt-3 flex flex-wrap gap-1.5">
-                  {p.types.map((t) => (
-                    <span key={t.name} className="rounded-md bg-gray-100 px-1.5 py-0.5 text-[11px] text-gray-500">{t.name}: {t.annualCount}</span>
-                  ))}
+                  {p.types.map((t) => {
+                    const rate = monthlyRate(t, p.cycle);
+                    return (
+                      <span key={t.name} className="rounded-md bg-gray-100 px-1.5 py-0.5 text-[11px] text-gray-500">
+                        {t.name}: {t.annualCount}
+                        {rate != null && p.cycle === "YEARLY" && <span className="text-gray-400"> ({days(rate)}/mo)</span>}
+                      </span>
+                    );
+                  })}
                 </div>
               </div>
             ))}
@@ -127,6 +172,8 @@ function LeavePolicyDrawer({
   const [types, setTypes] = useState<LeaveTypeResponse[]>(existing?.types ?? [{ name: "Casual Leave", annualCount: 12, accrual: "MONTHLY", paid: true }]);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+
+  const totals = leaveTotals(types, cycle);
 
   const addRow = () => setTypes((t) => [...t, { name: "", annualCount: 0, accrual: "ALL_AT_ONCE", paid: true }]);
   const updateRow = (i: number, patch: Partial<LeaveTypeResponse>) => setTypes((t) => t.map((row, idx) => (idx === i ? { ...row, ...patch } : row)));
@@ -163,9 +210,25 @@ function LeavePolicyDrawer({
         </div>
 
         <div className="rounded-xl border border-gray-200 p-3">
-          <div className="mb-2 flex items-center justify-between">
-            <span className="text-sm font-semibold text-gray-800">Leave Types · {totalLeaves(types)} days</span>
-            <button type="button" onClick={addRow} className="flex items-center gap-1 text-xs font-medium text-brand-accent hover:underline">
+          <div className="mb-2 flex items-start justify-between gap-3">
+            <div>
+              <span className="text-sm font-semibold text-gray-800">
+                Leave Types · {days(totals.perCycle)} days / {cycle === "YEARLY" ? "year" : "month"}
+              </span>
+              {/* The figure people actually plan against, spelled out rather than left to be worked
+                  out from twelve rows of counts and accrual settings. */}
+              <p className="mt-0.5 text-xs text-gray-500">
+                {totals.perMonth > 0 ? (
+                  <>
+                    <span className="font-medium text-gray-700">{days(totals.perMonth)} days accrue each month</span>
+                    {totals.upfront > 0 && <>, plus {days(totals.upfront)} granted up front</>}
+                  </>
+                ) : (
+                  <>All {days(totals.perCycle)} days are granted up front — nothing accrues monthly.</>
+                )}
+              </p>
+            </div>
+            <button type="button" onClick={addRow} className="mt-0.5 flex shrink-0 items-center gap-1 text-xs font-medium text-brand-accent hover:underline">
               <Plus size={13} /> Add type
             </button>
           </div>
@@ -173,11 +236,23 @@ function LeavePolicyDrawer({
             {types.map((t, i) => (
               <div key={i} className="flex items-center gap-2">
                 <input value={t.name} onChange={(e) => updateRow(i, { name: e.target.value })} className="input flex-1" placeholder="Leave type" />
-                <input type="number" value={t.annualCount} onChange={(e) => updateRow(i, { annualCount: Number(e.target.value) })} className="input w-20 shrink-0" placeholder="Days" title="Days per cycle" />
+                <div className="relative w-20 shrink-0">
+                  <input
+                    type="number"
+                    value={t.annualCount}
+                    onChange={(e) => updateRow(i, { annualCount: Number(e.target.value) })}
+                    className="input w-full"
+                    placeholder="Days"
+                    title={`Days per ${cycle === "YEARLY" ? "year" : "month"}`}
+                  />
+                </div>
                 <select value={t.accrual} onChange={(e) => updateRow(i, { accrual: e.target.value as LeaveTypeResponse["accrual"] })} className="input w-36 shrink-0">
                   <option value="ALL_AT_ONCE">All at once</option>
                   <option value="MONTHLY">Monthly</option>
                 </select>
+                <span className="w-16 shrink-0 text-right text-[11px] whitespace-nowrap text-gray-400">
+                  {monthlyRate(t, cycle) != null ? `${days(monthlyRate(t, cycle)!)} / mo` : "—"}
+                </span>
                 <button
                   type="button"
                   onClick={() => updateRow(i, { paid: !t.paid })}

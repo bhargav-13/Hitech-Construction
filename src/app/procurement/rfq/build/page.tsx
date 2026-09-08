@@ -5,11 +5,15 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Pencil, Plus, Search, Trash2, X } from "lucide-react";
 import { ProcurementShell } from "@/components/procurement/ProcurementShell";
 import { MaterialLibrary } from "@/components/procurement/MaterialLibrary";
-import { BillShipDialog } from "@/components/procurement/BillShipDialog";
+import { BillShipDialog } from "@/components/BillShipDialog";
 import { SendRfqDialog } from "@/components/procurement/SendRfqDialog";
+import { PartyDialog } from "@/components/vyapar/PartyDialog";
 import { Select } from "@/components/Select";
+import { UnitSelect } from "@/components/procurement/UnitSelect";
+import { TypeaheadPicker } from "@/components/vyapar/TypeaheadPicker";
 import { DatePicker } from "@/components/DatePicker";
 import { Spinner } from "@/components/Spinner";
+import { inr, qty as formatQty } from "@/lib/format";
 import { useProjects } from "@/lib/useProjects";
 import { useVyaparProjectId } from "@/lib/projectScope";
 import * as procurement from "@/lib/procurementApi";
@@ -38,8 +42,6 @@ export default function RfqBuilderPage() {
     </Suspense>
   );
 }
-
-const UNITS = ["Nos", "Bag", "Kg", "MT", "Mtr", "Sqm", "Cum", "Litre", "Set", "Box", "Tonne"];
 
 type DraftLine = {
   id?: number;
@@ -92,6 +94,9 @@ function Builder() {
   const [libraryOpen, setLibraryOpen] = useState(false);
   const [addrOpen, setAddrOpen] = useState(false);
   const [supplierSearch, setSupplierSearch] = useState("");
+  const [supplierListOpen, setSupplierListOpen] = useState(false);
+  /** Non-null while the inline "add supplier" form is open; holds the text already typed. */
+  const [creatingSupplier, setCreatingSupplier] = useState<string | null>(null);
 
   const [items, setItems] = useState<Item[]>([]);
   const [parties, setParties] = useState<Party[]>([]);
@@ -191,7 +196,7 @@ function Builder() {
         const rank = (p: Party) => (p.partyType === "SUPPLIER" ? 0 : 1);
         return rank(a) - rank(b) || a.name.localeCompare(b.name);
       })
-      .slice(0, 8);
+      .slice(0, 40);
   }, [parties, supplierIds, supplierSearch]);
 
   function setLine(i: number, patch: Partial<DraftLine>) {
@@ -402,11 +407,30 @@ function Builder() {
                   <tr key={i} className="border-b border-gray-50 align-top last:border-b-0">
                     <td className="px-3 py-2 text-xs text-gray-400">{i + 1}</td>
                     <td className="px-3 py-2">
-                      <input
+                      {/* Free text stays allowed — half of what a site enquires about has never
+                          been a catalogue item — but picking one fills the unit, HSN and budget
+                          rate that would otherwise be retyped from the item master by hand. */}
+                      <TypeaheadPicker<Item>
                         value={l.itemName}
-                        onChange={(e) => setLine(i, { itemName: e.target.value, itemId: null })}
-                        placeholder="Item name"
-                        className="w-full rounded-md border border-gray-200 px-2 py-1 text-sm outline-none focus:border-cyan-500"
+                        onChange={(text) => setLine(i, { itemName: text, itemId: null })}
+                        rows={items}
+                        getKey={(it) => it.id}
+                        getLabel={(it) => it.name}
+                        columns={[
+                          { label: "Purchase Price", get: (it) => inr(it.purchasePrice) },
+                          { label: "Stock", get: (it) => formatQty(it.stockQty), align: "right" },
+                        ]}
+                        onPick={(it) =>
+                          setLine(i, {
+                            itemId: it.id,
+                            itemName: it.name,
+                            specification: it.description ?? "",
+                            hsnCode: it.hsn ?? "",
+                            unit: it.unit || "Nos",
+                            budgetRate: it.purchasePrice ? String(it.purchasePrice) : "",
+                          })
+                        }
+                        placeholder="Item name — or type anything"
                       />
                       {/* The brand/spec line their enquiries carry under the item name. */}
                       <input
@@ -432,13 +456,7 @@ function Builder() {
                           onChange={(e) => setLine(i, { quantity: Number(e.target.value) })}
                           className="w-16 rounded-md border border-gray-200 px-2 py-1 text-right text-sm outline-none focus:border-cyan-500"
                         />
-                        <Select
-                          value={l.unit}
-                          onChange={(v) => setLine(i, { unit: v })}
-                          size="sm"
-                          className="w-20"
-                          options={UNITS.map((u) => ({ value: u, label: u }))}
-                        />
+                        <UnitSelect value={l.unit} onChange={(v) => setLine(i, { unit: v })} className="w-24" />
                       </div>
                     </td>
                     <td className="px-3 py-2">
@@ -497,19 +515,27 @@ function Builder() {
                 <Search size={15} className="text-gray-400" />
                 <input
                   value={supplierSearch}
-                  onChange={(e) => setSupplierSearch(e.target.value)}
+                  onChange={(e) => {
+                    setSupplierSearch(e.target.value);
+                    setSupplierListOpen(true);
+                  }}
+                  onFocus={() => setSupplierListOpen(true)}
+                  // Blur lands before the option's click, so closing is deferred a tick.
+                  onBlur={() => setTimeout(() => setSupplierListOpen(false), 120)}
                   placeholder="Select supplier"
                   className="w-full bg-transparent text-sm outline-none"
                 />
               </div>
-              {supplierSearch && supplierOptions.length > 0 && (
-                <div className="absolute z-20 mt-1 w-full overflow-hidden rounded-lg border border-gray-200 bg-white shadow-lg">
+              {supplierListOpen && (
+                <div className="absolute z-20 mt-1 max-h-72 w-full overflow-auto rounded-lg border border-gray-200 bg-white shadow-lg">
                   {supplierOptions.map((p) => (
                     <button
                       key={p.id}
+                      onMouseDown={(e) => e.preventDefault()}
                       onClick={() => {
                         setSupplierIds((prev) => [...prev, p.id]);
                         setSupplierSearch("");
+                        setSupplierListOpen(false);
                       }}
                       className="flex w-full items-center justify-between px-3 py-2 text-left text-sm transition-colors duration-150 hover:bg-cyan-50"
                     >
@@ -517,6 +543,24 @@ function Builder() {
                       <span className="text-xs text-gray-400">{p.phone ?? ""}</span>
                     </button>
                   ))}
+                  {supplierOptions.length === 0 && (
+                    <p className="px-3 py-3 text-sm text-gray-400">
+                      {supplierSearch.trim() ? "No party matches." : "Every party is already on this enquiry."}
+                    </p>
+                  )}
+                  {/* A supplier nobody has entered yet is common enough that sending the buyer off
+                      to Vyapar → Parties — losing the half-built enquiry — is a real cost. */}
+                  <button
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => {
+                      setSupplierListOpen(false);
+                      setCreatingSupplier(supplierSearch.trim());
+                    }}
+                    className="sticky bottom-0 flex w-full items-center gap-1.5 border-t border-gray-100 bg-white px-3 py-2 text-left text-sm font-medium text-brand-accent transition-colors duration-150 hover:bg-cyan-50"
+                  >
+                    <Plus size={13} className="shrink-0" />
+                    {supplierSearch.trim() ? `Add "${supplierSearch.trim()}" as a supplier` : "Add new supplier"}
+                  </button>
                 </div>
               )}
             </div>
@@ -626,11 +670,26 @@ function Builder() {
       {addrOpen && (
         <BillShipDialog
           value={addr}
-          projectName={projects.find((p) => String(p.id) === projectId)?.name}
+          projects={projects}
+          projectId={projectId}
           onClose={() => setAddrOpen(false)}
           onSave={(next) => {
             setAddr(next);
             setAddrOpen(false);
+          }}
+        />
+      )}
+
+      {creatingSupplier !== null && (
+        <PartyDialog
+          defaultType="SUPPLIER"
+          initialName={creatingSupplier || undefined}
+          onClose={() => setCreatingSupplier(null)}
+          onSaved={(created) => {
+            setParties((prev) => [created, ...prev]);
+            setSupplierIds((prev) => (prev.includes(created.id) ? prev : [...prev, created.id]));
+            setSupplierSearch("");
+            setCreatingSupplier(null);
           }}
         />
       )}

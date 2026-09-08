@@ -9,6 +9,7 @@ import { ItemDialog } from "@/components/vyapar/ItemDialog";
 import { ItemMasterDialog } from "@/components/vyapar/ItemMasterDialog";
 import { PartyDialog } from "@/components/vyapar/PartyDialog";
 import { LinkPaymentDialog } from "@/components/vyapar/LinkPaymentDialog";
+import { BillShipDialog, type BillShip } from "@/components/BillShipDialog";
 // Aliased: `calc` below uses a local `qty` accumulator, and shadowing the formatter would be a trap.
 import { inr, qty as formatQty } from "@/lib/format";
 import { usePaymentTypeOptions, useBankAccountResolver } from "@/lib/bankScope";
@@ -192,6 +193,11 @@ export function InvoiceBuilder({
   const isReturn = docType === "SALE_RETURN" || docType === "PURCHASE_RETURN";
   // Purchase-family docs pick suppliers, not customers.
   const isSupplierSide = docType === "PURCHASE" || docType === "PURCHASE_ORDER" || docType === "PURCHASE_RETURN";
+  // A purchase order charges no tax, so it has no place of supply to state; what it does need is
+  // the two addresses — bill here, deliver there. The client asked for exactly that swap.
+  const isPurchaseOrder = docType === "PURCHASE_ORDER";
+  const showStateOfSupply = !isPurchaseOrder;
+  const showBillShip = isPurchaseOrder;
   const noPayment = isQuote || isOrder || isChallan;
   // Vyapar drives purchase paid/unpaid from a "Paid" amount, not a cash/credit toggle.
   const noToggle = noPayment || isReturn || isPurchase;
@@ -267,6 +273,21 @@ export function InvoiceBuilder({
   );
   const [dueDate, setDueDate] = useState(existing?.dueDate ?? prefill?.deliveryDate ?? "");
   const [stateOfSupply, setStateOfSupply] = useState(existing?.stateOfSupply ?? "");
+  /**
+   * Bill To / Ship To — shown on a purchase order, where they are two different places: the bill
+   * comes to the office, the material goes to a site. Every other document type has one party and
+   * one address, so the panel stays out of their way.
+   */
+  const [addr, setAddr] = useState<BillShip>({
+    billToName: existing?.billToName ?? "",
+    billToAddress: existing?.billToAddress ?? "",
+    billToGstin: existing?.billToGstin ?? "",
+    shipToName: existing?.shipToName ?? "",
+    shipToAddress: existing?.shipToAddress ?? "",
+    shipToGstin: existing?.shipToGstin ?? "",
+    shipSameAsBill: false,
+  });
+  const [addrOpen, setAddrOpen] = useState(false);
   const [terms, setTerms] = useState(
     existing?.terms ?? prefill?.terms ?? "Thank you for doing business with us."
   );
@@ -364,7 +385,7 @@ export function InvoiceBuilder({
    * means an edit that's typed and then undone correctly reads as clean.
    */
   const signature = JSON.stringify({
-    partyId, selectedProjectId, invoicePrefix, invoiceNo, invoiceDate, dueDate, stateOfSupply,
+    partyId, selectedProjectId, invoicePrefix, invoiceNo, invoiceDate, dueDate, stateOfSupply, addr,
     terms, notes, discountPercent, discountAmount, roundOffOn, priceHasTax, received, isCash,
     paymentMode, paymentReference, receiveOn, partyText, lines,
     description, imageDataUrl, documentName, documentDataUrl,
@@ -532,7 +553,20 @@ export function InvoiceBuilder({
         // Only meaningful on a cash bill with no party — otherwise the party carries the address.
         billingName: !partyId && partyText.trim() ? partyText.trim() : null,
         billingAddress: !partyId && billingAddress.trim() ? billingAddress.trim() : null,
-        stateOfSupply: stateOfSupply || null,
+        // Place of supply decides IGST vs CGST/SGST on a sale. A purchase order is not a tax
+        // document — no tax is charged by it — so the field is not shown there and not sent.
+        // A prefilled form was opened from another module's screen — an RFQ award or a
+        // subcontractor bill. Stamp where it came from so that module can list its own documents
+        // rather than the firm's entire purchase ledger. Editing later never clears it.
+        sourceModule: prefill ? "PROCUREMENT" : undefined,
+        sourceRef: prefill?.rfqNo ?? undefined,
+        stateOfSupply: showStateOfSupply ? stateOfSupply || null : null,
+        billToName: showBillShip ? addr.billToName.trim() || null : null,
+        billToAddress: showBillShip ? addr.billToAddress.trim() || null : null,
+        billToGstin: showBillShip ? addr.billToGstin.trim() || null : null,
+        shipToName: showBillShip ? addr.shipToName.trim() || null : null,
+        shipToAddress: showBillShip ? addr.shipToAddress.trim() || null : null,
+        shipToGstin: showBillShip ? addr.shipToGstin.trim() || null : null,
         terms: terms || null,
         notes: notes || null,
         description: description.trim() || null,
@@ -844,14 +878,32 @@ export function InvoiceBuilder({
                 </Field>
               )}
             </div>
-            <Field label="State of supply">
-              <Select
-                value={stateOfSupply}
-                onChange={setStateOfSupply}
-                placeholder="Select"
-                options={[{ value: "", label: "Select" }, ...STATES_OF_SUPPLY.map((s) => ({ value: s, label: s }))]}
-              />
-            </Field>
+            {showStateOfSupply && (
+              <Field label="State of supply">
+                <Select
+                  value={stateOfSupply}
+                  onChange={setStateOfSupply}
+                  placeholder="Select"
+                  options={[{ value: "", label: "Select" }, ...STATES_OF_SUPPLY.map((s) => ({ value: s, label: s }))]}
+                />
+              </Field>
+            )}
+            {showBillShip && (
+              <Field label="Bill To / Ship To">
+                <button
+                  type="button"
+                  onClick={() => setAddrOpen(true)}
+                  className="flex w-full items-center justify-between rounded-lg border border-gray-200 px-3 py-2 text-left text-sm transition-colors duration-150 hover:border-brand-accent"
+                >
+                  <span className="min-w-0 truncate text-gray-700">
+                    {addr.shipToName || addr.billToName || <span className="text-gray-400">Not set</span>}
+                  </span>
+                  <span className="shrink-0 text-xs font-medium text-brand-accent">
+                    {addr.billToName || addr.shipToName ? "View / edit" : "+ Add"}
+                  </span>
+                </button>
+              </Field>
+            )}
           </div>
         </div>
 
@@ -1390,6 +1442,19 @@ export function InvoiceBuilder({
             onPartyCreated?.(saved);
             pickParty(saved);
             setCreatingParty(null);
+          }}
+        />
+      )}
+
+      {addrOpen && (
+        <BillShipDialog
+          value={addr}
+          projects={projects}
+          projectId={selectedProjectId}
+          onClose={() => setAddrOpen(false)}
+          onSave={(next) => {
+            setAddr(next);
+            setAddrOpen(false);
           }}
         />
       )}

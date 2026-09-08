@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useDiscardGuard } from "@/lib/formDirty";
 import { PayrollShell } from "@/components/payroll/PayrollShell";
 import { Spinner } from "@/components/Spinner";
 import { Select } from "@/components/Select";
@@ -81,12 +82,15 @@ export default function OthersPage() {
 }
 
 function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
+  // Asks before throwing away a half-filled sheet — the backdrop used to close it outright.
+  const { panelRef, confirmDiscard } = useDiscardGuard();
+  const dismiss = () => confirmDiscard() && onClose();
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
-      <div className="max-h-[85vh] w-full max-w-3xl overflow-auto rounded-2xl bg-white p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={dismiss}>
+      <div ref={panelRef} className="max-h-[85vh] w-full max-w-3xl overflow-auto rounded-2xl bg-white p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
         <div className="mb-4 flex items-center justify-between">
           <h3 className="text-base font-semibold text-gray-800">{title}</h3>
-          <button onClick={onClose} aria-label="Close" className="rounded-md p-1.5 text-gray-400 hover:bg-gray-100"><X size={18} /></button>
+          <button onClick={dismiss} aria-label="Close" className="rounded-md p-1.5 text-gray-400 hover:bg-gray-100"><X size={18} /></button>
         </div>
         {children}
       </div>

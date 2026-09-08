@@ -1,12 +1,14 @@
 "use client";
 
-import { use, useMemo, useState } from "react";
+import { use, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, ArrowRight, Pencil, Plus, Receipt, Trash2, TriangleAlert, X } from "lucide-react";
 import { ProcurementShell } from "@/components/procurement/ProcurementShell";
 import { Spinner } from "@/components/Spinner";
 import { Select } from "@/components/Select";
+import { UnitSelect } from "@/components/procurement/UnitSelect";
+import { TypeaheadPicker } from "@/components/vyapar/TypeaheadPicker";
 import { DatePicker } from "@/components/DatePicker";
 import { useWorkOrder } from "@/lib/useWorkOrders";
 import { useProjects } from "@/lib/useProjects";
@@ -14,6 +16,7 @@ import { WORK_ORDER_STATUS_CLS } from "@/lib/procurementConfig";
 import { gstCodeForPercent } from "@/lib/gstRates";
 import { stashPoDraft, vyaparUnit } from "@/lib/poHandoff";
 import * as wo from "@/lib/workOrderApi";
+import * as vyapar from "@/lib/vyaparApi";
 import { inr } from "@/lib/format";
 
 /**
@@ -338,6 +341,7 @@ export default function WorkOrderDetailPage({ params }: { params: Promise<{ id: 
 
       {issuing && (
         <IssueDialog
+          workOrder={w}
           onClose={() => setIssuing(false)}
           onSave={async (body) => {
             await run(() => wo.saveSubconMaterial(w.id, body));
@@ -728,9 +732,52 @@ function BillDialog({
   );
 }
 
-function IssueDialog({ onClose, onSave }: { onClose: () => void; onSave: (body: wo.SubconMaterialInput) => void }) {
+/** One row of the material picker: an item from the catalogue, or one already on this order. */
+type MaterialChoice = { key: string; name: string; unit: string | null; hint: string };
+
+function IssueDialog({
+  workOrder,
+  onClose,
+  onSave,
+}: {
+  workOrder: wo.WorkOrder;
+  onClose: () => void;
+  onSave: (body: wo.SubconMaterialInput) => void;
+}) {
   const [itemName, setItemName] = useState("");
   const [unit, setUnit] = useState("Nos");
+  const [catalogue, setCatalogue] = useState<vyapar.Item[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    vyapar
+      .getItems()
+      .then((rows) => { if (!cancelled) setCatalogue(rows); })
+      // No catalogue is survivable: the box stays free text, which is all it was before.
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
+
+  /**
+   * What is already on this order first, then the whole catalogue.
+   *
+   * A return or a consumption entry names a material he was issued, and that is a handful of names
+   * rather than the firm's entire item master — so they are offered first, with what he still holds
+   * shown beside them.
+   */
+  const choices = useMemo<MaterialChoice[]>(() => {
+    const onOrder = workOrder.materialSummary.map((m) => ({
+      key: `wo:${m.itemName}`,
+      name: m.itemName,
+      unit: m.unit,
+      hint: `${m.inHand.toLocaleString("en-IN", { maximumFractionDigits: 3 })} in hand`,
+    }));
+    const seen = new Set(onOrder.map((m) => m.name.trim().toLowerCase()));
+    const rest = catalogue
+      .filter((it) => !seen.has(it.name.trim().toLowerCase()))
+      .map((it) => ({ key: `item:${it.id}`, name: it.name, unit: it.unit, hint: "" }));
+    return [...onOrder, ...rest];
+  }, [workOrder.materialSummary, catalogue]);
   const [movement, setMovement] = useState<wo.MaterialMovement>("ISSUE");
   const [quantity, setQuantity] = useState("");
   const [rate, setRate] = useState("");
@@ -743,11 +790,18 @@ function IssueDialog({ onClose, onSave }: { onClose: () => void; onSave: (body: 
     <Dialog title="Material to subcontractor" onClose={onClose}>
       <div className="grid gap-3 sm:grid-cols-2">
         <Field label="Material" required>
-          <input
+          <TypeaheadPicker<MaterialChoice>
             value={itemName}
-            onChange={(e) => setItemName(e.target.value)}
+            onChange={setItemName}
+            rows={choices}
+            getKey={(c) => c.key}
+            getLabel={(c) => c.name}
+            columns={[{ label: "On this order", get: (c) => c.hint, align: "right" }]}
+            onPick={(c) => {
+              setItemName(c.name);
+              if (c.unit) setUnit(c.unit);
+            }}
             placeholder="e.g. Cement OPC 53"
-            className="input"
             autoFocus
           />
         </Field>
@@ -766,11 +820,7 @@ function IssueDialog({ onClose, onSave }: { onClose: () => void; onSave: (body: 
           <input value={quantity} onChange={(e) => setQuantity(e.target.value)} inputMode="decimal" className="input" />
         </Field>
         <Field label="Unit">
-          <Select
-            value={unit}
-            onChange={setUnit}
-            options={["Nos", "Bag", "Kg", "MT", "Rmt", "Sqm", "Cum", "Litre"].map((u) => ({ value: u, label: u }))}
-          />
+          <UnitSelect value={unit} onChange={setUnit} size="md" />
         </Field>
         <Field label="Recovery rate">
           <input

@@ -1,9 +1,11 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { useDiscardGuard } from "@/lib/formDirty";
 import { PayrollShell, PayrollEmpty, StatCard } from "@/components/payroll/PayrollShell";
 import { Spinner } from "@/components/Spinner";
 import { usePayrollRuns, usePayrollRun } from "@/lib/usePayrollLive";
+import { usePayrollProfiles } from "@/lib/usePayrollSetup";
 import { ApiError, editPayslip } from "@/lib/api";
 import type { PayslipApi, UnmarkedDayPolicy } from "@/lib/api";
 import { Select } from "@/components/Select";
@@ -38,6 +40,12 @@ export default function PayrollRunPage() {
    * "Unpaid" and only marked days count.
    */
   const [unmarked, setUnmarked] = useState<UnmarkedDayPolicy>("PRESENT");
+  /**
+   * Payroll profiles, keyed by member, so a downloaded slip carries designation, joining date, PAN
+   * and bank account. Without them the slip prints a row of dashes where the employee's details
+   * belong, which is no use to anyone taking it to a bank.
+   */
+  const { profiles } = usePayrollProfiles();
 
   const step = (dir: 1 | -1) => {
     let m = monthIdx + dir, y = year;
@@ -263,7 +271,7 @@ export default function PayrollRunPage() {
                             <Pencil size={14} />
                           </button>
                         )}
-                        <button onClick={() => downloadPayslip(p, p.memberName)} title="Download payslip" className="rounded-md p-1.5 text-gray-400 transition-colors hover:bg-cyan-50 hover:text-brand-accent">
+                        <button onClick={() => downloadPayslip(p, p.memberName, { profile: profiles[p.userId] })} title="Download payslip" className="rounded-md p-1.5 text-gray-400 transition-colors hover:bg-cyan-50 hover:text-brand-accent">
                           <Download size={14} />
                         </button>
                       </div>
@@ -341,12 +349,16 @@ function EditPayslipModal({
     }
   }
 
+  // Retyped gross and deduction figures are exactly the work a stray backdrop click used to lose.
+  const { panelRef, confirmDiscard } = useDiscardGuard();
+  const dismiss = () => confirmDiscard() && onClose();
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
-      <div className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={dismiss}>
+      <div ref={panelRef} className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
         <div className="mb-4 flex items-center justify-between">
           <h3 className="text-base font-semibold text-gray-800">Edit payslip — {slip.memberName}</h3>
-          <button onClick={onClose} aria-label="Close" className="rounded-md p-1.5 text-gray-400 hover:bg-gray-100"><X size={18} /></button>
+          <button onClick={dismiss} aria-label="Close" className="rounded-md p-1.5 text-gray-400 hover:bg-gray-100"><X size={18} /></button>
         </div>
         {error && <div className="mb-3 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-600">{error}</div>}
         <div className="space-y-3">

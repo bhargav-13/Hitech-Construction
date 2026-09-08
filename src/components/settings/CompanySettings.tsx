@@ -2,9 +2,11 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Spinner } from "@/components/Spinner";
+import { Modal } from "@/components/Modal";
 import { apiRequest } from "@/lib/api";
+import { useAuthStore } from "@/lib/authStore";
 import { useCompanies, companyAccent, companyInitials, type Company } from "@/lib/companyScope";
-import { Check, ImageUp, Lock, Save, Search, Trash2, Users } from "lucide-react";
+import { Check, ImageUp, Lock, Plus, Save, Search, Trash2, Users } from "lucide-react";
 
 /**
  * Settings ▸ Companies — the letterhead for each firm the group trades as.
@@ -20,6 +22,8 @@ import { Check, ImageUp, Lock, Save, Search, Trash2, Users } from "lucide-react"
 export function CompanySettings() {
   const { companies, loading } = useCompanies();
   const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [adding, setAdding] = useState(false);
+  const canEdit = (useAuthStore((s) => s.user?.permissions) ?? []).includes("SETTINGS:EDIT");
   // Derived rather than synced in an effect: the list arrives asynchronously, and falling back to
   // the first company keeps a valid selection without a render pass that shows nothing.
   const selected = companies.find((c) => c.id === selectedId) ?? companies[0] ?? null;
@@ -32,7 +36,7 @@ export function CompanySettings() {
     );
   }
 
-  if (companies.length === 0) {
+  if (companies.length === 0 && !canEdit) {
     return (
       <div className="rounded-xl border border-dashed border-gray-300 bg-white p-8 text-center text-sm text-gray-500">
         No companies are set up for your account.
@@ -74,10 +78,106 @@ export function CompanySettings() {
             </button>
           );
         })}
+
+        {canEdit && (
+          <button
+            onClick={() => setAdding(true)}
+            className="flex w-full items-center justify-center gap-1.5 rounded-xl border-2 border-dashed border-gray-300 p-3 text-sm font-medium text-gray-600 transition-colors duration-150 hover:border-brand-accent hover:text-brand-accent"
+          >
+            <Plus size={15} /> New Company
+          </button>
+        )}
       </div>
 
-      <div className="min-w-0 flex-1">{selected && <CompanyForm key={selected.id} company={selected} />}</div>
+      <div className="min-w-0 flex-1">
+        {selected ? (
+          <CompanyForm key={selected.id} company={selected} />
+        ) : (
+          <div className="rounded-xl border border-dashed border-gray-300 bg-white p-8 text-center text-sm text-gray-500">
+            Add the first firm to start stamping its details on invoices.
+          </div>
+        )}
+      </div>
+
+      {adding && <NewCompanyModal onClose={() => setAdding(false)} />}
     </div>
+  );
+}
+
+/**
+ * Register another firm.
+ *
+ * Only the name is asked for. The rest of the letterhead is filled in on the form the moment the
+ * firm exists, and a modal that demanded a GSTIN before the company could be created would stop
+ * someone setting one up before the registration came through.
+ */
+function NewCompanyModal({ onClose }: { onClose: () => void }) {
+  const [name, setName] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  async function save() {
+    if (!name.trim()) return setError("Give the company a name.");
+    setSaving(true);
+    setError("");
+    try {
+      await apiRequest<Company>("/api/v1/companies", { method: "POST", body: { name: name.trim() } });
+      // Same reasoning as saving a letterhead: the switcher holds this list for the page's lifetime.
+      window.location.reload();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't create this company.");
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Modal onClose={onClose}>
+      <div className="p-6">
+        <h2 className="text-base font-semibold text-gray-800">New Company</h2>
+        <p className="mt-1 text-sm text-gray-500">
+          Its books, sites and staff are kept separate from the others. You can switch into it from the
+          sidebar as soon as it&apos;s created.
+        </p>
+
+        {error && <div className="mt-4 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-600">{error}</div>}
+
+        <label className="mt-4 block">
+          <span className="mb-1.5 block text-[11px] font-medium tracking-wide text-gray-400 uppercase">
+            Business Name <span className="text-rose-500">*</span>
+          </span>
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") save(); }}
+            placeholder="e.g. Hi-Tech Infra"
+            className="input"
+            autoFocus
+          />
+        </label>
+
+        {/* Said plainly rather than discovered later: three modules still pool their data. */}
+        <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2.5 text-xs text-amber-800">
+          Vyapar, projects and tasks are kept per company. Payroll, tenders and procurement are still
+          shared across every firm — work filed there will be visible to the whole group.
+        </p>
+
+        <div className="mt-5 flex justify-end gap-2">
+          <button
+            onClick={onClose}
+            className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 transition-colors duration-150 hover:border-gray-400"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={save}
+            disabled={saving || !name.trim()}
+            className="flex items-center gap-1.5 rounded-lg bg-brand-accent px-4 py-2 text-sm font-medium text-white transition-opacity duration-150 hover:opacity-90 disabled:opacity-50"
+          >
+            {saving && <Spinner size={14} />} {saving ? "Creating…" : "Create Company"}
+          </button>
+        </div>
+      </div>
+    </Modal>
   );
 }
 

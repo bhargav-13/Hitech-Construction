@@ -201,7 +201,7 @@ const amountIn = (s: string): number | null => {
 export interface ParsedSecurity {
   securityType: SecurityType | null;
   securityAmount: number | null;
-  additionalSecurityType: SecurityType | null;
+  additionalSecurityType: string | null;
   additionalSecurityAmount: number | null;
   bgCharges: number | null;
 }

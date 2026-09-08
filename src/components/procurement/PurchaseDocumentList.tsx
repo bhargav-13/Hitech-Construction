@@ -43,6 +43,17 @@ export function PurchaseDocumentList({
 }) {
   const [q, setQ] = useState("");
   const [status, setStatus] = useState("all");
+  /**
+   * Whose documents to show.
+   *
+   * This screen used to list the firm's entire purchase ledger — 245 bills, nearly all of them cash
+   * purchases and one-offs typed straight into Vyapar — so the module's own screen could not tell a
+   * buyer what the module had actually produced. It now opens on documents raised *through*
+   * procurement: an RFQ award, a subcontractor bill. Those carry a source stamp; everything older
+   * does not, and rather than hide it behind a rule nobody can see, "Everything" stays one click
+   * away and the count says how many are being left out.
+   */
+  const [source, setSource] = useState<"procurement" | "all">("procurement");
   const [open, setOpen] = useState<Invoice | null>(null);
   // Vyapar's screens are gated on VYAPAR:VIEW, so the handoff link is only shown to people who
   // would get through — the whole reason these screens exist is that most buyers would not.
@@ -53,9 +64,12 @@ export function PurchaseDocumentList({
     [rows],
   );
 
+  const fromProcurement = useMemo(() => rows.filter((r) => r.sourceModule === "PROCUREMENT"), [rows]);
+
   const visible = useMemo(() => {
     const query = q.trim().toLowerCase();
-    return rows.filter((r) => {
+    const pool = source === "procurement" ? fromProcurement : rows;
+    return pool.filter((r) => {
       if (status !== "all" && r.status !== status) return false;
       if (!query) return true;
       return (
@@ -64,7 +78,7 @@ export function PurchaseDocumentList({
         (r.notes ?? "").toLowerCase().includes(query)
       );
     });
-  }, [rows, q, status]);
+  }, [rows, fromProcurement, source, q, status]);
 
   const totals = useMemo(
     () => ({
@@ -97,6 +111,16 @@ export function PurchaseDocumentList({
           />
         </div>
         <Select
+          value={source}
+          onChange={(v) => setSource(v as "procurement" | "all")}
+          size="sm"
+          className="w-52"
+          options={[
+            { value: "procurement", label: `Raised in Procurement (${fromProcurement.length})` },
+            { value: "all", label: `Everything in the books (${rows.length})` },
+          ]}
+        />
+        <Select
           value={status}
           onChange={setStatus}
           size="sm"
@@ -127,7 +151,17 @@ export function PurchaseDocumentList({
       </div>
 
       {visible.length === 0 ? (
-        <ProcurementEmpty icon={FileText} title={`No ${noun}s here`} hint={emptyHint} />
+        <ProcurementEmpty
+          icon={FileText}
+          title={`No ${noun}s here`}
+          // Say why the list is empty rather than implying nothing was ever bought: on a fresh
+          // install nothing carries the stamp yet, and "Everything in the books" holds the history.
+          hint={
+            source === "procurement" && rows.length > 0
+              ? `None of these ${noun}s were raised through Procurement. Switch to “Everything in the books” to see the ${rows.length} already in Vyapar.`
+              : emptyHint
+          }
+        />
       ) : (
         <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white">
           <table className="min-w-full text-sm">

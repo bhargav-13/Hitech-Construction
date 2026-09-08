@@ -102,8 +102,17 @@ function AdminAttendanceDashboard() {
     return () => { cancelled = true; };
   }, []);
 
-  const active = useMemo(() => team.filter((u) => u.active), [team]);
-  const deactivated = team.length - active.length;
+  /**
+   * The roster this dashboard counts: active **and on payroll**.
+   *
+   * It used to be every active user, which is not the same list — office staff who have a login but
+   * draw no salary through here are active and not on payroll. So "On roll" over-counted, and every
+   * split under it (Present, Not Marked, the donut, the attendance percentage) was measured against
+   * a roster the Attendance screen next door doesn't use. The two screens disagreed by exactly the
+   * number of people who aren't on payroll. Same filter as Attendance now.
+   */
+  const active = useMemo(() => team.filter((u) => u.active && u.onPayroll), [team]);
+  const notOnPayroll = team.filter((u) => u.active && !u.onPayroll).length;
 
   const dayRows = useMemo(() => rows.filter((r) => r.date === date), [rows, date]);
 
@@ -261,7 +270,7 @@ function AdminAttendanceDashboard() {
 
         {/* ---- The selected day ---- */}
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
-          <StatCard label="On roll" value={active.length} accent="cyan" icon={Users} hint={deactivated > 0 ? `${deactivated} deactivated` : undefined} />
+          <StatCard label="On roll" value={active.length} accent="cyan" icon={Users} hint={notOnPayroll > 0 ? `${notOnPayroll} not on payroll` : undefined} />
           <StatCard label="Present" value={totals.present} accent="green" icon={CircleCheck} hint={`${attendanceRate}% of roster`} />
           <StatCard label="Absent" value={totals.absent} accent="rose" icon={CircleX} />
           <StatCard label="Half Day" value={totals.halfDay} accent="amber" icon={Clock} />

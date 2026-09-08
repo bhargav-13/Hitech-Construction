@@ -171,6 +171,31 @@ export interface Invoice {
   /** Walk-in details for a cash bill with no saved party behind it. */
   billingName: string | null;
   billingAddress: string | null;
+  /**
+   * Where the paperwork goes and where the goods go — two different places on a purchase order.
+   * Distinct from billingName/billingAddress above, which are a walk-in's counter details.
+   */
+  billToName: string | null;
+  billToAddress: string | null;
+  billToGstin: string | null;
+  shipToName: string | null;
+  shipToAddress: string | null;
+  shipToGstin: string | null;
+  /**
+   * Party To Party Transfer only: the party the balance moves **to**. `partyId` is the source.
+   * The one document in the ledger with two parties on it; null everywhere else.
+   */
+  transferToPartyId: number | null;
+  transferToPartyName: string | null;
+  /** Who entered this document. Backs the "User" filter on lists and reports. */
+  createdBy: number | null;
+  createdByName: string | null;
+  /**
+   * The module that raised this document ("PROCUREMENT") and its own reference for it
+   * ("RFQ-2026-006", "WO-2026-004"). Null for anything entered straight into Vyapar.
+   */
+  sourceModule: string | null;
+  sourceRef: string | null;
   isCash: boolean;
   stateOfSupply: string | null;
   invoicePrefix: string | null;
@@ -228,6 +253,17 @@ export interface DashboardSummary {
   stockValue: number;
   lowStockCount: number;
   salesTrend: { label: string; value: number }[];
+}
+
+/**
+ * A document's number as people say it: the series prefix and the running number together.
+ *
+ * They are two columns because the number restarts inside each series — "HTB/25-26/22" and
+ * "HTB/26-27/22" are different bills — but nobody reads them apart, so anywhere a number is shown,
+ * printed or searched it is this, not the bare `invoiceNo`.
+ */
+export function fullInvoiceNo(inv: { invoiceNo: string; invoicePrefix?: string | null }): string {
+  return `${inv.invoicePrefix ?? ""}${inv.invoiceNo}`;
 }
 
 const BASE = "/api/v1/vyapar";
@@ -290,6 +326,17 @@ export interface InvoiceInput {
   paymentReference?: string | null;
   billingName?: string | null;
   billingAddress?: string | null;
+  billToName?: string | null;
+  billToAddress?: string | null;
+  billToGstin?: string | null;
+  shipToName?: string | null;
+  shipToAddress?: string | null;
+  shipToGstin?: string | null;
+  /** Party To Party Transfer only: the party the balance moves to. `partyId` is the source. */
+  transferToPartyId?: number | null;
+  /** Stamped by the screen that prefilled this form, so procurement can find its own documents. */
+  sourceModule?: string | null;
+  sourceRef?: string | null;
   isCash?: boolean;
   stateOfSupply?: string | null;
   invoicePrefix?: string | null;

@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { Drawer, DrawerField } from "@/components/Drawer";
 import { Select } from "@/components/Select";
+import { CreatableSelect } from "@/components/CreatableSelect";
 import { DatePicker } from "@/components/DatePicker";
 import { useTenderStore } from "@/lib/tenderStore";
 import {
@@ -24,7 +25,7 @@ import {
 import type { TenderCustomField } from "@/lib/tenderTypes";
 import { parseDurationMonths, parseValidityDays, parseLooseDate } from "@/lib/tenderHelpers";
 import { transitionsFor } from "@/lib/tenderStateMachine";
-import { ChevronDown, ChevronRight, Plus, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronRight, Lock, Plus, Trash2 } from "lucide-react";
 
 const STAGE_OPTIONS = (["SORTING", "RESEARCH", "APPLIED", "WON", "LOST"] as TenderStage[]).map((s) => ({
   value: s,
@@ -47,6 +48,42 @@ const SECURITY_OPTIONS = [
 const PRIORITY_OPTIONS = [
   { value: "", label: "—" },
   ...(Object.keys(PRIORITY_META) as TenderPriority[]).map((p) => ({ value: p, label: PRIORITY_META[p].label })),
+];
+
+/**
+ * Class, duration and DLP were free-text boxes, and the same handful of answers were being retyped
+ * (and mistyped) on every tender — which also broke the parsers that read "9 months" into
+ * `durationMonths`. They are dropdowns now, seeded with what the client's own tenders actually say
+ * and extendable in place, so a department with an unusual requirement isn't blocked.
+ */
+const CLASS_OPTIONS = [
+  "AA Class",
+  "A Class",
+  "A Class & Above",
+  "B Class",
+  "B Class & Above",
+  "C Class",
+  "C Class & Above",
+  "D Class",
+  "E Class",
+  "Any Class",
+];
+const DURATION_OPTIONS = [
+  "1 month", "2 months", "3 months", "4 months", "6 months",
+  "9 months", "12 months", "18 months", "24 months", "36 months",
+];
+const DLP_OPTIONS = [
+  "3 months", "6 months", "12 months", "18 months", "24 months", "36 months", "60 months", "None",
+];
+
+/** What a department asks for on top of the primary deposit. Extendable — every body names it differently. */
+const ADDITIONAL_SECURITY_OPTIONS = [
+  "F.D.R.",
+  "Bank Guarantee",
+  "Cash / Online",
+  "Performance Guarantee",
+  "Additional Performance Security",
+  "Retention",
 ];
 
 /** Default applied-stage status for a stage, so a directly-created WON/LOST/APPLIED tender is consistent. */
@@ -110,6 +147,13 @@ export function TenderForm({
   }, [tender]);
   const isGem = f.source === "GEM";
   const isApplied = stage === "APPLIED" || stage === "WON" || stage === "LOST";
+  /**
+   * Security deposit is a won-tender fact. It stays editable on a tender that already carries one,
+   * so a record imported or captured before this rule cannot be made read-only and unfixable.
+   */
+  const hasSecurityOnFile =
+    f.securityAmount != null || f.additionalSecurityAmount != null || !!f.securityType || !!f.securityReleasedOn;
+  const canEditSecurity = stage === "WON" || hasSecurityOnFile;
 
   async function save() {
     const clean: Tender = {
@@ -223,7 +267,14 @@ export function TenderForm({
             <input className="input" value={f.location ?? ""} onChange={(e) => set({ location: e.target.value })} />
           </DrawerField>
           <DrawerField label="Class">
-            <input className="input" value={f.classReq ?? ""} onChange={(e) => set({ classReq: e.target.value })} placeholder="e.g. B Class & Above" />
+            <CreatableSelect
+              value={f.classReq ?? ""}
+              onChange={(v) => set({ classReq: v || null })}
+              masterKey="tender.class"
+              builtIns={CLASS_OPTIONS}
+              createLabel="Add class"
+              placeholder="e.g. B Class & Above"
+            />
           </DrawerField>
         </Section>
 
@@ -297,7 +348,14 @@ export function TenderForm({
             <DatePicker value={f.hardcopyDue ?? ""} onChange={(v) => set({ hardcopyDue: v })} />
           </DrawerField>
           <DrawerField label="Duration">
-            <input className="input" value={f.duration ?? ""} onChange={(e) => set({ duration: e.target.value })} placeholder="e.g. 9 months" />
+            <CreatableSelect
+              value={f.duration ?? ""}
+              onChange={(v) => set({ duration: v || null })}
+              masterKey="tender.duration"
+              builtIns={DURATION_OPTIONS}
+              createLabel="Add duration"
+              placeholder="e.g. 9 months"
+            />
           </DrawerField>
           <DrawerField label="Validity">
             <input className="input" value={f.validity == null ? "" : String(f.validity)} onChange={(e) => set({ validity: e.target.value })} placeholder="e.g. 120 days" />
@@ -306,7 +364,14 @@ export function TenderForm({
             <DatePicker value={f.preBidDate ?? ""} onChange={(v) => set({ preBidDate: v })} />
           </DrawerField>
           <DrawerField label="DLP">
-            <input className="input" value={f.dlp ?? ""} onChange={(e) => set({ dlp: e.target.value })} placeholder="Defect liability period" />
+            <CreatableSelect
+              value={f.dlp ?? ""}
+              onChange={(v) => set({ dlp: v || null })}
+              masterKey="tender.dlp"
+              builtIns={DLP_OPTIONS}
+              createLabel="Add period"
+              placeholder="Defect liability period"
+            />
           </DrawerField>
           {isApplied && (
             <>
@@ -377,28 +442,51 @@ export function TenderForm({
           </button>
           {showMore && (
             <div className="mt-3 space-y-6">
-              <Section title="Security Deposit">
+              <Section
+                title="Security Deposit"
+                /**
+                 * Locked until the tender is won, at the client's request.
+                 *
+                 * A security deposit is only lodged against a work order — there is nothing to
+                 * record while a bid is still out, and figures typed in hopefully at Sorting were
+                 * being read later as money actually deposited. The fields unlock the moment the
+                 * stage becomes Won, which is also when the real numbers are known.
+                 */
+                locked={!canEditSecurity}
+                lockNote="Filled in once the tender is won — that is when a deposit is actually lodged."
+              >
                 <DrawerField label="Type">
-                  <Select value={f.securityType ?? ""} onChange={(v) => set({ securityType: (v || null) as SecurityType | null })} options={SECURITY_OPTIONS} />
+                  <Select
+                    value={f.securityType ?? ""}
+                    onChange={(v) => set({ securityType: (v || null) as SecurityType | null })}
+                    options={SECURITY_OPTIONS}
+                    disabled={!canEditSecurity}
+                  />
                 </DrawerField>
                 <DrawerField label="Amount (₹)">
-                  <input type="number" className="input" value={f.securityAmount ?? ""} onChange={(e) => set({ securityAmount: num(e.target.value) })} />
+                  <input type="number" className="input" disabled={!canEditSecurity} value={f.securityAmount ?? ""} onChange={(e) => set({ securityAmount: num(e.target.value) })} />
                 </DrawerField>
                 <DrawerField label="Additional Type">
-                  <Select
+                  {/* Free-form, unlike the primary Type: the extra security a department asks for
+                      is whatever they name it — "Performance Guarantee", "Additional PBG". */}
+                  <CreatableSelect
                     value={f.additionalSecurityType ?? ""}
-                    onChange={(v) => set({ additionalSecurityType: (v || null) as SecurityType | null })}
-                    options={SECURITY_OPTIONS}
+                    onChange={(v) => set({ additionalSecurityType: v || null })}
+                    masterKey="tender.additionalSecurityType"
+                    builtIns={ADDITIONAL_SECURITY_OPTIONS}
+                    createLabel="Add type"
+                    placeholder="—"
+                    disabled={!canEditSecurity}
                   />
                 </DrawerField>
                 <DrawerField label="Additional Amount (₹)">
-                  <input type="number" className="input" value={f.additionalSecurityAmount ?? ""} onChange={(e) => set({ additionalSecurityAmount: num(e.target.value) })} />
+                  <input type="number" className="input" disabled={!canEditSecurity} value={f.additionalSecurityAmount ?? ""} onChange={(e) => set({ additionalSecurityAmount: num(e.target.value) })} />
                 </DrawerField>
                 <DrawerField label="BG Charges (₹)">
-                  <input type="number" className="input" value={f.bgCharges ?? ""} onChange={(e) => set({ bgCharges: num(e.target.value) })} />
+                  <input type="number" className="input" disabled={!canEditSecurity} value={f.bgCharges ?? ""} onChange={(e) => set({ bgCharges: num(e.target.value) })} />
                 </DrawerField>
                 <DrawerField label="Released On">
-                  <DatePicker value={f.securityReleasedOn ?? ""} onChange={(v) => set({ securityReleasedOn: v })} />
+                  <DatePicker value={f.securityReleasedOn ?? ""} onChange={(v) => set({ securityReleasedOn: v })} disabled={!canEditSecurity} />
                 </DrawerField>
               </Section>
 
@@ -421,11 +509,26 @@ export function TenderForm({
   );
 }
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+function Section({
+  title,
+  locked,
+  lockNote,
+  children,
+}: {
+  title: string;
+  /** Greys the block and says why, for fields that only make sense at a later stage. */
+  locked?: boolean;
+  lockNote?: string;
+  children: React.ReactNode;
+}) {
   return (
     <div>
-      <h4 className="mb-2 text-[11px] font-semibold tracking-wide text-gray-400 uppercase">{title}</h4>
-      <div className="grid grid-cols-2 gap-x-4 gap-y-3">{children}</div>
+      <div className="mb-2 flex items-center gap-1.5">
+        <h4 className="text-[11px] font-semibold tracking-wide text-gray-400 uppercase">{title}</h4>
+        {locked && <Lock size={11} className="text-gray-400" />}
+      </div>
+      {locked && lockNote && <p className="mb-2 text-xs text-gray-400">{lockNote}</p>}
+      <div className={`grid grid-cols-2 gap-x-4 gap-y-3 ${locked ? "opacity-60" : ""}`}>{children}</div>
     </div>
   );
 }

@@ -34,6 +34,7 @@ import { isSuperAdminRole, useTaskRights } from "@/lib/taskPermissions";
 import { TaskImportDrawer, type ParsedTaskRow } from "@/components/task/TaskImportDrawer";
 import type { TaskRights } from "@/lib/taskPermissions";
 import {
+  ASSIGNABLE_TASK_STATUSES,
   TASK_PRIORITIES,
   TASK_STATUSES,
   formatTaskDate,
@@ -170,8 +171,9 @@ export function TaskWorkspace({ projectId }: { projectId?: string }) {
   // Which optional columns the list shows — persisted so the choice sticks between visits.
   const [columns, setColumns] = useState<ColumnKey[]>(DEFAULT_COLUMNS);
   const [showColumns, setShowColumns] = useState(false);
-  // Completed tasks are shown by default; unchecking "Show completed" hides them.
-  const [hideCompleted, setHideCompleted] = useState(false);
+  // Completed tasks are hidden until asked for. The list is a worklist: what is finished is noise
+  // on it, and on a busy month it was burying everything still open.
+  const [hideCompleted, setHideCompleted] = useState(true);
   // My/All scope now lives in the task store (server-driven); see above.
 
   // Drill-down: apply any filters passed in the URL (e.g. from a dashboard score card/chart).
@@ -1084,7 +1086,12 @@ function KanbanView({
 
   return (
     <div className="animate-fade-in flex gap-4 overflow-x-auto pb-2">
-      {TASK_STATUSES.map((status) => {
+      {/* One column per status a card can actually be dropped into, plus Awaiting Approval when
+          something is sitting in it — a permanently empty column you cannot drag into is just a
+          column that looks broken. Dropping *out* of it works: that is a manager overriding. */}
+      {TASK_STATUSES.filter(
+        (s) => (ASSIGNABLE_TASK_STATUSES as string[]).includes(s) || tasks.some((t) => t.status === s),
+      ).map((status) => {
         const col = tasks.filter((t) => t.status === status);
         return (
           <div

@@ -2,13 +2,18 @@
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Check, ChevronDown } from "lucide-react";
+import { Check, ChevronDown, Plus } from "lucide-react";
 import { notifyFormTouched } from "@/lib/formDirty";
 
 export interface SelectOption {
   value: string;
   label: string;
   disabled?: boolean;
+  /**
+   * Renders as a small group heading rather than a choice — for lists that read better in sections
+   * ("Asked on RFQ-2026-007" above the suppliers who were). Never selectable or keyboard-reachable.
+   */
+  header?: boolean;
 }
 
 /**
@@ -34,6 +39,8 @@ export function Select({
   disabled = false,
   title,
   icon,
+  onCreate,
+  createLabel = "Add new",
 }: {
   value: string;
   onChange: (value: string) => void;
@@ -46,6 +53,12 @@ export function Select({
   disabled?: boolean;
   title?: string;
   icon?: React.ReactNode;
+  /**
+   * Adds a "⊕ <createLabel>" row pinned to the foot of the list. Given so a value that isn't in the
+   * master yet — a unit of measure, a supplier — can be made without abandoning the form you are in.
+   */
+  onCreate?: () => void;
+  createLabel?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(0);
@@ -113,7 +126,7 @@ export function Select({
   }, [open, active]);
 
   const pick = (opt: SelectOption) => {
-    if (opt.disabled) return;
+    if (opt.disabled || opt.header) return;
     onChange(opt.value);
     // The listbox is portalled to the document root, so nothing about this choice reaches the
     // drawer the field sits in. Raise the touch signal from the field itself instead, so an
@@ -127,7 +140,7 @@ export function Select({
       let next = cur;
       for (let step = 0; step < options.length; step++) {
         next = (next + dir + options.length) % options.length;
-        if (!options[next]?.disabled) return next;
+        if (!options[next]?.disabled && !options[next]?.header) return next;
       }
       return cur;
     });
@@ -160,7 +173,7 @@ export function Select({
       const now = Date.now();
       typed.current = { str: now - typed.current.at < 800 ? typed.current.str + e.key : e.key, at: now };
       const q = typed.current.str.toLowerCase();
-      const i = options.findIndex((o) => o.label.toLowerCase().startsWith(q));
+      const i = options.findIndex((o) => !o.header && !o.disabled && o.label.toLowerCase().startsWith(q));
       if (i >= 0) setActive(i);
     }
   }
@@ -204,6 +217,17 @@ export function Select({
             <div className="px-3 py-2 text-xs text-gray-400">No options</div>
           ) : (
             options.map((opt, i) => {
+              if (opt.header) {
+                return (
+                  <div
+                    key={opt.value}
+                    role="presentation"
+                    className="px-3 pt-2 pb-1 text-[10px] font-semibold tracking-wide text-gray-400 uppercase"
+                  >
+                    {opt.label}
+                  </div>
+                );
+              }
               const isSelected = opt.value === value;
               const isActive = i === active;
               return (
@@ -225,6 +249,20 @@ export function Select({
                 </button>
               );
             })
+          )}
+          {onCreate && (
+            <div className="sticky bottom-0 border-t border-gray-100 bg-white">
+              <button
+                type="button"
+                onClick={() => {
+                  setOpen(false);
+                  onCreate();
+                }}
+                className="flex w-full items-center gap-1.5 px-3 py-2 text-left text-sm font-medium text-brand-accent transition-colors duration-100 hover:bg-cyan-50"
+              >
+                <Plus size={13} className="shrink-0" /> {createLabel}
+              </button>
+            </div>
           )}
         </div>,
         document.body,

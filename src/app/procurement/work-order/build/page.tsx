@@ -2,9 +2,11 @@
 
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Pencil, Plus, Search, Trash2, X } from "lucide-react";
+import { ChevronDown, Pencil, Plus, Search, Trash2, X } from "lucide-react";
 import { ProcurementShell } from "@/components/procurement/ProcurementShell";
 import { Select } from "@/components/Select";
+import { UnitSelect } from "@/components/procurement/UnitSelect";
+import { TypeaheadPicker } from "@/components/vyapar/TypeaheadPicker";
 import { DatePicker } from "@/components/DatePicker";
 import { Spinner } from "@/components/Spinner";
 import { useProjects } from "@/lib/useProjects";
@@ -13,7 +15,7 @@ import * as wo from "@/lib/workOrderApi";
 import * as vyapar from "@/lib/vyaparApi";
 import { measuredQuantity } from "@/lib/workOrderApi";
 import { inr } from "@/lib/format";
-import type { Party } from "@/lib/vyaparApi";
+import type { Item, Party } from "@/lib/vyaparApi";
 
 /**
  * The work-order builder.
@@ -34,8 +36,6 @@ export default function WorkOrderBuilderPage() {
     </Suspense>
   );
 }
-
-const UNITS = ["Nos", "Rmt", "Sqm", "Cum", "Kg", "MT", "Brass", "Day", "Lump sum"];
 
 type DraftItem = {
   id?: number;
@@ -97,18 +97,26 @@ function Builder() {
   const [items, setItems] = useState<DraftItem[]>([blankItem()]);
 
   const [parties, setParties] = useState<Party[]>([]);
+  const [catalogue, setCatalogue] = useState<Item[]>([]);
+  // Every work order already raised, held only so a contractor's bank details can be recalled the
+  // second time we give him work. See `pickVendor`.
+  const [pastOrders, setPastOrders] = useState<wo.WorkOrder[]>([]);
+  const [vendorListOpen, setVendorListOpen] = useState(false);
+  /** Exactly what `pickVendor` last wrote into the bank fields — see the note there. */
+  const [autofilled, setAutofilled] = useState({ name: "", number: "", ifsc: "" });
 
-  const loadParties = useCallback(async () => {
-    try {
-      setParties(await vyapar.getParties());
-    } catch {
-      /* the form still works with a typed contractor name once one is picked elsewhere */
-    }
+  const loadMasters = useCallback(async () => {
+    const [p, i, w] = await Promise.allSettled([vyapar.getParties(), vyapar.getItems(), wo.getWorkOrders()]);
+    // Settled, not all-or-nothing: a failed catalogue must not cost us the contractor list. Each
+    // field the data feeds degrades to plain typing, which is what the form did before.
+    if (p.status === "fulfilled") setParties(p.value);
+    if (i.status === "fulfilled") setCatalogue(i.value);
+    if (w.status === "fulfilled") setPastOrders(w.value);
   }, []);
 
   useEffect(() => {
-    loadParties();
-  }, [loadParties]);
+    loadMasters();
+  }, [loadMasters]);
 
   function hydrate(w: wo.WorkOrder) {
     setWoNo(w.woNo);
@@ -169,10 +177,46 @@ function Builder() {
         const rank = (p: Party) => (p.partyType === "SUPPLIER" ? 0 : 1);
         return rank(a) - rank(b) || a.name.localeCompare(b.name);
       })
-      .slice(0, 8);
+      .slice(0, 40);
   }, [parties, vendorSearch]);
 
   const vendor = parties.find((p) => p.id === vendorId) ?? null;
+
+  /**
+   * Choose the subcontractor, and carry his bank details across from the last order we gave him.
+   *
+   * Account number and IFSC are copied off a document, not remembered by anyone, so the second work
+   * order for the same contractor meant digging the first one out of a drawer.
+   *
+   * The provenance check is the important half. Switching contractors after a prefill must not leave
+   * the previous man's account number on the form — that is how money goes to the wrong bank — so
+   * anything this function filled in is replaced, or cleared when the new contractor has no history.
+   * Anything a person typed is left exactly as typed: they know something the last order doesn't.
+   */
+  function pickVendor(p: Party) {
+    setVendorId(p.id);
+    setVendorSearch("");
+    setVendorListOpen(false);
+
+    const last = pastOrders
+      .filter((w) => w.vendorPartyId === p.id && (w.bankAccountNumber || w.bankAccountName || w.bankIfsc))
+      .sort((a, b) => (b.woDate ?? "").localeCompare(a.woDate ?? "") || b.id - a.id)[0];
+    const next = {
+      name: last ? last.bankAccountName || p.name : "",
+      number: last?.bankAccountNumber ?? "",
+      ifsc: last?.bankIfsc ?? "",
+    };
+
+    // Untouched = empty, or still exactly what the last prefill put there.
+    const untouched = (current: string, filled: string) => current === "" || current === filled;
+    if (!untouched(bankName, autofilled.name) || !untouched(bankNumber, autofilled.number) || !untouched(bankIfsc, autofilled.ifsc)) {
+      return;
+    }
+    setBankName(next.name);
+    setBankNumber(next.number);
+    setBankIfsc(next.ifsc);
+    setAutofilled(next);
+  }
 
   function setItem(i: number, patch: Partial<DraftItem>) {
     setItems((prev) => prev.map((it, j) => (j === i ? { ...it, ...patch } : it)));
@@ -345,18 +389,30 @@ function Builder() {
                 </button>
               </div>
             ) : (
-              <div className="space-y-2">
+              // A dropdown, not a search-only box: the list opens on focus so the contractors on
+              // file can be browsed. Typing still narrows it, which is what the box did before.
+              <div className="relative space-y-2">
                 <div className="flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 transition-colors duration-150 focus-within:border-cyan-400">
                   <Search size={14} className="text-gray-400" />
                   <input
                     value={vendorSearch}
-                    onChange={(e) => setVendorSearch(e.target.value)}
+                    onChange={(e) => {
+                      setVendorSearch(e.target.value);
+                      setVendorListOpen(true);
+                    }}
+                    onFocus={() => setVendorListOpen(true)}
+                    // Blur fires before the option's click, so closing is deferred a tick.
+                    onBlur={() => setTimeout(() => setVendorListOpen(false), 120)}
                     placeholder="Search contractor by name or phone"
                     className="w-full bg-transparent text-sm outline-none"
                   />
+                  <ChevronDown
+                    size={14}
+                    className={`shrink-0 text-gray-400 transition-transform duration-200 ${vendorListOpen ? "rotate-180" : ""}`}
+                  />
                 </div>
-                {vendorSearch.trim() && (
-                  <div className="divide-y divide-gray-100 rounded-lg border border-gray-200">
+                {vendorListOpen && (
+                  <div className="absolute z-20 max-h-64 w-full overflow-auto divide-y divide-gray-100 rounded-lg border border-gray-200 bg-white shadow-lg">
                     {vendorOptions.length === 0 ? (
                       <p className="px-3 py-3 text-sm text-gray-400">
                         No party matches. Add them under Vyapar → Parties first.
@@ -365,10 +421,8 @@ function Builder() {
                       vendorOptions.map((p) => (
                         <button
                           key={p.id}
-                          onClick={() => {
-                            setVendorId(p.id);
-                            setVendorSearch("");
-                          }}
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => pickVendor(p)}
                           className="flex w-full items-center gap-3 px-3 py-2 text-left transition-colors duration-150 hover:bg-cyan-50/50"
                         >
                           <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-gray-100 text-[11px] font-semibold text-gray-600">
@@ -423,11 +477,26 @@ function Builder() {
                     <tr key={i} className="align-top">
                       <td className="px-3 py-2 text-xs text-gray-400">{i + 1}</td>
                       <td className="px-3 py-2">
-                        <input
+                        {/* Free text still works — most scope lines are described, not catalogued —
+                            but the item master is offered so a rate and unit already on file are
+                            picked rather than retyped. */}
+                        <TypeaheadPicker<Item>
                           value={it.itemName}
-                          onChange={(e) => setItem(i, { itemName: e.target.value })}
-                          placeholder="e.g. HSC laying"
-                          className="w-full rounded-md border border-gray-200 px-2 py-1.5 text-sm outline-none focus:border-cyan-500"
+                          onChange={(text) => setItem(i, { itemName: text, itemId: null })}
+                          rows={catalogue}
+                          getKey={(x) => x.id}
+                          getLabel={(x) => x.name}
+                          columns={[{ label: "Purchase Price", get: (x) => inr(x.purchasePrice) }]}
+                          onPick={(x) =>
+                            setItem(i, {
+                              itemId: x.id,
+                              itemName: x.name,
+                              description: x.description ?? "",
+                              unit: x.unit || "Nos",
+                              rate: x.purchasePrice ? String(x.purchasePrice) : "",
+                            })
+                          }
+                          placeholder="e.g. HSC laying — or type anything"
                         />
                         <input
                           value={it.description}
@@ -465,13 +534,7 @@ function Builder() {
                         )}
                       </td>
                       <td className="px-3 py-2">
-                        <Select
-                          value={it.unit}
-                          onChange={(v) => setItem(i, { unit: v })}
-                          size="sm"
-                          className="w-24"
-                          options={UNITS.map((u) => ({ value: u, label: u }))}
-                        />
+                        <UnitSelect value={it.unit} onChange={(v) => setItem(i, { unit: v })} className="w-28" />
                       </td>
                       <td className="px-3 py-2 text-right">
                         <input

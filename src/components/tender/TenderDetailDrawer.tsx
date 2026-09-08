@@ -336,7 +336,14 @@ export function TenderDetailDrawer({
         <Section title="Security Deposit">
           <Field label="Type">{t.securityType ? SECURITY_TYPE_META[t.securityType].label : "—"}</Field>
           <Field label="Amount">{tmoney(t.securityAmount)}</Field>
-          <Field label="Additional Type">{t.additionalSecurityType ? SECURITY_TYPE_META[t.additionalSecurityType].label : "—"}</Field>
+          {/* Free text since the client asked to add their own — show the label when it happens to
+              be one of ours, otherwise whatever they typed. */}
+          <Field label="Additional Type">
+            {t.additionalSecurityType
+              ? ((SECURITY_TYPE_META as Record<string, { label: string } | undefined>)[t.additionalSecurityType]?.label ??
+                 t.additionalSecurityType)
+              : "—"}
+          </Field>
           <Field label="Additional Amount">{tmoney(t.additionalSecurityAmount)}</Field>
           <Field label="BG Charges">{tmoney(t.bgCharges)}</Field>
           <Field label="Released On">{tdate(t.securityReleasedOn)}</Field>

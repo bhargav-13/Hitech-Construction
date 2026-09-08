@@ -134,7 +134,12 @@ export interface Tender {
   securityDetails?: string | null;
   securityType?: SecurityType | null;
   securityAmount?: number | null;
-  additionalSecurityType?: SecurityType | null;
+  /**
+   * Free text, unlike {@link Tender.securityType}. The extra security a department asks for on top
+   * of the deposit is whatever they choose to call it — "Performance Guarantee", "Additional PBG" —
+   * and the client asked to be able to add their own rather than pick from our three.
+   */
+  additionalSecurityType?: string | null;
   additionalSecurityAmount?: number | null;
   bgCharges?: number | null;
   securityReleasedOn?: string | null;

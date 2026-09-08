@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { findAnalysis, useAnalysisStore } from "@/lib/tenderAnalysisStore";
 import { analysisTotals } from "@/lib/tenderAnalysisCalc";
-import type { HealthBand } from "@/lib/tenderAnalysisTypes";
+import type { HealthBand, TenderAnalysis } from "@/lib/tenderAnalysisTypes";
 
 /**
  * A tender's bid verdict, small enough to sit in a table row.
@@ -30,16 +30,27 @@ const DOT_CLASS: Record<HealthBand, string> = {
 
 export function TenderHealthChip({
   tender,
+  analysis: given,
   size = "sm",
   showBid = true,
 }: {
   /** The tender itself — its number is the fallback key when ids have been reassigned. */
   tender: { id: string; tenderId?: string | null };
+  /**
+   * The analysis to read, when the caller already holds one.
+   *
+   * The analysis list does, and passing it matters: looking it back up from the tender returns the
+   * *first* analysis pointing at that tender, so two analyses on one tender both rendered the first
+   * one's numbers — two rows showing identical health for completely different costings, which is
+   * the duplicate the client reported.
+   */
+  analysis?: TenderAnalysis | null;
   size?: "sm" | "md";
   showBid?: boolean;
 }) {
   const analyses = useAnalysisStore((s) => s.analyses);
-  const analysis = findAnalysis(analyses, tender);
+  const found = findAnalysis(analyses, tender);
+  const analysis = given ?? found;
 
   const pad = size === "md" ? "px-2.5 py-1 text-xs" : "px-2 py-0.5 text-[11px]";
 

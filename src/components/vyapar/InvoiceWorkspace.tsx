@@ -22,6 +22,7 @@ import { downloadInvoicePdf, downloadPdf, printRows } from "@/lib/vyaparExport";
 import { ExportDialog, type ExportColumn } from "@/components/vyapar/ExportDialog";
 import { useProjects } from "@/lib/useProjects";
 import * as vyapar from "@/lib/vyaparApi";
+import { fullInvoiceNo } from "@/lib/vyaparApi";
 import type { DocType, Invoice, InvoiceLine, Item, Party } from "@/lib/vyaparApi";
 import { Download, FileText, Plus, Search, Upload } from "lucide-react";
 
@@ -149,7 +150,7 @@ export function InvoiceWorkspace({
       if (!inRange(i.invoiceDate, range)) return false;
       if (statusFilter !== "All" && i.status !== statusFilter) return false;
       if (!q) return true;
-      return [i.invoiceNo, i.partyName, i.invoiceDate].some((f) => f?.toLowerCase().includes(q));
+      return [fullInvoiceNo(i), i.partyName, i.invoiceDate].some((f) => f?.toLowerCase().includes(q));
     });
   }, [invoices, search, statusFilter, range]);
 
@@ -157,23 +158,25 @@ export function InvoiceWorkspace({
   const columns = useMemo(
     () => ({
       date: { get: (i: Invoice) => i.invoiceDate ?? "", type: "text" as const },
-      number: { get: (i: Invoice) => i.invoiceNo, type: "text" as const },
+      number: { get: (i: Invoice) => fullInvoiceNo(i), type: "text" as const },
       party: { get: (i: Invoice) => i.partyName ?? "", type: "text" as const },
+      // `options` here is only a floor — the real list is whatever the rows contain, since a
+      // payment type is a bank/cash account name rather than a fixed vocabulary. See useColumnFilters.
       paymentType: { get: (i: Invoice) => i.paymentType, type: "select" as const, options: PAYMENT_TYPES },
       amount: { get: (i: Invoice) => i.total, type: "number" as const },
       balance: { get: (i: Invoice) => i.balance, type: "number" as const },
-      status: { get: (i: Invoice) => i.status, type: "select" as const, options: ["Paid", "Partial", "Unpaid"] },
+      status: { get: (i: Invoice) => i.status, type: "select" as const, options: ["Paid", "Partial", "Unpaid", "Cancelled"] },
     }),
     []
   );
-  const { filtered, filters, setFilter } = useColumnFilters(rows, columns);
+  const { filtered, filters, setFilter, options: filterOptions } = useColumnFilters(rows, columns);
 
   // Sortable columns — defaults to newest first, like Vyapar's own lists.
   const { sorted, sortKey, sortDir, toggle } = useTableSort<Invoice>(
     filtered,
     {
       date: (i) => i.invoiceDate,
-      number: (i) => i.invoiceNo,
+      number: (i) => fullInvoiceNo(i),
       party: (i) => i.partyName,
       paymentType: (i) => i.paymentType,
       amount: (i) => i.total,
@@ -216,7 +219,7 @@ export function InvoiceWorkspace({
   }, [filtered, invoices, range]);
 
   async function remove(inv: Invoice) {
-    if (!confirm(`Delete ${inv.invoiceNo}? Stock and balances will be reversed.`)) return;
+    if (!confirm(`Delete ${fullInvoiceNo(inv)}? Stock and balances will be reversed.`)) return;
     try {
       await vyapar.deleteInvoice(inv.id);
       load();
@@ -240,7 +243,7 @@ export function InvoiceWorkspace({
    * as distinct from delete, so the confirmation has to say which one this is.
    */
   function cancel(inv: Invoice) {
-    if (!confirm(`Cancel ${inv.invoiceNo}? It stays in the books but stops counting towards balances and stock.`)) return;
+    if (!confirm(`Cancel ${fullInvoiceNo(inv)}? It stays in the books but stops counting towards balances and stock.`)) return;
     run(() => vyapar.cancelInvoice(inv.id), "Couldn't cancel this document.");
   }
 
@@ -254,14 +257,14 @@ export function InvoiceWorkspace({
 
   function convertToReturn(inv: Invoice) {
     const noun = docType === "PURCHASE" ? "debit note" : "credit note";
-    if (!confirm(`Raise a ${noun} against ${inv.invoiceNo}?`)) return;
+    if (!confirm(`Raise a ${noun} against ${fullInvoiceNo(inv)}?`)) return;
     run(() => vyapar.convertToReturn(inv.id), "Couldn't convert this document.");
   }
 
   /** Print one document, using the same table renderer the list export uses. */
   function printOne(inv: Invoice) {
     printRows(
-      `${noun} · ${inv.invoiceNo}`,
+      `${noun} · ${fullInvoiceNo(inv)}`,
       ["Item", "Qty", "Rate", "Tax", "Amount"],
       inv.lines.map((l) => [l.itemName, l.quantity, inr(l.rate), inr(l.taxAmount), inr(l.amount)]),
       `${inv.partyName ?? "—"} · ${bookDate(inv.invoiceDate)} · Total ${inr(inv.total)}`
@@ -279,7 +282,7 @@ export function InvoiceWorkspace({
   const exportColumns: ExportColumn<Invoice>[] = useMemo(() => {
     const cols: ExportColumn<Invoice>[] = [
       { key: "date", label: "Date", value: (i) => i.invoiceDate ?? "" },
-      { key: "no", label: numberColLabel, value: (i) => i.invoiceNo },
+      { key: "no", label: numberColLabel, value: (i) => fullInvoiceNo(i) },
       { key: "party", label: "Party", value: (i) => i.partyName ?? i.billingName ?? "" },
       { key: "partyPhone", label: "Party Phone", value: (i) => partyOf(i)?.phone ?? "" },
       { key: "partyGstin", label: "Party GSTIN", value: (i) => partyOf(i)?.gstin ?? "" },
@@ -353,7 +356,7 @@ export function InvoiceWorkspace({
               downloadPdf(
                 title,
                 ["Date", "Invoice no", "Party", "Payment Type", "Total", "Paid", "Balance", "Status"],
-                filtered.map((i) => [i.invoiceDate ?? "", i.invoiceNo, i.partyName ?? "", i.paymentType, inr(i.total), inr(i.paidAmount), inr(i.balance), i.status]),
+                filtered.map((i) => [i.invoiceDate ?? "", fullInvoiceNo(i), i.partyName ?? "", i.paymentType, inr(i.total), inr(i.paidAmount), inr(i.balance), i.status]),
                 { rightAlignFrom: 4 }
               )
             }
@@ -504,10 +507,10 @@ export function InvoiceWorkspace({
                 <FilterTh label="Party Name" sortKey="party" activeKey={sortKey} dir={sortDir} onSort={toggle} filterKey="party" type="text" filter={filters.party} onApply={setFilter} />
                 {/* Vyapar carries a Transaction column naming the document type on every list. */}
                 <th className="px-4 py-2 text-left font-medium">Transaction</th>
-                {!NON_PAYMENT && <FilterTh label="Payment Type" sortKey="paymentType" activeKey={sortKey} dir={sortDir} onSort={toggle} filterKey="paymentType" type="select" options={PAYMENT_TYPES} filter={filters.paymentType} onApply={setFilter} />}
+                {!NON_PAYMENT && <FilterTh label="Payment Type" sortKey="paymentType" activeKey={sortKey} dir={sortDir} onSort={toggle} filterKey="paymentType" type="select" options={filterOptions.paymentType} filter={filters.paymentType} onApply={setFilter} />}
                 <FilterTh label="Amount" sortKey="amount" activeKey={sortKey} dir={sortDir} onSort={toggle} align="right" filterKey="amount" type="number" filter={filters.amount} onApply={setFilter} />
                 {!NON_PAYMENT && <FilterTh label="Balance" sortKey="balance" activeKey={sortKey} dir={sortDir} onSort={toggle} align="right" filterKey="balance" type="number" filter={filters.balance} onApply={setFilter} />}
-                {!NON_PAYMENT && <FilterTh label="Status" sortKey="status" activeKey={sortKey} dir={sortDir} onSort={toggle} filterKey="status" type="select" options={["Paid", "Partial", "Unpaid", "Cancelled"]} filter={filters.status} onApply={setFilter} />}
+                {!NON_PAYMENT && <FilterTh label="Status" sortKey="status" activeKey={sortKey} dir={sortDir} onSort={toggle} filterKey="status" type="select" options={filterOptions.status} filter={filters.status} onApply={setFilter} />}
                 <th className="w-32 px-4 py-2 text-left font-medium">Actions</th>
               </tr>
             </thead>
@@ -520,7 +523,7 @@ export function InvoiceWorkspace({
                 >
                   <td className="px-4 py-2.5 whitespace-nowrap text-gray-600">{bookDate(i.invoiceDate)}</td>
                   <td className={`px-4 py-2.5 font-medium text-gray-800 ${i.cancelled ? "line-through decoration-rose-400" : ""}`}>
-                    {i.invoiceNo}
+                    {fullInvoiceNo(i)}
                   </td>
                   <td className="px-4 py-2.5 text-gray-700">{i.partyName ?? "—"}</td>
                   <td className="px-4 py-2.5 text-gray-600">{noun}</td>
@@ -541,7 +544,7 @@ export function InvoiceWorkspace({
                       docType={docType}
                       cancelled={i.cancelled}
                       hasBalance={!NON_PAYMENT && i.balance > 0}
-                      label={i.invoiceNo}
+                      label={fullInvoiceNo(i)}
                       handlers={{
                         onEdit: () => setEditing(i),
                         onDelete: () => remove(i),
@@ -720,7 +723,7 @@ function PaymentDrawer({
   }
 
   return (
-    <Drawer title={`Record Payment · ${invoice.invoiceNo}`} onClose={onClose} onSave={save} saveLabel={saving ? "Saving…" : "Save"}>
+    <Drawer title={`Record Payment · ${fullInvoiceNo(invoice)}`} onClose={onClose} onSave={save} saveLabel={saving ? "Saving…" : "Save"}>
       <div className="space-y-4">
         {error && <div className="rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-600">{error}</div>}
         <div className="rounded-xl border border-gray-200 bg-gray-50/60 p-4 text-sm">

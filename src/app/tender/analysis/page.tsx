@@ -48,8 +48,15 @@ export default function TenderAnalysisListPage() {
       .map((a) => ({
         a,
         totals: analysisTotals(a),
-        // Match the tender back by number too — backend ids are reassigned on hydration.
-        tender: tenders.find((t) => t.id === a.tenderRef || t.tenderId === a.tenderId) ?? null,
+        // Match the tender back by number too — backend ids are reassigned on hydration. The
+        // number has to be non-empty to match on: several analyses carry no tender number, and
+        // `"" === ""` bound every one of them to whichever tender also had a blank number. Two
+        // unrelated costings then shared a tender, and the health chip — which looks the analysis
+        // back up from that tender — showed the same figures on both rows.
+        tender:
+          tenders.find((t) => t.id === a.tenderRef) ??
+          (a.tenderId.trim() ? tenders.find((t) => (t.tenderId ?? "").trim() === a.tenderId.trim()) : undefined) ??
+          null,
       }))
       .filter(
         ({ a, tender }) =>
@@ -190,7 +197,9 @@ export default function TenderAnalysisListPage() {
                     </td>
                     <td className="px-4 py-2.5">
                       {tender ? (
-                        <TenderHealthChip tender={tender} showBid={false} />
+                        // This row's own analysis, not one resolved from the tender: two costings
+                        // can point at the same tender, and the lookup would return the first.
+                        <TenderHealthChip tender={tender} analysis={a} showBid={false} />
                       ) : (
                         <button
                           type="button"

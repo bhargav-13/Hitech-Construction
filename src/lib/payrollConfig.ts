@@ -205,7 +205,13 @@ export const DEPARTMENTS = [
   "Administration",
 ];
 
-/** Designations offered in the Add-Staff form. */
+/**
+ * Designations offered on a payroll profile.
+ *
+ * The shipped list only — the picker is a {@link CreatableSelect} over the "payroll.designation"
+ * master, so a firm with a "Billing Engineer" or a "Quantity Surveyor" adds one where they are
+ * filling the profile in, rather than waiting on a release.
+ */
 export const DESIGNATIONS = [
   "Site Engineer",
   "Project Manager",

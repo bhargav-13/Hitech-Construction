@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { Drawer, DrawerField } from "@/components/Drawer";
 import { Select } from "@/components/Select";
+import { PartyDialog } from "@/components/vyapar/PartyDialog";
 import { DatePicker } from "@/components/DatePicker";
 import { inr } from "@/lib/format";
 import * as procurement from "@/lib/procurementApi";
@@ -25,6 +26,7 @@ export function QuoteDialog({
   existingVendorId,
   onClose,
   onSaved,
+  onVendorAdded,
 }: {
   rfq: Rfq;
   vendors: Party[];
@@ -32,6 +34,8 @@ export function QuoteDialog({
   existingVendorId?: number;
   onClose: () => void;
   onSaved: (saved: Rfq) => void;
+  /** Lets the page behind refresh its party list after one is created from in here. */
+  onVendorAdded?: (created: Party) => void;
 }) {
   const existing = rfq.quotes.find((q) => q.vendorPartyId === existingVendorId);
 
@@ -52,6 +56,10 @@ export function QuoteDialog({
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [addingVendor, setAddingVendor] = useState(false);
+  // A supplier created from inside this drawer, held here so it can be selected before the page
+  // behind has refetched its party list.
+  const [freshVendor, setFreshVendor] = useState<Party | null>(null);
 
   /** What this quote comes to, priced the way the comparison will price it. */
   const total = useMemo(() => {
@@ -93,17 +101,47 @@ export function QuoteDialog({
     }
   }
 
-  // Suppliers first, but every party is selectable: a firm that normally sells to us can quote too.
-  const options = useMemo(
-    () =>
-      [...vendors]
-        .sort((a, b) => {
-          const rank = (p: Party) => (p.partyType === "SUPPLIER" ? 0 : 1);
-          return rank(a) - rank(b) || a.name.localeCompare(b.name);
-        })
-        .map((p) => ({ value: String(p.id), label: p.name })),
-    [vendors],
-  );
+  /**
+   * The suppliers this enquiry actually went to, first and labelled — then everyone else.
+   *
+   * A quote almost always comes back from someone who was asked for one, and hunting for that name
+   * in an alphabetical list of every party on file is the wrong way round. The rest stay selectable
+   * below the divider, because a supplier who was never invited does sometimes quote anyway.
+   */
+  const options = useMemo(() => {
+    const all = freshVendor && !vendors.some((v) => v.id === freshVendor.id) ? [...vendors, freshVendor] : vendors;
+    const invitedIds = new Set(rfq.suppliers.map((s) => s.vendorPartyId));
+    const byName = (a: Party, b: Party) => a.name.localeCompare(b.name);
+
+    const invited = all.filter((p) => invitedIds.has(p.id)).sort(byName);
+    const rest = all
+      .filter((p) => !invitedIds.has(p.id))
+      .sort((a, b) => {
+        const rank = (p: Party) => (p.partyType === "SUPPLIER" ? 0 : 1);
+        return rank(a) - rank(b) || byName(a, b);
+      });
+
+    const row = (p: Party) => ({
+      value: String(p.id),
+      // Who has already answered matters when keying a stack of replies.
+      label: rfq.quotes.some((q) => q.vendorPartyId === p.id) ? `${p.name} — quoted` : p.name,
+    });
+
+    // Suppliers named on the enquiry but no longer in the party list (deleted, or scoped to another
+    // project) would otherwise vanish from a quote that is theirs. Fall back to the stored name.
+    const missing = rfq.suppliers
+      .filter((s) => !all.some((p) => p.id === s.vendorPartyId))
+      .map((s) => ({ value: String(s.vendorPartyId), label: s.vendorName }));
+
+    if (invited.length === 0 && missing.length === 0) return rest.map(row);
+    return [
+      { value: "__asked", label: `Asked on ${rfq.rfqNo}`, header: true },
+      ...invited.map(row),
+      ...missing,
+      ...(rest.length ? [{ value: "__other", label: "Other parties", header: true }] : []),
+      ...rest.map(row),
+    ];
+  }, [vendors, freshVendor, rfq.suppliers, rfq.quotes, rfq.rfqNo]);
 
   return (
     <Drawer
@@ -125,6 +163,10 @@ export function QuoteDialog({
               placeholder="Which supplier"
               disabled={!!existing}
               options={options}
+              // A quote arriving from a firm nobody has entered yet is common enough that sending
+              // the user off to Vyapar → Parties (and losing the rates already keyed) is a real cost.
+              onCreate={existing ? undefined : () => setAddingVendor(true)}
+              createLabel="Add new supplier"
             />
           </DrawerField>
           <DrawerField label="Received on">
@@ -222,6 +264,19 @@ export function QuoteDialog({
           </div>
         </div>
       </div>
+
+      {addingVendor && (
+        <PartyDialog
+          defaultType="SUPPLIER"
+          onClose={() => setAddingVendor(false)}
+          onSaved={(created) => {
+            setFreshVendor(created);
+            setVendorId(String(created.id));
+            setAddingVendor(false);
+            onVendorAdded?.(created);
+          }}
+        />
+      )}
     </Drawer>
   );
 }

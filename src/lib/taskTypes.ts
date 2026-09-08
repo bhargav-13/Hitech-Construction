@@ -7,6 +7,20 @@ export type TaskStatus = "Pending" | "In Progress" | "On Hold" | "Stuck" | "Comp
 export type TaskPriority = "Low" | "Medium" | "High";
 
 export const TASK_STATUSES: TaskStatus[] = ["Pending", "In Progress", "On Hold", "Stuck", "Completed", "Awaiting Approval"];
+
+/**
+ * The statuses a person may set by hand.
+ *
+ * "Awaiting Approval" is deliberately not among them. It is not a state you choose, it is the state
+ * the server puts a task into when someone who needs sign-off marks it Completed — and it carries an
+ * approver role decided at that moment. Letting it be picked from the dropdown produced tasks that
+ * *looked* like they were waiting on someone while sitting in nobody's approvals queue, which is
+ * exactly the bug the client reported. Mark it Completed; the approval follows automatically.
+ *
+ * Filters and reports still use the full `TASK_STATUSES` list — you very much want to *find* tasks
+ * awaiting approval, you just can't declare one.
+ */
+export const ASSIGNABLE_TASK_STATUSES: TaskStatus[] = TASK_STATUSES.filter((s) => s !== "Awaiting Approval");
 export const TASK_PRIORITIES: TaskPriority[] = ["Low", "Medium", "High"];
 
 /** Status chip colours — mirrors TaskOPad's semantics, restyled to our palette. */

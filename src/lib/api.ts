@@ -304,6 +304,9 @@ export interface TeamMemberResponse {
   active: boolean;
   departmentId: number | null;
   departmentName: string | null;
+  /** On payroll — can punch, has a payroll profile. The Payroll roster is these people, not all of them. */
+  onPayroll: boolean;
+  staffType: "OFFICE" | "SITE" | null;
 }
 
 export function getTeam() {
@@ -618,6 +621,11 @@ export interface PayrollSalaryStructure {
   otherAllowances: number;
   workType: "DAILY" | "HOURLY" | "PIECE" | null;
   workRate: number;
+  /**
+   * How a worked day converts into pay. SHIFT — a marked day is a full day (what everyone is on
+   * today). PUNCH — the day is worth the hours between punch-in and punch-out.
+   */
+  salaryBasis: "SHIFT" | "PUNCH";
   pf: boolean;
   esic: boolean;
   pt: boolean;
@@ -1016,7 +1024,11 @@ export function myReimbursementsApi() {
 export function createReimbursementApi(body: ReimbursementCreateBody) {
   return request<ReimbursementApi>("/api/v1/payroll/reimbursements", { method: "POST", body });
 }
-export function decideReimbursementApi(id: number, body: { action: "APPROVE" | "REJECT" | "PAY"; approvedAmount?: number }) {
+/** REOPEN puts a rejected or approved claim back to PENDING; a paid one can't be unwound here. */
+export function decideReimbursementApi(
+  id: number,
+  body: { action: "APPROVE" | "REJECT" | "PAY" | "REOPEN"; approvedAmount?: number },
+) {
   return request<ReimbursementApi>(`/api/v1/payroll/reimbursements/${id}/decide`, { method: "POST", body });
 }
 

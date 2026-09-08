@@ -1,9 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback } from "react";
 import { X } from "lucide-react";
 import { useDrawerDismiss } from "@/lib/useDrawerDismiss";
-import { DISCARD_PROMPT, watchFormTouches } from "@/lib/formDirty";
+import { DISCARD_PROMPT, useDiscardGuard } from "@/lib/formDirty";
 
 /**
  * Right-side slide-over drawer — Onsite's standard "add / edit record" form pattern.
@@ -49,25 +49,19 @@ export function Drawer({
   footer?: React.ReactNode;
   children: React.ReactNode;
 }) {
-  const panelRef = useRef<HTMLDivElement>(null);
   /**
-   * Set as soon as anything inside the panel is edited. This is what makes the confirmation
-   * universal: drawers no longer have to remember to pass `dirty`, which almost none of the ~50 of
-   * them did — so every tender, procurement and payroll form silently discarded a half-filled page
-   * on a stray backdrop click.
+   * Watches for the first edit inside the panel. This is what makes the confirmation universal:
+   * drawers no longer have to remember to pass `dirty`, which almost none of the ~50 of them did —
+   * so every tender, procurement and payroll form silently discarded a half-filled page on a stray
+   * backdrop click.
    */
-  const touched = useRef(false);
-
-  useEffect(() => {
-    const el = panelRef.current;
-    if (!el) return;
-    return watchFormTouches(el, () => { touched.current = true; });
-  }, []);
+  const { panelRef, confirmDiscard } = useDiscardGuard(guardOnClose);
 
   // Consulted by the overlay/close button and, through useDrawerDismiss, by Escape.
+  // `dirty` forces the prompt on a drawer that opened already holding work.
   const canClose = useCallback(
-    () => !(guardOnClose && (dirty || touched.current)) || confirm(DISCARD_PROMPT),
-    [dirty, guardOnClose]
+    () => (guardOnClose && dirty ? confirm(DISCARD_PROMPT) : confirmDiscard()),
+    [dirty, guardOnClose, confirmDiscard]
   );
 
   const { closing, requestClose } = useDrawerDismiss(onClose, undefined, canClose);
@@ -131,11 +125,14 @@ export function Drawer({
 export function DrawerField({
   label,
   required,
+  hint,
   children,
   className = "",
 }: {
   label: string;
   required?: boolean;
+  /** One line under the field explaining what it does to the rest of the form. */
+  hint?: string;
   children: React.ReactNode;
   className?: string;
 }) {
@@ -146,6 +143,7 @@ export function DrawerField({
         {required && <span className="text-rose-500"> *</span>}
       </span>
       {children}
+      {hint && <span className="mt-1 block text-xs text-gray-400">{hint}</span>}
     </label>
   );
 }

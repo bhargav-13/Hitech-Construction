@@ -1,8 +1,8 @@
 "use client";
 
 import { X } from "lucide-react";
-import { useCallback, useEffect, useRef } from "react";
-import { DISCARD_PROMPT, watchFormTouches } from "@/lib/formDirty";
+import { useCallback, useEffect } from "react";
+import { useDiscardGuard } from "@/lib/formDirty";
 
 export function Modal({
   onClose,
@@ -16,21 +16,14 @@ export function Modal({
   wide?: boolean;
   guardOnClose?: boolean;
 }) {
-  const panelRef = useRef<HTMLDivElement>(null);
-  // Same contract as Drawer: once a field inside has been edited, Escape and the X ask before
-  // throwing the work away. Nothing is lost to a mis-aimed key press.
-  const touched = useRef(false);
-
-  useEffect(() => {
-    const el = panelRef.current;
-    if (!el) return;
-    return watchFormTouches(el, () => { touched.current = true; });
-  }, []);
+  // Same contract as Drawer: once a field inside has been edited, Escape, the X and the backdrop
+  // ask before throwing the work away. Nothing is lost to a mis-aimed click or key press.
+  const { panelRef, confirmDiscard } = useDiscardGuard(guardOnClose);
 
   const dismiss = useCallback(() => {
-    if (guardOnClose && touched.current && !confirm(DISCARD_PROMPT)) return;
+    if (!confirmDiscard()) return;
     onClose();
-  }, [guardOnClose, onClose]);
+  }, [confirmDiscard, onClose]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && dismiss();
@@ -39,10 +32,16 @@ export function Modal({
   }, [dismiss]);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 animate-overlay-in">
+    // Clicking the backdrop dismisses, through the same guard — Vyapar's behaviour, and what people
+    // expect from a modal. Before this it did nothing at all, which read as the app being stuck.
+    <div
+      className="animate-overlay-in fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+      onClick={dismiss}
+    >
       <div
         ref={panelRef}
-        className={`relative max-h-[90vh] w-full ${wide ? "max-w-3xl" : "max-w-md"} overflow-y-auto rounded-2xl bg-white shadow-xl animate-fade-in-scale`}
+        onClick={(e) => e.stopPropagation()}
+        className={`animate-fade-in-scale relative max-h-[90vh] w-full ${wide ? "max-w-3xl" : "max-w-md"} overflow-y-auto rounded-2xl bg-white shadow-xl`}
       >
         <button
           onClick={dismiss}

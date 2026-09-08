@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { useDiscardGuard } from "@/lib/formDirty";
 import { useRouter } from "next/navigation";
 import { CalendarRange, Loader2, MapPin, X, Trash2 } from "lucide-react";
 import { usePayrollStore } from "@/lib/payrollApi";
@@ -54,7 +55,9 @@ export function ProjectSettingModal({
 }) {
   const router = useRouter();
   const canDelete = useAuthStore((s) => s.user?.permissions.includes("PROJECT:DELETE") ?? false);
-  const { closing, requestClose } = useDrawerDismiss(onClose);
+  // A settings form: every tab holds typed work, so the backdrop asks before discarding it.
+  const { panelRef, confirmDiscard } = useDiscardGuard();
+  const { closing, requestClose } = useDrawerDismiss(onClose, undefined, confirmDiscard);
 
   const [tab, setTab] = useState<Tab>("Project Details");
   const [saved, setSaved] = useState(false);
@@ -135,6 +138,7 @@ export function ProjectSettingModal({
       onClick={requestClose}
     >
       <div
+        ref={panelRef}
         className={`flex h-full w-full max-w-2xl flex-col overflow-hidden bg-white shadow-2xl ${
           closing ? "animate-slide-out-right" : "animate-slide-in-right"
         }`}

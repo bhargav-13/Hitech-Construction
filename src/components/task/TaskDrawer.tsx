@@ -21,7 +21,7 @@ import { useUsers } from "@/lib/useUsers";
 import { useDepartments } from "@/lib/useDepartments";
 import { useProjects } from "@/lib/useProjects";
 import { useTaskStore } from "@/lib/taskStore";
-import { TASK_PRIORITIES, TASK_STATUSES, formatTaskDateTime, toIso } from "@/lib/taskTypes";
+import { ASSIGNABLE_TASK_STATUSES, TASK_PRIORITIES, formatTaskDateTime, toIso } from "@/lib/taskTypes";
 import { formatChatStampIST, msIST } from "@/lib/datetime";
 import type { SubTask, Task, TaskAttachment, TaskComment, TaskPriority, TaskStatus } from "@/lib/taskTypes";
 import { UserAvatar, PeopleSelect, PeopleMultiSelect, ClientSelect } from "./TaskBits";
@@ -673,7 +673,11 @@ export function TaskDrawer({
                     onChange={(v) => setStatus(v as TaskStatus)}
                     size="sm"
                     disabled={!rights.canSetStatus}
-                    options={TASK_STATUSES.map((s) => ({ value: s, label: s }))}
+                    // The task's own status is kept in the list even when it isn't assignable, so a
+                    // task already awaiting approval shows what it is instead of an empty box.
+                    options={(ASSIGNABLE_TASK_STATUSES as string[]).includes(status)
+                      ? ASSIGNABLE_TASK_STATUSES.map((s) => ({ value: s, label: s }))
+                      : [{ value: status, label: status, disabled: true }, ...ASSIGNABLE_TASK_STATUSES.map((s) => ({ value: s, label: s }))]}
                   />
                 </div>
 

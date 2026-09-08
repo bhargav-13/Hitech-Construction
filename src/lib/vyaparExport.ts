@@ -3,7 +3,17 @@
  * branded PDF (jsPDF + autotable — genuine vector text, not a screenshot or a print-dialog).
  */
 
-import { getFirmProfile, DOC_LABEL, type FirmProfile, type Invoice, type InvoiceLine, type Party } from "./vyaparApi";
+import {
+  getBankAccounts,
+  getFirmProfile,
+  fullInvoiceNo,
+  DOC_LABEL,
+  type BankAccount,
+  type FirmProfile,
+  type Invoice,
+  type InvoiceLine,
+  type Party,
+} from "./vyaparApi";
 import { apiRequest, getActiveCompanyId } from "./api";
 import type { Company } from "./companyScope";
 import { getAmountDecimals } from "./format";
@@ -24,7 +34,30 @@ let firmProfileCache: FirmProfile | null | undefined;
  * Without this, an R.P. Enterprise invoice printed blank: its name, GSTIN and logo had been entered
  * against the company, and the exporter was still reading the empty legacy profile.
  */
-async function getCachedFirmProfile(): Promise<FirmProfile | null> {
+/**
+ * The bank account whose details belong on a printed document.
+ *
+ * Cash & Bank has carried a "print bank details on invoice" toggle since it was built and nothing
+ * ever read it, so a customer got an invoice with no account to pay into — the client's "bank
+ * account is not showing, they added account also".
+ *
+ * The document's own settlement account wins when it has one: that is the account this bill was
+ * actually taken through. Otherwise the first active account flagged for printing. Cash carries no
+ * details worth printing, so an account with neither a number nor a UPI id is skipped.
+ */
+let bankAccountsCache: BankAccount[] | undefined;
+
+async function printableBankAccount(invoice: Invoice): Promise<BankAccount | null> {
+  if (bankAccountsCache === undefined) {
+    bankAccountsCache = await getBankAccounts().catch(() => []);
+  }
+  const hasDetails = (a: BankAccount) => !!(a.accountNumber?.trim() || a.upiId?.trim());
+  const own = bankAccountsCache.find((a) => a.id === invoice.bankAccountId);
+  if (own && hasDetails(own)) return own;
+  return bankAccountsCache.find((a) => a.isActive && a.printBankDetails && hasDetails(a)) ?? null;
+}
+
+export async function getCachedFirmProfile(): Promise<FirmProfile | null> {
   if (firmProfileCache !== undefined) return firmProfileCache;
   const [company, legacy] = await Promise.all([
     apiRequest<Company[]>("/api/v1/companies")
@@ -487,7 +520,7 @@ function threeDigitWords(n: number): string {
  * Carries paise, as Vyapar does — it prints "… Rupees and Thirty Two Paisa only". Rounding the
  * paise away made the words disagree with the figure beside them on any non-round total.
  */
-function amountInWords(amount: number): string {
+export function amountInWords(amount: number): string {
   const negative = amount < 0;
   const abs = Math.abs(amount);
   const n = Math.floor(abs);
@@ -517,10 +550,11 @@ function amountInWords(amount: number): string {
  * built to match how a real printed Vyapar invoice reads, not a plain export sheet.
  */
 export async function downloadInvoicePdf(invoice: Invoice, party?: Party | null, items?: { id: number; hsn: string | null }[]) {
-  const [{ jsPDF }, autoTableMod, firm] = await Promise.all([
+  const [{ jsPDF }, autoTableMod, firm, bank] = await Promise.all([
     import("jspdf"),
     import("jspdf-autotable"),
     getCachedFirmProfile(),
+    printableBankAccount(invoice),
   ]);
   const autoTable = (autoTableMod as unknown as { default: (doc: unknown, o: unknown) => void }).default;
 
@@ -600,7 +634,7 @@ export async function downloadInvoicePdf(invoice: Invoice, party?: Party | null,
   doc.setFont("helvetica", "normal");
   doc.setFontSize(9);
   doc.setTextColor(160, 228, 245);
-  doc.text(`# ${invoice.invoiceNo}`, pageWidth - margin, 60, { align: "right" });
+  doc.text(`# ${fullInvoiceNo(invoice)}`, pageWidth - margin, 60, { align: "right" });
 
   let y = bandH + 22;
 
@@ -670,6 +704,52 @@ export async function downloadInvoicePdf(invoice: Invoice, party?: Party | null,
   doc.rect(metaX, panelTop, panelW, panelBottom - panelTop);
   doc.setTextColor(0);
   y = panelBottom + 20;
+
+  // ---- Bill To / Ship To, when the document carries them ----
+  // Only a purchase order does today. The panel above names the *party*; these two name places, and
+  // on an order they are routinely different ones — the bill comes to the office, the material goes
+  // to a site. Printing the delivery address is the whole point of capturing it.
+  const addressPanels: [string, string[]][] = [];
+  const place = (name: string | null, address: string | null, gstin: string | null) =>
+    [name, address, gstin ? `GSTIN: ${gstin}` : null].filter(Boolean) as string[];
+  const billPlace = place(invoice.billToName, invoice.billToAddress, invoice.billToGstin);
+  const shipPlace = place(invoice.shipToName, invoice.shipToAddress, invoice.shipToGstin);
+  if (billPlace.length) addressPanels.push(["BILL TO", billPlace]);
+  if (shipPlace.length) addressPanels.push(["SHIP TO", shipPlace]);
+
+  if (addressPanels.length) {
+    const colW = addressPanels.length === 1 ? contentWidth : contentWidth / 2 - 8;
+    const top = y;
+    let deepest = top;
+    addressPanels.forEach(([title, details], i) => {
+      const x = margin + i * (colW + 16);
+      setFill(NAVY_SOFT);
+      doc.rect(x, top, colW, headerH, "F");
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(8);
+      doc.setTextColor(255, 255, 255);
+      doc.text(title, x + 10, top + 13.5);
+
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(8.5);
+      gray(90);
+      let line = top + headerH + 14;
+      for (const d of details) {
+        // Same wrap-then-advance rule as the Bill To panel above: `maxWidth` alone overprints.
+        for (const wrapped of doc.splitTextToSize(d, colW - 20) as string[]) {
+          doc.text(wrapped, x + 10, line);
+          line += 11;
+        }
+      }
+      deepest = Math.max(deepest, line);
+    });
+    const bottom = deepest + 4;
+    doc.setDrawColor(HAIRLINE[0], HAIRLINE[1], HAIRLINE[2]);
+    doc.setLineWidth(0.75);
+    addressPanels.forEach((_, i) => doc.rect(margin + i * (colW + 16), top, colW, bottom - top));
+    doc.setTextColor(0);
+    y = bottom + 20;
+  }
 
   // ---- Line items — taxable value shown separately from the tax charged on it ----
   const tax = splitTax(invoice.lines, firm, party, invoice.stateOfSupply);
@@ -838,6 +918,31 @@ export async function downloadInvoicePdf(invoice: Invoice, party?: Party | null,
 
   let noteY = Math.max(afterTable + boxH, wordsY + 44) + 26;
 
+  // ---- Bank details, so the customer knows where to pay ----
+  const sigXForBank = pageWidth - margin - 160;
+  if (bank) {
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(8);
+    setText(CYAN);
+    doc.text("BANK DETAILS", margin, noteY);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8.5);
+    gray(90);
+    let bankY = noteY + 12;
+    for (const line of [
+      bank.bankName?.trim() || bank.name,
+      bank.accountHolder?.trim() ? `A/c Name: ${bank.accountHolder.trim()}` : null,
+      bank.accountNumber?.trim() ? `A/c No: ${bank.accountNumber.trim()}` : null,
+      bank.ifsc?.trim() ? `IFSC: ${bank.ifsc.trim()}` : null,
+      bank.upiId?.trim() ? `UPI: ${bank.upiId.trim()}` : null,
+    ].filter(Boolean) as string[]) {
+      doc.text(line, margin, bankY, { maxWidth: sigXForBank - margin - 20 });
+      bankY += 11;
+    }
+    doc.setTextColor(0);
+    noteY = bankY + 14;
+  }
+
   // ---- Terms (left) + signature block (right) ----
   const sigX = pageWidth - margin - 160;
   if (invoice.terms) {
@@ -872,5 +977,5 @@ export async function downloadInvoicePdf(invoice: Invoice, party?: Party | null,
     doc.text(firm.footerNote, margin, noteY, { maxWidth: contentWidth });
   }
 
-  doc.save(`${invoice.invoiceNo || docTitle}-${new Date().toISOString().slice(0, 10)}.pdf`);
+  doc.save(`${fullInvoiceNo(invoice).replace(/[\/:*?"<>|]/g, "-") || docTitle}-${new Date().toISOString().slice(0, 10)}.pdf`);
 }

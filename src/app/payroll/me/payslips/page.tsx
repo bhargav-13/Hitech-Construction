@@ -3,6 +3,8 @@
 import { PayrollShell, PayrollEmpty } from "@/components/payroll/PayrollShell";
 import { Spinner } from "@/components/Spinner";
 import { useMyPayslips } from "@/lib/usePayrollLive";
+import { useAuthStore } from "@/lib/authStore";
+import { usePayrollProfiles } from "@/lib/usePayrollSetup";
 import type { PayslipApi } from "@/lib/api";
 import { inr } from "@/lib/format";
 import { downloadPayslip } from "@/lib/payslipExport";
@@ -21,9 +23,13 @@ function fmtMonth(month: string | null): string {
 
 export default function MyPayslipsPage() {
   const { slips, loading, error } = useMyPayslips();
+  // The member's own profile, so their slip carries designation, PAN and bank account like the one
+  // payroll downloads for them — not a column of dashes.
+  const myId = useAuthStore((s) => s.user?.id);
+  const { profiles } = usePayrollProfiles(myId != null ? [Number(myId)] : undefined);
 
   function slipPdf(p: PayslipApi) {
-    downloadPayslip(p, p.memberName);
+    downloadPayslip(p, p.memberName, { profile: profiles[p.userId] });
   }
 
   return (

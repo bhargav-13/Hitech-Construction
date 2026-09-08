@@ -230,6 +230,7 @@ export default function RfqPage() {
           rfq={quoting.rfq}
           vendors={parties}
           existingVendorId={quoting.vendorId}
+          onVendorAdded={loadMasters}
           onClose={() => setQuoting(null)}
           onSaved={(saved) => {
             splice(saved);

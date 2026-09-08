@@ -93,6 +93,30 @@ function matches(type: FilterType, f: ColumnFilterState, raw: string | number | 
 export function useColumnFilters<T>(rows: T[], columns: Record<string, FilterColumn<T>>) {
   const [filters, setFilters] = useState<ColumnFilters>({});
 
+  /**
+   * The choices a `select` column actually offers: whatever is in the data, plus any the caller
+   * declared, sorted.
+   *
+   * Hardcoding them was wrong in a way that hid rows. Payment Type is not a fixed vocabulary — it
+   * is the name of a bank or cash account, so the books contain "jevin online", "BHAVESHBHAI CASH",
+   * "HI-TECH CONSTRUCTION"; the filter offered Cash / Credit / Bank / UPI / Cheque and none of them
+   * matched anything. Reading the column back off the rows means a filter can always find what is
+   * on screen, whatever the firm has named things.
+   */
+  const options = useMemo(() => {
+    const out: Record<string, string[]> = {};
+    for (const [key, col] of Object.entries(columns)) {
+      if ((col.type ?? "text") !== "select") continue;
+      const seen = new Set<string>(col.options ?? []);
+      for (const row of rows) {
+        const v = col.get(row);
+        if (v != null && String(v).trim() !== "") seen.add(String(v));
+      }
+      out[key] = [...seen].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+    }
+    return out;
+  }, [rows, columns]);
+
   const filtered = useMemo(() => {
     const active = Object.entries(filters);
     if (active.length === 0) return rows;
@@ -116,7 +140,7 @@ export function useColumnFilters<T>(rows: T[], columns: Record<string, FilterCol
 
   const clearAll = () => setFilters({});
 
-  return { filtered, filters, setFilter, clearAll, activeCount: Object.keys(filters).length };
+  return { filtered, filters, setFilter, clearAll, options, activeCount: Object.keys(filters).length };
 }
 
 /**

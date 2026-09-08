@@ -7,7 +7,7 @@ import { Drawer, DrawerField } from "@/components/Drawer";
 import { Select } from "@/components/Select";
 import { Spinner } from "@/components/Spinner";
 import { DatePicker } from "@/components/DatePicker";
-import { RowMenu, RowMenuDivider, RowMenuItem } from "@/components/RowMenu";
+import { InvoiceHistoryDialog, TxnRowActions } from "@/components/vyapar/TxnRowActions";
 import { SortTh } from "@/components/vyapar/SortTh";
 import { useTableSort } from "@/lib/useTableSort";
 import { TAX_RATES } from "@/lib/useItemSettings";
@@ -15,13 +15,13 @@ import { inr } from "@/lib/format";
 import { usePaymentTypeOptions, useBankAccountResolver } from "@/lib/bankScope";
 import { useVyaparProjectId } from "@/lib/projectScope";
 import { useProjects } from "@/lib/useProjects";
-import { downloadPdf } from "@/lib/vyaparExport";
+import { downloadPdf, downloadInvoicePdf, printRows } from "@/lib/vyaparExport";
 import { ExportDialog, type ExportColumn } from "@/components/vyapar/ExportDialog";
 import { ImportDialog } from "@/components/vyapar/ImportDialog";
 import { documentImportConfig } from "@/lib/vyaparImportConfigs";
 import * as vyapar from "@/lib/vyaparApi";
 import type { Invoice, InvoiceLine, Party } from "@/lib/vyaparApi";
-import { Download, FileText, Pencil, Plus, Receipt, Search, Trash2, Upload, X } from "lucide-react";
+import { Download, FileText, Plus, Receipt, Search, Upload, X } from "lucide-react";
 const UNCATEGORISED = "Uncategorised";
 
 /**
@@ -44,6 +44,13 @@ export function ExpenseWorkspace() {
   const [editing, setEditing] = useState<Invoice | null>(null);
   const [exporting, setExporting] = useState(false);
   const [importing, setImporting] = useState(false);
+  /** The expense whose edit history is on screen — the same dialog the document lists use. */
+  const [history, setHistory] = useState<Invoice | null>(null);
+  /**
+   * The catalogue, only so a printed expense can carry HSN per line. An expense often has none
+   * (a cash payment for food is not a catalogue item), so a failed fetch changes nothing.
+   */
+  const [items, setItems] = useState<vyapar.Item[]>([]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -55,6 +62,7 @@ export function ExpenseWorkspace() {
       ]);
       setExpenses(inv);
       setParties(pty);
+      vyapar.getItems(projectId).then(setItems).catch(() => {});
     } catch (err) {
       setError(err instanceof Error ? err.message : "Couldn't load expenses.");
     } finally {
@@ -185,6 +193,35 @@ export function ExpenseWorkspace() {
     } catch (err) {
       setError(err instanceof Error ? err.message : "Couldn't delete this expense.");
     }
+  }
+
+  /** Runs a document action and reloads, reporting the failure rather than swallowing it. */
+  async function run(action: () => Promise<unknown>, failure: string) {
+    try {
+      await action();
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : failure);
+    }
+  }
+
+  async function cancel(e: Invoice) {
+    const verb = e.cancelled ? "Reopen" : "Cancel";
+    if (!confirm(`${verb} this expense of ${inr(e.total)}?`)) return;
+    run(
+      () => (e.cancelled ? vyapar.reopenInvoice(e.id) : vyapar.cancelInvoice(e.id)),
+      `Couldn't ${verb.toLowerCase()} this expense.`,
+    );
+  }
+
+  /** Print one expense with its lines — the same renderer the register export uses. */
+  function printOne(e: Invoice) {
+    printRows(
+      `Expense · ${e.invoiceNo || catOf(e)}`,
+      ["Item", "Qty", "Rate", "Tax", "Amount"],
+      e.lines.map((l) => [l.itemName, l.quantity, inr(l.rate), inr(l.taxAmount), inr(l.amount)]),
+      `${e.partyName ?? "—"} · ${formatDate(e.invoiceDate)} · Total ${inr(e.total)}`,
+    );
   }
 
   return (
@@ -339,15 +376,26 @@ export function ExpenseWorkspace() {
                         <span className={`rounded-md px-2 py-0.5 text-xs font-medium ${e.status === "Paid" ? "bg-emerald-50 text-emerald-700" : e.status === "Partial" ? "bg-amber-50 text-amber-700" : "bg-rose-50 text-rose-700"}`}>{e.status}</span>
                       </td>
                       <td className="px-4 py-2.5 text-right" onClick={(ev) => ev.stopPropagation()}>
-                        <RowMenu align="right" buttonLabel="Expense actions">
-                          {(close) => (
-                            <>
-                              <RowMenuItem icon={Pencil} label="View/Edit" onClick={() => { close(); setEditing(e); }} />
-                              <RowMenuDivider />
-                              <RowMenuItem icon={Trash2} label="Delete" tone="danger" onClick={() => { close(); remove(e); }} />
-                            </>
-                          )}
-                        </RowMenu>
+                        {/* The same action set every other document row carries. An expense used to
+                            offer View/Edit and Delete only — no PDF, no print, no duplicate — even
+                            though it is the document a site spends against most often. */}
+                        <TxnRowActions
+                          docType="EXPENSE"
+                          cancelled={e.cancelled}
+                          hasBalance={e.balance > 0}
+                          label={e.invoiceNo || catOf(e)}
+                          handlers={{
+                            onEdit: () => setEditing(e),
+                            onDelete: () => remove(e),
+                            onPreview: () => setEditing(e),
+                            onPrint: () => printOne(e),
+                            onShare: () => downloadInvoicePdf(e, parties.find((p) => p.id === e.partyId), items),
+                            onHistory: () => setHistory(e),
+                            onDuplicate: () => run(() => vyapar.duplicateInvoice(e.id), "Couldn't duplicate this expense."),
+                            onCancel: () => cancel(e),
+                            onReopen: () => cancel(e),
+                          }}
+                        />
                       </td>
                     </tr>
                     );
@@ -399,6 +447,8 @@ export function ExpenseWorkspace() {
           onClose={() => setExporting(false)}
         />
       )}
+
+      {history && <InvoiceHistoryDialog invoice={history} onClose={() => setHistory(null)} />}
     </div>
   );
 }

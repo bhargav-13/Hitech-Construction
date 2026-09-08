@@ -112,7 +112,11 @@ export interface Exposure {
    */
   emdRecoverable: number;
   securityByType: Record<SecurityType, number>;
-  additionalByType: Record<SecurityType, number>;
+  /**
+   * Keyed by whatever the tender calls its additional security — free text, so this map is open
+   * rather than one entry per {@link SecurityType}.
+   */
+  additionalByType: Record<string, number>;
   securityBlocked: number;
   /** Cost of carrying bank guarantees — a real expense, not blocked capital. */
   bgCharges: number;
@@ -143,7 +147,7 @@ export function exposure(tenders: Tender[]): Exposure {
     emdRequired: 0,
     emdRecoverable: 0,
     securityByType: zeroSecurity(),
-    additionalByType: zeroSecurity(),
+    additionalByType: {},
     securityBlocked: 0,
     bgCharges: 0,
     feeSpent: 0,
@@ -175,7 +179,8 @@ export function exposure(tenders: Tender[]): Exposure {
         e.securityBlocked += t.securityAmount;
       }
       if (t.additionalSecurityType && t.additionalSecurityAmount) {
-        e.additionalByType[t.additionalSecurityType] += t.additionalSecurityAmount;
+        e.additionalByType[t.additionalSecurityType] =
+          (e.additionalByType[t.additionalSecurityType] ?? 0) + t.additionalSecurityAmount;
         e.securityBlocked += t.additionalSecurityAmount;
       }
     }

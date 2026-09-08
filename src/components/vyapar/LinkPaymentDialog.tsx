@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useDiscardGuard } from "@/lib/formDirty";
 import { Spinner } from "@/components/Spinner";
 import { Select } from "@/components/Select";
 import { inr, bookDate } from "@/lib/format";
@@ -124,13 +125,20 @@ export function LinkPaymentDialog({
     onDone(links, amount);
   }
 
+  // Allocations typed across a dozen invoices are not something to lose to a backdrop click.
+  const { panelRef, confirmDiscard } = useDiscardGuard();
+  const dismiss = () => confirmDiscard() && onClose();
+
   return (
     <>
-      <div className="fixed inset-0 z-40 bg-black/30" onClick={onClose} />
-      <div className="animate-fade-in fixed left-1/2 top-1/2 z-50 flex max-h-[88vh] w-[min(880px,94vw)] -translate-x-1/2 -translate-y-1/2 flex-col rounded-xl border border-gray-200 bg-white shadow-2xl">
+      <div className="fixed inset-0 z-40 bg-black/30" onClick={dismiss} />
+      <div
+        ref={panelRef}
+        className="animate-fade-in fixed top-1/2 left-1/2 z-50 flex max-h-[88vh] w-[min(880px,94vw)] -translate-x-1/2 -translate-y-1/2 flex-col rounded-xl border border-gray-200 bg-white shadow-2xl"
+      >
         <div className="flex items-center justify-between border-b border-gray-100 px-5 py-3">
           <h3 className="text-base font-semibold text-gray-800">Link Payment to Txns</h3>
-          <button onClick={onClose} aria-label="Close" className="rounded-md p-1 text-gray-400 hover:bg-gray-100">
+          <button onClick={dismiss} aria-label="Close" className="rounded-md p-1 text-gray-400 hover:bg-gray-100">
             <X size={16} />
           </button>
         </div>
