@@ -11,6 +11,9 @@ export const NAV_ITEMS: NavItem[] = [
   { label: "Vyapar", href: "/vyapar" },
   { label: "Procurement", href: "/procurement" },
   { label: "Payroll", href: "/payroll" },
+  // Screens are built and navigable; nothing is persisted server-side yet, so it carries the badge
+  // until warehouse-service lands. See WarehouseShell for the same warning from inside the module.
+  { label: "Warehouse", href: "/warehouse", badge: "Soon" },
   { label: "Audit", href: "/audit" },
   { label: "Library", href: "/library" },
   { label: "Setting", href: "/settings" },
@@ -19,7 +22,6 @@ export const NAV_ITEMS: NavItem[] = [
   // { label: "Team Schedule", href: "/team-schedule" },
   // { label: "Finance", href: "/finance" },
   // { label: "CRM", href: "/crm" },
-  // { label: "Warehouse", href: "/warehouse" },
   // { label: "Equipment", href: "/equipment" },
   // { label: "Asset", href: "/asset" },
   // { label: "Services", href: "/services" },

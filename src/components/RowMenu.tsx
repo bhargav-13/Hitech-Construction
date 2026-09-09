@@ -117,12 +117,22 @@ export function RowMenuItem({
   onClick,
   tone = "default",
   iconClassName,
+  disabled = false,
+  disabledHint,
 }: {
   icon?: React.ComponentType<{ size?: number; className?: string }>;
   label: string;
   onClick: () => void;
   tone?: "default" | "warning" | "danger";
   iconClassName?: string;
+  /**
+   * Greyed rather than hidden. An action someone lacks the rights for is worth *seeing*: it tells
+   * them the capability exists and who to ask, where a menu that silently omits it reads as the
+   * feature not existing at all.
+   */
+  disabled?: boolean;
+  /** Why it is unavailable, on hover. */
+  disabledHint?: string;
 }) {
   const toneCls =
     tone === "danger"
@@ -133,7 +143,9 @@ export function RowMenuItem({
   return (
     <button
       onClick={onClick}
-      className={`flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm transition-colors duration-150 ${toneCls}`}
+      disabled={disabled}
+      title={disabled ? disabledHint : undefined}
+      className={`flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm transition-colors duration-150 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent ${toneCls}`}
     >
       {Icon && <Icon size={14} className={iconClassName ?? (tone === "default" ? "text-gray-400" : "")} />}
       {label}
