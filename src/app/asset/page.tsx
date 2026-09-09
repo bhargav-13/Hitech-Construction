@@ -27,7 +27,7 @@ const SEED: Asset[] = [
 export default function AssetPage() {
   const [assets, setAssets] = useState(SEED);
   const [showAdd, setShowAdd] = useState(false);
-
+// abcd
   function assign(id: string) {
     setAssets(assets.map((a) => (a.id === id && a.available > 0 ? { ...a, available: a.available - 1 } : a)));
   }
