@@ -75,6 +75,7 @@ export function MovementDialog({
   const [sourceDocNo, setSourceDocNo] = useState("");
   const [note, setNote] = useState("");
   const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
 
   const preset = presetItemId == null ? undefined : items.find((i) => i.id === presetItemId);
   const itemText = itemTextEdit ?? preset?.name ?? "";
@@ -102,7 +103,14 @@ export function MovementDialog({
 
   const title = isTransfer ? "Transfer stock" : `${meta.label.replace(/ed$/, "e")} stock`;
 
-  function save() {
+  /**
+   * The checks below are a courtesy — the server runs them again and is the one that decides. So
+   * nothing closes until the write has actually landed: a refusal ("you cannot move more than
+   * that") is usually the module working correctly, and the person needs to read it with their
+   * entry still in front of them rather than after the drawer has thrown it away.
+   */
+  async function save() {
+    if (saving) return;
     if (itemId == null) return setError("Pick the item from the catalogue.");
     if (wanted <= 0) return setError("Enter a quantity.");
     if (overdrawn) return setError(`Only ${fmtQty(onHand)} on hand — you cannot issue more than that.`);
@@ -112,41 +120,55 @@ export function MovementDialog({
     if (isIssue && target === "WORKER" && !issuedToUserId) return setError("Who is taking it?");
     if (isAdjust && !note.trim()) return setError("An adjustment needs a reason — that is its only record.");
 
-    if (isTransfer) {
-      transfer({
-        fromWarehouseId: warehouseId,
-        toWarehouseId: counterWarehouseId,
-        itemId,
-        quantity: wanted,
-        rate: Number(rate) || 0,
-        movedOn,
-        note: note.trim() || null,
-        byUserId: null,
-      });
-    } else {
-      record({
-        warehouseId,
-        itemId,
-        kind,
-        quantity: wanted,
-        rate: Number(rate) || 0,
-        movedOn,
-        byUserId: null,
-        target: isIssue ? target : null,
-        projectId: isIssue && target === "PROJECT" ? projectId || null : null,
-        partyId: isReceipt || (isIssue && target === "SUBCONTRACTOR") ? Number(partyId) || null : null,
-        issuedToUserId: isIssue && target === "WORKER" ? issuedToUserId || null : null,
-        counterWarehouseId: null,
-        sourceDocNo: sourceDocNo.trim() || null,
-        requestId: null,
-        note: note.trim() || null,
-      });
+    setSaving(true);
+    setError("");
+    try {
+      if (isTransfer) {
+        await transfer({
+          fromWarehouseId: warehouseId,
+          toWarehouseId: counterWarehouseId,
+          itemId,
+          quantity: wanted,
+          rate: Number(rate) || 0,
+          movedOn,
+          note: note.trim() || null,
+          byUserId: null,
+        });
+      } else {
+        await record({
+          warehouseId,
+          itemId,
+          kind,
+          quantity: wanted,
+          rate: Number(rate) || 0,
+          movedOn,
+          byUserId: null,
+          target: isIssue ? target : null,
+          projectId: isIssue && target === "PROJECT" ? projectId || null : null,
+          partyId: isReceipt || (isIssue && target === "SUBCONTRACTOR") ? Number(partyId) || null : null,
+          issuedToUserId: isIssue && target === "WORKER" ? issuedToUserId || null : null,
+          counterWarehouseId: null,
+          sourceDocNo: sourceDocNo.trim() || null,
+          requestId: null,
+          note: note.trim() || null,
+        });
+      }
+      onClose();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "The store refused that entry.");
+    } finally {
+      setSaving(false);
     }
-    onClose();
   }
 
   return (
-    <Drawer title={title} onClose={onClose} onSave={save} saveLabel="Record" width="max-w-2xl">
+    <Drawer
+      title={title}
+      onClose={onClose}
+      onSave={() => void save()}
+      saveLabel={saving ? "Recording…" : "Record"}
+      width="max-w-2xl"
+    >
       <div className="space-y-5">
         {error && <div className="rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-600">{error}</div>}
 

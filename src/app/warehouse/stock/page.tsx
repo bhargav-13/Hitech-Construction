@@ -8,7 +8,7 @@ import { Select } from "@/components/Select";
 import { SortTh } from "@/components/vyapar/SortTh";
 import { RowMenu, RowMenuDivider, RowMenuItem } from "@/components/RowMenu";
 import { useTableSort } from "@/lib/useTableSort";
-import { useWarehouseStore, stockByItem, reservedByItem } from "@/lib/warehouseStore";
+import { useWarehouseStore, stockByItem, reservedByItem, reportRefusal } from "@/lib/warehouseStore";
 import { useWarehouseScope, useWarehouseRights } from "@/lib/warehouseScope";
 import type { MovementKind, StockRow } from "@/lib/warehouseTypes";
 import { inr, qty as fmtQty } from "@/lib/format";
@@ -315,7 +315,7 @@ export default function WarehouseStockPage() {
           row={tuning}
           onClose={() => setTuning(null)}
           onSave={(reorderLevel, binLocation) => {
-            setStockSetting(tuning.warehouseId, tuning.item.id, { reorderLevel, binLocation });
+            setStockSetting(tuning.warehouseId, tuning.item.id, { reorderLevel, binLocation }).catch(reportRefusal);
             setTuning(null);
           }}
         />

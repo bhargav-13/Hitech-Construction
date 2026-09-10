@@ -6,7 +6,7 @@ import { WarehouseShell, WarehouseHeader, WarehouseEmpty } from "@/components/wa
 import { Drawer, DrawerField } from "@/components/Drawer";
 import { Select } from "@/components/Select";
 import { RowMenu, RowMenuDivider, RowMenuItem } from "@/components/RowMenu";
-import { useWarehouseStore, stockByItem } from "@/lib/warehouseStore";
+import { useWarehouseStore, stockByItem, reportRefusal } from "@/lib/warehouseStore";
 import { useWarehouseRights } from "@/lib/warehouseScope";
 import { WAREHOUSE_KIND_META } from "@/lib/warehouseConfig";
 import type { Warehouse, WarehouseKind } from "@/lib/warehouseTypes";
@@ -149,7 +149,7 @@ export default function WarehouseLocationsPage() {
                           icon={Power}
                           label={w.isActive ? "Close this store" : "Reopen"}
                           disabled={!rights.canAdminister}
-                          onClick={() => { close(); updateWarehouse(w.id, { isActive: !w.isActive }); }}
+                          onClick={() => { close(); updateWarehouse(w.id, { isActive: !w.isActive }).catch(reportRefusal); }}
                         />
                         <RowMenuDivider />
                         <RowMenuItem
@@ -163,7 +163,7 @@ export default function WarehouseLocationsPage() {
                             const warning = used
                               ? `${w.name} has movements against it, so it will be closed rather than deleted — its history explains stock elsewhere. Continue?`
                               : `Delete ${w.name}?`;
-                            if (confirm(warning)) removeWarehouse(w.id);
+                            if (confirm(warning)) removeWarehouse(w.id).catch(reportRefusal);
                           }}
                         />
                       </>
@@ -196,8 +196,8 @@ export default function WarehouseLocationsPage() {
             setEditing(null);
           }}
           onSave={(draft) => {
-            if (editing) updateWarehouse(editing.id, draft);
-            else addWarehouse({ ...draft, isActive: true });
+            if (editing) updateWarehouse(editing.id, draft).catch(reportRefusal);
+            else addWarehouse({ ...draft, isActive: true }).catch(reportRefusal);
             setCreating(false);
             setEditing(null);
           }}

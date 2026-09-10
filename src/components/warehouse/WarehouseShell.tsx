@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useMemo } from "react";
+import { Suspense, useEffect, useMemo } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { AppShell } from "@/components/AppShell";
@@ -11,7 +11,6 @@ import { useWarehouseStore, checkoutsOf, stockByItem } from "@/lib/warehouseStor
 import { useWarehouseScope } from "@/lib/warehouseScope";
 import {
   ArrowLeftRight,
-  Construction,
   Boxes,
   ClipboardList,
   FileText,
@@ -19,6 +18,7 @@ import {
   Home,
   PanelLeftClose,
   PanelLeftOpen,
+  TriangleAlert,
   Users,
   Warehouse as WarehouseIcon,
 } from "lucide-react";
@@ -54,7 +54,15 @@ export function WarehouseShell({ children }: { children: React.ReactNode }) {
   const movements = useWarehouseStore((s) => s.movements);
   const requests = useWarehouseStore((s) => s.requests);
   const settings = useWarehouseStore((s) => s.settings);
+  const load = useWarehouseStore((s) => s.load);
+  const loadError = useWarehouseStore((s) => s.error);
   const { warehouseId, setWarehouseId, warehouse } = useWarehouseScope();
+
+  // Every screen in the module sits inside this shell, so one load here covers all of them. The
+  // store ignores a second call while one is in flight, which is what makes that safe.
+  useEffect(() => {
+    void load();
+  }, [load]);
 
   const badges = useMemo(() => {
     const scoped = warehouseId === "all" ? movements : movements.filter((m) => m.warehouseId === warehouseId);
@@ -133,19 +141,19 @@ export function WarehouseShell({ children }: { children: React.ReactNode }) {
 
         <div className="min-w-0 flex-1 space-y-4">
           {/*
-            Said once, at the top of every screen, because the screens themselves look finished.
-            Someone who receives a week of deliveries into this and then finds it on one browser has
-            been misled by us, not by their own carelessness — and a badge in the sidebar is easy to
-            miss once you are three clicks in.
+            Said at the top of every screen when it happens, because the screens below would
+            otherwise read as an empty warehouse rather than as one we failed to fetch — and someone
+            who trusts that reading will go and receive stock that is already there.
           */}
-          <div className="flex items-start gap-2.5 rounded-xl border border-amber-200 bg-amber-50/70 px-4 py-2.5 text-sm text-amber-900">
-            <Construction size={16} className="mt-0.5 shrink-0" />
-            <p>
-              <strong>Coming soon.</strong> The screens work, but nothing is saved to the server yet —
-              entries live in this browser only and will not be visible to anyone else. Use it to check
-              the flow, not to run the stores.
-            </p>
-          </div>
+          {loadError && (
+            <div className="flex items-start gap-2.5 rounded-xl border border-rose-200 bg-rose-50/70 px-4 py-2.5 text-sm text-rose-900">
+              <TriangleAlert size={16} className="mt-0.5 shrink-0" />
+              <p>
+                <strong>Couldn&apos;t load the warehouse.</strong> {loadError} Figures below may be
+                out of date or missing — reload before recording anything.
+              </p>
+            </div>
+          )}
 
           {/* Which store — the question behind every figure in this module. */}
           <div className="flex flex-wrap items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 py-2">

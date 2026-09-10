@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { WarehouseShell, WarehouseHeader, WarehouseEmpty } from "@/components/warehouse/WarehouseShell";
 import { Select } from "@/components/Select";
-import { useWarehouseStore } from "@/lib/warehouseStore";
+import { useWarehouseStore, reportRefusal } from "@/lib/warehouseStore";
 import { useWarehouseRights } from "@/lib/warehouseScope";
 import { WAREHOUSE_ROLE_META, type WarehouseRole } from "@/lib/warehouseTypes";
 import { WAREHOUSE_KIND_META } from "@/lib/warehouseConfig";
@@ -180,7 +180,7 @@ export default function WarehouseAccessPage() {
                       <Select
                         value={current}
                         onChange={(v) =>
-                          setMemberRole(w.id, u.id, v === "" ? null : (v as WarehouseRole))
+                          void setMemberRole(w.id, u.id, v === "" ? null : (v as WarehouseRole)).catch(reportRefusal)
                         }
                         size="sm"
                         disabled={!rights.canAdminister}

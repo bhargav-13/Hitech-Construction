@@ -65,14 +65,15 @@ export function useWarehouseRights(warehouseId: string): {
 } {
   const permissions = useAuthStore((s) => s.user?.permissions) ?? [];
   const roleName = useAuthStore((s) => s.user?.role.name) ?? "";
-  const members = useWarehouseStore((s) => s.members);
-  const meId = String(useAuthStore((s) => s.user?.id) ?? "");
+  const access = useWarehouseStore((s) => s.access);
+  const loaded = useWarehouseStore((s) => s.loaded);
 
   const isSuperAdmin = roleName.toLowerCase() === "super admin";
   const has = (p: string) => permissions.includes(p);
 
-  const membership = members.find((m) => m.warehouseId === warehouseId && m.userId === meId);
-  const role: WarehouseRole | null = membership?.role ?? (isSuperAdmin ? "SUPERVISOR" : null);
+  // The server's answer, not one worked out from membership rows: standing can also be inherited
+  // from running the site's project, which leaves no row to find. See warehouseStore.access.
+  const role: WarehouseRole | null = access[warehouseId] ?? null;
 
   const canView = has("WAREHOUSE:VIEW") || isSuperAdmin;
   const inStore = warehouseId !== "all" && role !== null;
@@ -81,15 +82,20 @@ export function useWarehouseRights(warehouseId: string): {
   const canApprove = canView && inStore && role === "SUPERVISOR" && (has("WAREHOUSE:APPROVE") || isSuperAdmin);
   const canAdminister = has("WAREHOUSE:EDIT") || isSuperAdmin;
 
+  // Until the standings arrive, everything is read-only and says so honestly. Failing closed is the
+  // right way round — the alternative offers buttons the server is about to refuse — but "you
+  // aren't on this store's team" would be a false accusation while we simply have not asked yet.
   const reason = !canView
     ? "You don't have access to Warehouse."
-    : warehouseId === "all"
-      ? "Pick a single store to record movements."
-      : role === null
-        ? "You aren't on this store's team, so it's read-only."
-        : role === "VIEWER"
-          ? "You have view-only access to this store."
-          : null;
+    : !loaded
+      ? "Still loading this store's team…"
+      : warehouseId === "all"
+        ? "Pick a single store to record movements."
+        : role === null
+          ? "You aren't on this store's team, so it's read-only."
+          : role === "VIEWER"
+            ? "You have view-only access to this store."
+            : null;
 
   return { role, canView, canMove, canApprove, canAdminister, reason };
 }

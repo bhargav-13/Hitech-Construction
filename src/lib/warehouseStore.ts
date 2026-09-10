@@ -1,11 +1,10 @@
 "use client";
 
 import { create } from "zustand";
-import { persist, createJSONStorage } from "zustand/middleware";
+import * as api from "./warehouseApi";
 import type {
   Checkout,
   MaterialRequest,
-  MovementKind,
   StockMovement,
   StockSetting,
   Warehouse,
@@ -14,71 +13,137 @@ import type {
 import { MOVEMENT_META } from "./warehouseTypes";
 
 /**
- * Warehouse state, UI-first.
+ * Warehouse state, backed by warehouse-service.
  *
- * The module is being built screen-first and wired to `warehouse-service` after, so this holds the
- * data locally — but it is shaped as the API will be, not as a screen finds convenient. Every list
- * is flat and id-keyed, every derivation (`stockOf`, `checkouts`) is a function over movements
- * rather than a stored number, and nothing here computes a total that a server would later compute
- * differently. Swapping the seed for fetches should not move a single component.
+ * This used to hold the data in localStorage while the screens were being built. It now holds a
+ * cache of what the server said, and the shape did not have to change to make that true: every list
+ * was already flat and id-keyed, and every figure was already derived from the movement rows rather
+ * than stored. Swapping the seed for fetches moved no component, which was the point of building it
+ * that way.
  *
- * The one rule worth stating: **stock is never assigned, only moved.** There is no `setStock`. If a
- * count disagrees with the book you post an ADJUSTMENT with a reason, and the ledger keeps both
- * facts. That is the whole difference between a store you can audit and a spreadsheet.
+ * Three things about how it works now:
+ *
+ *  - **Ids are strings here and numbers on the wire.** The screens were written against string ids,
+ *    so the conversion happens at this edge and nowhere else. Item ids stay numbers on both sides —
+ *    they are Vyapar item ids and were always numeric.
+ *  - **Every mutator writes through and re-reads.** No optimistic local edit: the server applies
+ *    rules the client does not know (it can refuse an issue that would go negative, and it moves a
+ *    request from APPROVED to PARTIAL on its own), so the honest thing after a write is to ask what
+ *    actually happened rather than to assume.
+ *  - **A rejected write throws.** Callers surface it; nothing here swallows a refusal, because a
+ *    refusal is usually the module working correctly and the person needs to read it.
+ *
+ * The one rule worth restating: **stock is never assigned, only moved.** There is no `setStock` on
+ * either side. If a count disagrees with the book you post an ADJUSTMENT with a reason and the
+ * ledger keeps both facts. That is the whole difference between a store you can audit and a
+ * spreadsheet.
  */
 
 const today = () => new Date().toISOString().slice(0, 10);
 const uid = (p: string) => `${p}-${Math.random().toString(36).slice(2, 9)}`;
 
-/** "GRN-2026-0007" — running per prefix, mirroring how the rest of the app numbers documents. */
-function nextNumber(prefix: string, existing: string[]): string {
-  const year = new Date().getFullYear();
-  const stem = `${prefix}-${year}-`;
-  const used = existing
-    .filter((n) => n.startsWith(stem))
-    .map((n) => Number(n.slice(stem.length)))
-    .filter((n) => Number.isFinite(n));
-  const next = (used.length ? Math.max(...used) : 0) + 1;
-  return `${stem}${String(next).padStart(4, "0")}`;
+/** null and "" both mean "no id" coming back from the server; everything else is a number. */
+const numOrNull = (v: string | null): number | null => {
+  if (v === null || v.trim() === "") return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+};
+const strOrNull = (v: number | null): string | null => (v === null ? null : String(v));
+
+// ---------------------------------------------------------------- mapping
+
+function toWarehouse(w: api.ApiWarehouse): Warehouse {
+  return {
+    id: String(w.id),
+    code: w.code,
+    name: w.name,
+    kind: w.kind,
+    projectId: strOrNull(w.projectId),
+    address: w.address,
+    inChargeUserId: strOrNull(w.inChargeUserId),
+    isActive: w.isActive,
+  };
 }
 
-const NUMBER_PREFIX: Record<MovementKind, string> = {
-  RECEIPT: "GRN",
-  ISSUE: "ISS",
-  TRANSFER_OUT: "TRF",
-  TRANSFER_IN: "TRF",
-  RETURN: "RTN",
-  ADJUSTMENT: "ADJ",
-};
+function toMember(m: api.ApiMember): WarehouseMember {
+  return {
+    id: String(m.id),
+    warehouseId: String(m.warehouseId),
+    userId: String(m.userId),
+    role: m.role,
+  };
+}
 
-// ---------------------------------------------------------------- seed
-//
-// Enough to read every screen as a real store rather than an empty one, and no more. Item ids are
-// left to be matched against the live Vyapar catalogue — a seeded item *name* would be a second
-// catalogue, which is exactly what this module must not have.
+function toSetting(s: api.ApiStockSetting): StockSetting {
+  return {
+    id: String(s.id),
+    warehouseId: String(s.warehouseId),
+    itemId: s.itemId,
+    reorderLevel: s.reorderLevel ?? 0,
+    binLocation: s.binLocation,
+  };
+}
 
-const SEED_WAREHOUSES: Warehouse[] = [
-  {
-    id: "wh-central",
-    code: "CS",
-    name: "Central Store — Rajkot",
-    kind: "CENTRAL",
-    projectId: null,
-    address: "150 Feet Ring Road, Rajkot",
-    inChargeUserId: null,
-    isActive: true,
-  },
-  {
-    id: "wh-transit",
-    code: "TRN",
-    name: "In Transit",
-    kind: "TRANSIT",
-    projectId: null,
-    address: null,
-    inChargeUserId: null,
-    isActive: true,
-  },
-];
+function toMovement(m: api.ApiMovement): StockMovement {
+  return {
+    id: String(m.id),
+    number: m.number,
+    warehouseId: String(m.warehouseId),
+    itemId: m.itemId,
+    kind: m.kind,
+    quantity: m.quantity,
+    rate: m.rate ?? 0,
+    movedOn: m.movedOn,
+    byUserId: strOrNull(m.byUserId),
+    target: (m.target as StockMovement["target"]) ?? null,
+    projectId: strOrNull(m.projectId),
+    partyId: m.partyId,
+    issuedToUserId: strOrNull(m.issuedToUserId),
+    counterWarehouseId: strOrNull(m.counterWarehouseId),
+    sourceDocNo: m.sourceDocNo,
+    requestId: strOrNull(m.requestId),
+    note: m.note,
+  };
+}
+
+function toRequest(r: api.ApiMaterialRequest): MaterialRequest {
+  return {
+    id: String(r.id),
+    number: r.number,
+    warehouseId: String(r.warehouseId),
+    projectId: strOrNull(r.projectId),
+    requestedByUserId: strOrNull(r.requestedByUserId),
+    raisedOn: r.raisedOn,
+    neededBy: r.neededBy,
+    status: r.status,
+    decidedByUserId: strOrNull(r.decidedByUserId),
+    decisionNote: r.decisionNote,
+    note: r.note,
+    lines: r.lines.map((l) => ({
+      id: String(l.id),
+      itemId: l.itemId,
+      quantity: l.quantity,
+      issuedQuantity: l.issuedQuantity,
+    })),
+  };
+}
+
+/** The full write shape the server wants for a store, built from what we hold plus a patch. */
+function warehouseInput(w: Warehouse): api.ApiWarehouseInput {
+  return {
+    code: w.code,
+    name: w.name,
+    // TRANSIT is the migration's to create, and the server refuses it here — a second in-transit
+    // store is one that transfers would not use.
+    kind: w.kind === "TRANSIT" ? "SITE" : w.kind,
+    projectId: numOrNull(w.projectId),
+    address: w.address,
+    inChargeUserId: numOrNull(w.inChargeUserId),
+    isActive: w.isActive,
+  };
+}
+
+// ---------------------------------------------------------------- store
 
 interface WarehouseState {
   warehouses: Warehouse[];
@@ -87,19 +152,42 @@ interface WarehouseState {
   movements: StockMovement[];
   requests: MaterialRequest[];
 
+  /**
+   * This member's standing in each store they can reach, keyed by warehouse id — the server's
+   * answer, not one reconstructed here.
+   *
+   * It has to come from the server because one of the two ways to get standing leaves no membership
+   * row: whoever runs a site's project can read that site's store. Working it out from `members`
+   * would show those people a locked screen they are in fact allowed to read.
+   */
+  access: Record<string, WarehouseMember["role"]>;
+
+  /** False until the first load finishes, so a screen can tell "empty" from "not asked yet". */
+  loaded: boolean;
+  loading: boolean;
+  /** Set when the last load failed — the shell shows it rather than an empty store. */
+  error: string | null;
+
+  /** Fetches everything this member may see. Safe to call on every mount. */
+  load: () => Promise<void>;
+
   // ---- warehouses ----
-  addWarehouse: (w: Omit<Warehouse, "id">) => Warehouse;
-  updateWarehouse: (id: string, patch: Partial<Warehouse>) => void;
-  removeWarehouse: (id: string) => void;
+  addWarehouse: (w: Omit<Warehouse, "id">) => Promise<void>;
+  updateWarehouse: (id: string, patch: Partial<Warehouse>) => Promise<void>;
+  removeWarehouse: (id: string) => Promise<void>;
 
   // ---- access ----
-  setMemberRole: (warehouseId: string, userId: string, role: WarehouseMember["role"] | null) => void;
+  setMemberRole: (
+    warehouseId: string,
+    userId: string,
+    role: WarehouseMember["role"] | null,
+  ) => Promise<void>;
 
   // ---- per-store item settings ----
-  setStockSetting: (warehouseId: string, itemId: number, patch: Partial<StockSetting>) => void;
+  setStockSetting: (warehouseId: string, itemId: number, patch: Partial<StockSetting>) => Promise<void>;
 
   // ---- movements ----
-  record: (m: Omit<StockMovement, "id" | "number">) => StockMovement;
+  record: (m: Omit<StockMovement, "id" | "number">) => Promise<void>;
   /** A transfer is one act and two rows, so both stores' ledgers read correctly. */
   transfer: (input: {
     fromWarehouseId: string;
@@ -110,152 +198,202 @@ interface WarehouseState {
     movedOn: string;
     note: string | null;
     byUserId: string | null;
-  }) => void;
-  removeMovement: (id: string) => void;
+  }) => Promise<void>;
 
   // ---- requests ----
-  saveRequest: (r: MaterialRequest) => void;
-  setRequestStatus: (id: string, status: MaterialRequest["status"], note?: string) => void;
-  removeRequest: (id: string) => void;
+  saveRequest: (r: MaterialRequest) => Promise<void>;
+  setRequestStatus: (id: string, status: MaterialRequest["status"], note?: string) => Promise<void>;
+  removeRequest: (id: string) => Promise<void>;
 }
 
-export const useWarehouseStore = create<WarehouseState>()(
-  persist(
-    (set, get) => ({
-      warehouses: SEED_WAREHOUSES,
-      members: [],
-      settings: [],
-      movements: [],
-      requests: [],
+export const useWarehouseStore = create<WarehouseState>()((set, get) => ({
+  warehouses: [],
+  members: [],
+  settings: [],
+  movements: [],
+  requests: [],
+  access: {},
+  loaded: false,
+  loading: false,
+  error: null,
 
-      addWarehouse: (w) => {
-        const created: Warehouse = { ...w, id: uid("wh") };
-        set((s) => ({ warehouses: [...s.warehouses, created] }));
-        return created;
-      },
+  load: async () => {
+    if (get().loading) return;
+    set({ loading: true });
+    try {
+      // The lists are fetched together; members need the store ids first, so they follow.
+      const [warehouses, settings, movements, requests, access] = await Promise.all([
+        api.getWarehouses(),
+        api.getStockSettings(),
+        api.getMovements(),
+        api.getRequests(),
+        api.getMyAccess(),
+      ]);
 
-      updateWarehouse: (id, patch) =>
-        set((s) => ({ warehouses: s.warehouses.map((w) => (w.id === id ? { ...w, ...patch } : w)) })),
-
-      /**
-       * Deactivates rather than deletes once a store has history. A store that has issued material
-       * cannot be removed without orphaning the movements that explain today's stock elsewhere.
-       */
-      removeWarehouse: (id) =>
-        set((s) => {
-          const used = s.movements.some((m) => m.warehouseId === id || m.counterWarehouseId === id);
-          return used
-            ? { warehouses: s.warehouses.map((w) => (w.id === id ? { ...w, isActive: false } : w)) }
-            : {
-                warehouses: s.warehouses.filter((w) => w.id !== id),
-                members: s.members.filter((m) => m.warehouseId !== id),
-                settings: s.settings.filter((x) => x.warehouseId !== id),
-              };
-        }),
-
-      setMemberRole: (warehouseId, userId, role) =>
-        set((s) => {
-          const rest = s.members.filter((m) => !(m.warehouseId === warehouseId && m.userId === userId));
-          return role === null
-            ? { members: rest }
-            : { members: [...rest, { id: uid("whm"), warehouseId, userId, role }] };
-        }),
-
-      setStockSetting: (warehouseId, itemId, patch) =>
-        set((s) => {
-          const existing = s.settings.find((x) => x.warehouseId === warehouseId && x.itemId === itemId);
-          if (existing) {
-            return { settings: s.settings.map((x) => (x.id === existing.id ? { ...x, ...patch } : x)) };
-          }
-          return {
-            settings: [
-              ...s.settings,
-              { id: uid("ss"), warehouseId, itemId, reorderLevel: 0, binLocation: null, ...patch },
-            ],
-          };
-        }),
-
-      record: (m) => {
-        const created: StockMovement = {
-          ...m,
-          id: uid("mv"),
-          number: nextNumber(
-            NUMBER_PREFIX[m.kind],
-            get().movements.map((x) => x.number),
+      const members = (
+        await Promise.all(
+          warehouses.map((w) =>
+            // A store whose team this member may not read is not a failed load — it is one team
+            // they cannot see, and the rest of the module still works without it.
+            api.getMembers(w.id).catch(() => [] as api.ApiMember[]),
           ),
-        };
-        set((s) => ({ movements: [created, ...s.movements] }));
-        return created;
-      },
+        )
+      ).flat();
 
-      transfer: ({ fromWarehouseId, toWarehouseId, itemId, quantity, rate, movedOn, note, byUserId }) => {
-        const number = nextNumber("TRF", get().movements.map((x) => x.number));
-        const base = {
-          itemId,
-          quantity,
-          rate,
-          movedOn,
-          byUserId,
-          target: null,
-          projectId: null,
-          partyId: null,
-          issuedToUserId: null,
-          sourceDocNo: null,
-          requestId: null,
-          note,
-        };
-        // Both halves carry the same number: it is one document, and reconciling a transfer means
-        // finding its other end.
-        const out: StockMovement = {
-          ...base,
-          id: uid("mv"),
-          number,
-          warehouseId: fromWarehouseId,
-          kind: "TRANSFER_OUT",
-          counterWarehouseId: toWarehouseId,
-        };
-        const inn: StockMovement = {
-          ...base,
-          id: uid("mv"),
-          number,
-          warehouseId: toWarehouseId,
-          kind: "TRANSFER_IN",
-          counterWarehouseId: fromWarehouseId,
-        };
-        set((s) => ({ movements: [out, inn, ...s.movements] }));
-      },
+      set({
+        warehouses: warehouses.map(toWarehouse),
+        members: members.map(toMember),
+        settings: settings.map(toSetting),
+        movements: movements.map(toMovement),
+        requests: requests.map(toRequest),
+        access,
+        loaded: true,
+        loading: false,
+        error: null,
+      });
+    } catch (e) {
+      set({
+        loading: false,
+        loaded: true,
+        error: e instanceof Error ? e.message : "Couldn't load the warehouse.",
+      });
+    }
+  },
 
-      removeMovement: (id) => set((s) => ({ movements: s.movements.filter((m) => m.id !== id) })),
+  // ---- warehouses ----
 
-      saveRequest: (r) =>
-        set((s) => ({
-          requests: s.requests.some((x) => x.id === r.id)
-            ? s.requests.map((x) => (x.id === r.id ? r : x))
-            : [{ ...r, id: r.id || uid("mr"), number: r.number || nextNumber("MR", s.requests.map((x) => x.number)) }, ...s.requests],
-        })),
+  addWarehouse: async (w) => {
+    await api.createWarehouse(warehouseInput({ ...w, id: "" }));
+    await get().load();
+  },
 
-      setRequestStatus: (id, status, note) =>
-        set((s) => ({
-          requests: s.requests.map((r) =>
-            r.id === id ? { ...r, status, decisionNote: note ?? r.decisionNote } : r,
-          ),
-        })),
+  updateWarehouse: async (id, patch) => {
+    const current = get().warehouses.find((w) => w.id === id);
+    if (!current) return;
+    await api.updateWarehouse(Number(id), warehouseInput({ ...current, ...patch }));
+    await get().load();
+  },
 
-      removeRequest: (id) => set((s) => ({ requests: s.requests.filter((r) => r.id !== id) })),
-    }),
-    {
-      // Bumped on every schema change — persisted state otherwise shadows a changed seed.
-      name: "hitech.warehouse.v1",
-      storage: createJSONStorage(() => localStorage),
-    },
-  ),
-);
+  /**
+   * The server deactivates rather than deletes once a store has history — its movements are what
+   * explain today's stock in the stores it transferred to, and deleting them would leave those
+   * balances unexplainable. Either way the answer comes back in the reload.
+   */
+  removeWarehouse: async (id) => {
+    await api.deleteWarehouse(Number(id));
+    await get().load();
+  },
+
+  // ---- access ----
+
+  setMemberRole: async (warehouseId, userId, role) => {
+    await api.setMember(Number(warehouseId), Number(userId), role);
+    await get().load();
+  },
+
+  // ---- settings ----
+
+  setStockSetting: async (warehouseId, itemId, patch) => {
+    const existing = get().settings.find((s) => s.warehouseId === warehouseId && s.itemId === itemId);
+    await api.saveStockSetting({
+      warehouseId: Number(warehouseId),
+      itemId,
+      reorderLevel: patch.reorderLevel ?? existing?.reorderLevel ?? 0,
+      binLocation: patch.binLocation ?? existing?.binLocation ?? null,
+    });
+    await get().load();
+  },
+
+  // ---- movements ----
+
+  record: async (m) => {
+    if (m.kind === "TRANSFER_IN" || m.kind === "TRANSFER_OUT") {
+      throw new Error("Use transfer() — a transfer is one act with two sides.");
+    }
+    await api.recordMovement({
+      warehouseId: Number(m.warehouseId),
+      itemId: m.itemId,
+      kind: m.kind,
+      quantity: m.quantity,
+      rate: m.rate,
+      movedOn: m.movedOn,
+      target: m.target,
+      projectId: numOrNull(m.projectId),
+      partyId: m.partyId,
+      issuedToUserId: numOrNull(m.issuedToUserId),
+      sourceDocNo: m.sourceDocNo,
+      requestId: numOrNull(m.requestId),
+      note: m.note,
+    });
+    // Reloaded rather than appended: an issue against a request also moves that request's status,
+    // and guessing which way is how the two end up disagreeing.
+    await get().load();
+  },
+
+  transfer: async ({ fromWarehouseId, toWarehouseId, itemId, quantity, rate, movedOn, note }) => {
+    await api.transferStock({
+      fromWarehouseId: Number(fromWarehouseId),
+      toWarehouseId: Number(toWarehouseId),
+      itemId,
+      quantity,
+      rate,
+      movedOn,
+      note,
+    });
+    await get().load();
+  },
+
+  // ---- requests ----
+
+  saveRequest: async (r) => {
+    const body = {
+      warehouseId: Number(r.warehouseId),
+      projectId: numOrNull(r.projectId),
+      neededBy: r.neededBy,
+      note: r.note,
+      lines: r.lines
+        .filter((l) => l.itemId > 0 && l.quantity > 0)
+        .map((l) => ({ itemId: l.itemId, quantity: l.quantity })),
+    };
+    // A blank id is a request that has never been saved — the numbering is the server's to assign.
+    if (r.id) await api.updateRequest(Number(r.id), body);
+    else await api.createRequest(body);
+    await get().load();
+  },
+
+  /**
+   * Approve or reject. The other statuses are not decisions anyone makes — PARTIAL and ISSUED are
+   * what the server sets as material actually leaves the store, so there is nothing to send.
+   */
+  setRequestStatus: async (id, status, note) => {
+    if (status !== "APPROVED" && status !== "REJECTED") return;
+    await api.decideRequest(Number(id), status === "APPROVED" ? "APPROVE" : "REJECT", note);
+    await get().load();
+  },
+
+  removeRequest: async (id) => {
+    await api.deleteRequest(Number(id));
+    await get().load();
+  },
+}));
+
+/**
+ * Shows a refused write to the person who attempted it.
+ *
+ * The server's refusals are written to be read — "Central Store holds 300, you cannot move more
+ * than that", "a decided request is a record". Swallowing one leaves a button that silently does
+ * nothing, which is the worst of the three possible outcomes; the person retries, assumes the app
+ * is broken, and works around it on paper.
+ */
+export function reportRefusal(e: unknown) {
+  alert(e instanceof Error ? e.message : "The store refused that change.");
+}
 
 // ---------------------------------------------------------------- derivations
 //
-// Kept as plain functions over the arrays rather than store selectors: they are the same arithmetic
-// the server will do, and a component that reads them is one that will keep working when the data
-// arrives over HTTP instead.
+// Plain functions over the arrays rather than store selectors, and the same arithmetic the server
+// does — which is now a checked claim rather than an intention: WarehouseFlowIntegrationTest drives
+// the same figures over HTTP and asserts them.
 
 /** Signed quantity for one movement — the direction lives in the metadata, not in the number. */
 export const signedQty = (m: StockMovement) => m.quantity * MOVEMENT_META[m.kind].sign;

@@ -8,7 +8,7 @@ import { Select } from "@/components/Select";
 import { DatePicker } from "@/components/DatePicker";
 import { TypeaheadPicker } from "@/components/vyapar/TypeaheadPicker";
 import { RowMenu, RowMenuDivider, RowMenuItem } from "@/components/RowMenu";
-import { useWarehouseStore, stockOf, emptyRequest, warehouseUid } from "@/lib/warehouseStore";
+import { useWarehouseStore, stockOf, emptyRequest, warehouseUid, reportRefusal } from "@/lib/warehouseStore";
 import { useWarehouseScope, useWarehouseRights } from "@/lib/warehouseScope";
 import { REQUEST_STATUS_META, type MaterialRequest, type RequestStatus } from "@/lib/warehouseTypes";
 import { useProjects } from "@/lib/useProjects";
@@ -152,7 +152,7 @@ export default function WarehouseRequestsPage() {
                     {r.status === "PENDING" && (
                       <>
                         <button
-                          onClick={() => setRequestStatus(r.id, "APPROVED")}
+                          onClick={() => { setRequestStatus(r.id, "APPROVED").catch(reportRefusal); }}
                           disabled={!rights.canApprove}
                           title={rights.canApprove ? "Approve" : (rights.reason ?? "Needs supervisor access")}
                           className="flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
@@ -162,7 +162,7 @@ export default function WarehouseRequestsPage() {
                         <button
                           onClick={() => {
                             const why = prompt("Why is this being rejected?");
-                            if (why !== null) setRequestStatus(r.id, "REJECTED", why || undefined);
+                            if (why !== null) setRequestStatus(r.id, "REJECTED", why || undefined).catch(reportRefusal);
                           }}
                           disabled={!rights.canApprove}
                           className="flex items-center gap-1.5 rounded-lg border border-rose-200 px-3 py-1.5 text-xs font-semibold text-rose-600 transition-colors hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-40"
@@ -193,7 +193,7 @@ export default function WarehouseRequestsPage() {
                             tone="danger"
                             disabled={decided}
                             disabledHint="A decided request is a record — reject it instead of deleting it."
-                            onClick={() => { close(); if (confirm(`Delete ${r.number}?`)) removeRequest(r.id); }}
+                            onClick={() => { close(); if (confirm(`Delete ${r.number}?`)) removeRequest(r.id).catch(reportRefusal); }}
                           />
                         </>
                       )}
@@ -269,7 +269,7 @@ export default function WarehouseRequestsPage() {
           items={items}
           onClose={() => setEditing(null)}
           onSave={(r) => {
-            saveRequest(r);
+            saveRequest(r).catch(reportRefusal);
             setEditing(null);
           }}
         />
