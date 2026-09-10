@@ -27,7 +27,7 @@ import { ProjectStaff } from "@/components/project/ProjectStaff";
 import { ProjectSite } from "@/components/project/ProjectSite";
 import { ProjectBoq } from "@/components/project/ProjectBoq";
 import { ProjectTargets } from "@/components/project/ProjectTargets";
-import { boqTotals, useProjectBoqStore } from "@/lib/projectBoqStore";
+import { useProjectTargets, useTargetTotals } from "@/lib/useProjectTargets";
 import { ProjectTender } from "@/components/project/ProjectTender";
 import { ProjectActivity } from "@/components/project/ProjectActivity";
 import * as api from "@/lib/api";
@@ -224,9 +224,9 @@ export default function ProjectDetailPage() {
  */
 function ProjectDashboard({ project }: { project: ProjectResponse }) {
   // Targets are the project's own record of what is built; the summary endpoint does not know
-  // about them yet, so read them where they live.
-  const boq = useProjectBoqStore((s) => s.boqs.find((b) => b.projectId === project.id) ?? null);
-  const boqStats = boq ? boqTotals(boq) : null;
+  // about them yet, so read them from where they live.
+  const { boq, targets } = useProjectTargets(project.id);
+  const boqStats = useTargetTotals(boq, targets);
   const [summary, setSummary] = useState<ProjectSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -308,7 +308,7 @@ function ProjectDashboard({ project }: { project: ProjectResponse }) {
           icon={<ListTodo size={16} />}
           tint="bg-amber-50 text-amber-600"
           label="Targets complete"
-          value={boq ? `${boqStats!.targetsComplete}/${boqStats!.targetCount}` : "—"}
+          value={boq ? `${boqStats!.complete}/${boqStats!.total}` : "—"}
           note={boq ? `${boqStats!.progressPct.toFixed(1)}% of BOQ value built` : "No BOQ on this project yet"}
         />
       </div>

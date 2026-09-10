@@ -26,10 +26,15 @@ import type { BoqLine } from "@/lib/tenderAnalysisTypes";
  */
 export function LibraryItemPicker({
   analysisId,
+  groupKey,
+  groupLabel,
   onClose,
   onAdded,
 }: {
   analysisId: string;
+  /** The family these lines go into. Chosen before the dialog opens, so nothing lands unfiled. */
+  groupKey: string;
+  groupLabel: string;
   onClose: () => void;
   onAdded: (count: number) => void;
 }) {
@@ -114,6 +119,7 @@ export function LibraryItemPicker({
         labourRate: remembered?.labourRate ?? null,
         otherRate: remembered?.otherRate ?? null,
         libraryItemId: String(item.id),
+        groupKey,
       };
       addBoqLine(analysisId, line);
       n += 1;
@@ -127,7 +133,7 @@ export function LibraryItemPicker({
       <div className="flex max-h-[82vh] flex-col">
         <header className="border-b border-gray-200 p-4">
           <div className="flex flex-wrap items-center gap-2">
-            <h2 className="text-base font-semibold text-gray-800">Add items from the Library</h2>
+            <h2 className="text-base font-semibold text-gray-800">Add items to {groupLabel}</h2>
             <Link
               href="/library"
               className="ml-auto inline-flex items-center gap-1 text-xs text-brand-accent hover:underline"

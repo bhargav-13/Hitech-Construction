@@ -81,6 +81,18 @@ export interface AnalysisState {
   patchAnalysis: (id: string, patch: Partial<TenderAnalysis>) => void;
   setBidPct: (id: string, bidPct: number) => void;
 
+  /**
+   * Create a family. It starts empty and stays that way until lines are added — which is how a
+   * schedule is actually built, headings first. Returns the key the lines should point at.
+   */
+  addGroup: (id: string, label: string) => string;
+  renameGroup: (id: string, key: string, label: string) => void;
+  /**
+   * Remove a family. Its lines move to `moveLinesTo`; without one, a family that still holds lines
+   * is left alone — deleting a heading must not quietly take priced work with it.
+   */
+  removeGroup: (id: string, key: string, moveLinesTo?: string) => void;
+
   addBoqLine: (id: string, line?: Partial<BoqLine>) => void;
   updateBoqLine: (id: string, lineId: string, patch: Partial<BoqLine>) => void;
   removeBoqLine: (id: string, lineId: string) => void;
@@ -108,30 +120,37 @@ export interface AnalysisState {
 }
 
 /**
- * Keep the group list in step with the lines: drop families nothing points at any more, add ones
- * that appeared, and re-derive each label from its members.
+ * Keep the group list in step with the lines, without ever destroying one.
  *
- * <p>Labels are re-derived rather than kept, because a family's name is only meaningful in terms of
- * what is in it — move a line out of "DI K7 pipe supply" and the name should stop claiming it.
+ * <p>This used to rebuild the families from scratch on every edit: it dropped any family nothing
+ * pointed at and re-derived each label from its members. Both had to go.
+ *
+ * <ul>
+ *   <li><b>An empty family has to survive.</b> A schedule is laid out as headings first and priced
+ *       over the following days, so a family with nothing in it yet is the normal state, not a
+ *       leftover. Dropping it meant there was nowhere to put the first line.
+ *   <li><b>A name somebody typed has to stick.</b> Re-deriving "DI K7 pipe supply" from whatever
+ *       happens to be inside it means renaming the family behind their back every time a line moves.
+ * </ul>
+ *
+ * <p>So families are authoritative and this only appends: any key a line references that has no
+ * family yet gets one, named from its members as a starting point.
  */
-function rebuildGroups(lines: BoqLine[], existing: BoqGroup[]): BoqGroup[] {
-  const order: string[] = [];
-  const members = new Map<string, string[]>();
+function reconcileGroups(lines: BoqLine[], existing: BoqGroup[]): BoqGroup[] {
+  const out = [...existing];
+  const known = new Set(out.map((g) => g.key));
+  const orphans = new Map<string, string[]>();
 
   for (const l of lines) {
-    if (!members.has(l.groupKey)) {
-      members.set(l.groupKey, []);
-      order.push(l.groupKey);
-    }
-    members.get(l.groupKey)!.push(l.description);
+    if (known.has(l.groupKey)) continue;
+    if (!orphans.has(l.groupKey)) orphans.set(l.groupKey, []);
+    orphans.get(l.groupKey)!.push(l.description);
   }
 
-  return order.map((key) => {
-    const descs = members.get(key)!;
-    const prior = existing.find((g) => g.key === key);
-    // A single-line family shows no header, so its label only matters once it has company.
-    return { key, label: descs.length > 1 ? familyLabel(descs) : prior?.label ?? descs[0] ?? "New item" };
-  });
+  for (const [key, descs] of orphans) {
+    out.push({ key, label: descs.length > 1 ? familyLabel(descs) : descs[0] || "New family" });
+  }
+  return out;
 }
 
 /** Apply `fn` to one analysis and stamp `updatedAt`. Every mutation goes through here. */
@@ -180,6 +199,33 @@ export const useAnalysisStore = create<AnalysisState>()(
 
       setBidPct: (id, bidPct) => edit(set, id, (a) => ({ ...a, bidPct })),
 
+      addGroup: (id, label) => {
+        const key = uid("g");
+        edit(set, id, (a) => ({
+          ...a,
+          groups: [...a.groups, { key, label: label.trim() || "New family" }],
+        }));
+        return key;
+      },
+
+      renameGroup: (id, key, label) =>
+        edit(set, id, (a) => ({
+          ...a,
+          groups: a.groups.map((g) => (g.key === key ? { ...g, label: label.trim() || g.label } : g)),
+        })),
+
+      removeGroup: (id, key, moveLinesTo) =>
+        edit(set, id, (a) => {
+          const inside = a.boqLines.filter((l) => l.groupKey === key);
+          // Refuse rather than destroy. The screen asks where the lines go before calling this, so
+          // reaching here with lines and no destination is a bug worth failing quietly closed on.
+          if (inside.length > 0 && !moveLinesTo) return a;
+          const boqLines = a.boqLines.map((l) =>
+            l.groupKey === key && moveLinesTo ? { ...l, groupKey: moveLinesTo } : l,
+          );
+          return { ...a, boqLines, groups: a.groups.filter((g) => g.key !== key) };
+        }),
+
       addBoqLine: (id, line) =>
         edit(set, id, (a) => {
           const lineId = uid("bl");
@@ -204,7 +250,7 @@ export const useAnalysisStore = create<AnalysisState>()(
               groupKey,
             },
           ];
-          return { ...a, boqLines, groups: rebuildGroups(boqLines, a.groups) };
+          return { ...a, boqLines, groups: reconcileGroups(boqLines, a.groups) };
         }),
 
       updateBoqLine: (id, lineId, patch) =>
@@ -221,13 +267,13 @@ export const useAnalysisStore = create<AnalysisState>()(
             line.groupKey = sibling ? sibling.groupKey : `g-${lineId}`;
           }
 
-          return { ...a, boqLines, groups: rebuildGroups(boqLines, a.groups) };
+          return { ...a, boqLines, groups: reconcileGroups(boqLines, a.groups) };
         }),
 
       removeBoqLine: (id, lineId) =>
         edit(set, id, (a) => {
           const boqLines = a.boqLines.filter((l) => l.id !== lineId);
-          return { ...a, boqLines, groups: rebuildGroups(boqLines, a.groups) };
+          return { ...a, boqLines, groups: reconcileGroups(boqLines, a.groups) };
         }),
 
       importBoqLines: (id, lines, groups) => edit(set, id, (a) => ({ ...a, boqLines: lines, groups })),

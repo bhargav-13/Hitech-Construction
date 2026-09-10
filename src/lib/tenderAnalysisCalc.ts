@@ -62,19 +62,32 @@ export function groupedBoq(lines: BoqLine[], groups: BoqGroup[]): BoqGroupCalc[]
   const byKey = new Map<string, BoqGroupCalc>();
   const order: string[] = [];
 
+  const blank = (key: string, label: string): BoqGroupCalc => ({
+    key,
+    label,
+    lines: [],
+    amount: 0,
+    costAmount: 0,
+    margin: null,
+    lossCount: 0,
+  });
+
+  // Families are the spine, not the lines. Walking the lines instead — as this did — means a family
+  // with nothing in it yet simply does not exist on screen, so there is nowhere to add its first
+  // line and no way to lay a schedule out as headings before pricing it.
+  for (const g of groups) {
+    if (byKey.has(g.key)) continue;
+    byKey.set(g.key, blank(g.key, g.label));
+    order.push(g.key);
+  }
+
   for (const line of lines) {
     const key = line.groupKey;
     let g = byKey.get(key);
     if (!g) {
-      g = {
-        key,
-        label: groups.find((x) => x.key === key)?.label ?? line.description,
-        lines: [],
-        amount: 0,
-        costAmount: 0,
-        margin: null,
-        lossCount: 0,
-      };
+      // A line pointing at a family nobody declared. Kept visible rather than dropped: losing a
+      // priced line to a bookkeeping mismatch is the worse failure.
+      g = blank(key, line.description);
       byKey.set(key, g);
       order.push(key);
     }

@@ -1,7 +1,20 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { BookOpen, ChevronDown, ChevronRight, Plus, Search, Trash2, TriangleAlert } from "lucide-react";
+import {
+  BookOpen,
+  ChevronDown,
+  ChevronRight,
+  FolderPlus,
+  Pencil,
+  Plus,
+  Search,
+  Trash2,
+  TriangleAlert,
+} from "lucide-react";
+import { Modal } from "@/components/Modal";
+import { Select } from "@/components/Select";
+import { RowMenu, RowMenuDivider, RowMenuItem } from "@/components/RowMenu";
 import { LibraryItemPicker } from "@/components/tender/analysis/LibraryItemPicker";
 import { inr } from "@/lib/format";
 import { expenseAmount, findLibraryRate, groupedBoq, isSubSr } from "@/lib/tenderAnalysisCalc";
@@ -20,15 +33,24 @@ import type { AnalysisTotals, BoqGroupCalc, BoqLine, CostComponent, TenderAnalys
 export function AnalysisItemsTab({ analysis, totals }: { analysis: TenderAnalysis; totals: AnalysisTotals }) {
   const updateBoqLine = useAnalysisStore((s) => s.updateBoqLine);
   const removeBoqLine = useAnalysisStore((s) => s.removeBoqLine);
-  const addBoqLine = useAnalysisStore((s) => s.addBoqLine);
   const applyLibraryRates = useAnalysisStore((s) => s.applyLibraryRates);
+  const addGroup = useAnalysisStore((s) => s.addGroup);
+  const renameGroup = useAnalysisStore((s) => s.renameGroup);
+  const removeGroup = useAnalysisStore((s) => s.removeGroup);
   const library = useAnalysisStore((s) => s.library);
 
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<"all" | "loss" | "unpriced">("all");
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
-  const [picking, setPicking] = useState(false);
+  // Families start collapsed so the sheet opens as its list of titles; expand a title to price it.
+  const [collapsed, setCollapsed] = useState<Set<string>>(
+    () => new Set(groupedBoq(analysis.boqLines, analysis.groups).map((g) => g.key)),
+  );
+  /** Which family the picker is filling. Null when closed, so nothing is ever added unfiled. */
+  const [picking, setPicking] = useState<{ key: string; label: string } | null>(null);
   const [added, setAdded] = useState(0);
+  const [newFamily, setNewFamily] = useState(false);
+  const [renaming, setRenaming] = useState<{ key: string; label: string } | null>(null);
+  const [deleting, setDeleting] = useState<{ key: string; label: string; count: number } | null>(null);
 
   const groups = useMemo(
     () => groupedBoq(analysis.boqLines, analysis.groups),
@@ -46,7 +68,10 @@ export function AnalysisItemsTab({ analysis, totals }: { analysis: TenderAnalysi
             (filter === "all" || (filter === "loss" ? c.isLoss : !c.priced)),
         ),
       }))
-      .filter((g) => g.lines.length > 0);
+      // An empty family stays visible: it is where the next line goes, and hiding it is exactly what
+      // made "add a title" impossible before. A search or filter still hides it, because then the
+      // user is looking for something specific rather than building the schedule.
+      .filter((g) => g.lines.length > 0 || (!q && filter === "all"));
   }, [groups, search, filter]);
 
   const unpriced = totals.linesTotal - totals.linesPriced;
@@ -85,18 +110,10 @@ export function AnalysisItemsTab({ analysis, totals }: { analysis: TenderAnalysi
         <div className="ml-auto flex items-center gap-2">
           <button
             type="button"
-            onClick={() => addBoqLine(analysis.id)}
-            title="For BOQ lines no material catalogue will ever hold — excavation, restoration, job work"
-            className="rounded-lg border border-gray-200 px-3 py-2 text-xs text-gray-600 transition-colors duration-150 hover:bg-gray-50"
-          >
-            Blank row
-          </button>
-          <button
-            type="button"
-            onClick={() => setPicking(true)}
+            onClick={() => setNewFamily(true)}
             className="inline-flex items-center gap-1.5 rounded-lg bg-brand-accent px-3 py-2 text-xs font-semibold text-white transition-all duration-150 hover:opacity-90 active:scale-95"
           >
-            <Plus size={13} /> Add from Library
+            <FolderPlus size={13} /> Add title
           </button>
         </div>
       </div>
@@ -109,9 +126,9 @@ export function AnalysisItemsTab({ analysis, totals }: { analysis: TenderAnalysi
       )}
 
       <p className="text-[11px] text-gray-400">
-        Sr numbers group the schedule: type <code className="rounded bg-gray-100 px-1">7</code> for a main item and{" "}
-        <code className="rounded bg-gray-100 px-1">7a</code>, <code className="rounded bg-gray-100 px-1">7b</code> for
-        items under it — they fold into one family with its own subtotal.
+        The schedule is built title first: add a title, then add its items from the Library. Each
+        title carries its own subtotal, and the whole structure crosses to the project BOQ when the
+        tender is won.
       </p>
 
       <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white">
@@ -151,13 +168,16 @@ export function AnalysisItemsTab({ analysis, totals }: { analysis: TenderAnalysi
                 onRemove={(lineId) => removeBoqLine(analysis.id, lineId)}
                 onLibrary={(lineId) => applyLibraryRates(analysis.id, lineId)}
                 hasLibraryRate={(l) => !!findLibraryRate(library, l.description, l.unit)}
+                onAddLine={() => setPicking({ key: g.key, label: g.label })}
+                onRename={() => setRenaming({ key: g.key, label: g.label })}
+                onDelete={() => setDeleting({ key: g.key, label: g.label, count: g.lines.length })}
               />
             ))}
             {visible.length === 0 && (
               <tr>
                 <td colSpan={13} className="px-4 py-12 text-center text-sm text-gray-400">
-                  {analysis.boqLines.length === 0
-                    ? "No items yet — add them from the Library, then set each one's tender rate and quantity."
+                  {analysis.groups.length === 0
+                    ? "No titles yet. Add one, then add its items from the Library."
                     : "No items match this filter."}
                 </td>
               </tr>
@@ -190,8 +210,47 @@ export function AnalysisItemsTab({ analysis, totals }: { analysis: TenderAnalysi
       {picking && (
         <LibraryItemPicker
           analysisId={analysis.id}
-          onClose={() => setPicking(false)}
+          groupKey={picking.key}
+          groupLabel={picking.label}
+          onClose={() => setPicking(null)}
           onAdded={(n) => setAdded(n)}
+        />
+      )}
+
+      {newFamily && (
+        <FamilyNameDialog
+          title="Add title"
+          hint="Earthwork, DI K7 pipe supply, Road restoration — the headings this schedule is built from."
+          onClose={() => setNewFamily(false)}
+          onSave={(label) => {
+            addGroup(analysis.id, label);
+            setNewFamily(false);
+          }}
+        />
+      )}
+
+      {renaming && (
+        <FamilyNameDialog
+          title="Rename title"
+          initial={renaming.label}
+          hint="Its items stay where they are — only the heading changes."
+          onClose={() => setRenaming(null)}
+          onSave={(label) => {
+            renameGroup(analysis.id, renaming.key, label);
+            setRenaming(null);
+          }}
+        />
+      )}
+
+      {deleting && (
+        <DeleteFamilyDialog
+          family={deleting}
+          others={analysis.groups.filter((g) => g.key !== deleting.key)}
+          onClose={() => setDeleting(null)}
+          onConfirm={(moveTo) => {
+            removeGroup(analysis.id, deleting.key, moveTo);
+            setDeleting(null);
+          }}
         />
       )}
     </div>
@@ -233,6 +292,9 @@ function GroupRows({
   onRemove,
   onLibrary,
   hasLibraryRate,
+  onAddLine,
+  onRename,
+  onDelete,
 }: {
   group: BoqGroupCalc;
   collapsed: boolean;
@@ -241,13 +303,17 @@ function GroupRows({
   onRemove: (lineId: string) => void;
   onLibrary: (lineId: string) => boolean;
   hasLibraryRate: (l: BoqLine) => boolean;
+  onAddLine: () => void;
+  onRename: () => void;
+  onDelete: () => void;
 }) {
-  // A family of one is just a line; a header above it would be noise.
-  const single = group.lines.length === 1;
+  // The header always shows now. It used to be hidden for a family of one, on the grounds that a
+  // heading over a single line is noise — but a family is something somebody named and it carries
+  // the button that adds its next line, so hiding it hides the way forward.
 
   return (
     <>
-      {!single && (
+      {(
         <tr className="border-b border-gray-100 bg-gray-50/70">
           <td className="px-3 py-2">
             <button
@@ -259,14 +325,56 @@ function GroupRows({
               {collapsed ? <ChevronRight size={15} /> : <ChevronDown size={15} />}
             </button>
           </td>
-          <td className="px-3 py-2 text-[13px] font-semibold text-gray-700">
-            {group.label}
-            <span className="ml-2 font-normal text-gray-400">
-              {group.lines.length} items
-              {group.lossCount > 0 && <span className="ml-2 text-rose-600">· {group.lossCount} below cost</span>}
-            </span>
+          {/* Spans Item + Qty + Unit + Tender rate. A title's name is long — "Excavation trench Soft
+              Murrum/Clay/Sand (all lifts)" — and squeezing it into the Item column alone wrapped it
+              over three lines and broke the controls beside it in half. */}
+          <td className="px-3 py-2 text-[13px] font-semibold text-gray-700" colSpan={4}>
+            <div className="flex min-w-0 items-center gap-2">
+              <span className="min-w-0 truncate" title={group.label}>
+                {group.label}
+              </span>
+              <span className="shrink-0 font-normal whitespace-nowrap text-gray-400">
+                {group.lines.length} {group.lines.length === 1 ? "item" : "items"}
+                {group.lossCount > 0 && (
+                  <span className="ml-2 text-rose-600">· {group.lossCount} below cost</span>
+                )}
+              </span>
+              {/* Adding lives in the menu and in the dashed row below. A solid button repeated down
+                  every title turned the page into a column of blue and drowned the items. */}
+              <RowMenu align="left" buttonLabel={`Actions for ${group.label}`}>
+                {(close) => (
+                  <>
+                    <RowMenuItem
+                      icon={Plus}
+                      label="Add item"
+                      onClick={() => {
+                        close();
+                        onAddLine();
+                      }}
+                    />
+                    <RowMenuItem
+                      icon={Pencil}
+                      label="Rename title"
+                      onClick={() => {
+                        close();
+                        onRename();
+                      }}
+                    />
+                    <RowMenuDivider />
+                    <RowMenuItem
+                      icon={Trash2}
+                      label="Delete title"
+                      tone="danger"
+                      onClick={() => {
+                        close();
+                        onDelete();
+                      }}
+                    />
+                  </>
+                )}
+              </RowMenu>
+            </div>
           </td>
-          <td colSpan={3} />
           <td className="px-3 py-2 text-right font-semibold tabular-nums text-gray-700">{inr(group.amount)}</td>
           <td colSpan={3} className="border-l border-gray-200" />
           <td className="px-3 py-2 text-right font-semibold tabular-nums text-gray-500">{inr(group.costAmount)}</td>
@@ -279,6 +387,24 @@ function GroupRows({
             {group.margin == null ? "—" : inr(group.margin)}
           </td>
           <td />
+        </tr>
+      )}
+
+      {!collapsed && (
+        <tr className="border-b border-gray-100">
+          <td />
+          <td colSpan={12} className="py-2 pr-3 pl-10">
+            <button
+              type="button"
+              onClick={onAddLine}
+              className="flex w-full max-w-md items-center justify-center gap-1.5 rounded-lg border border-dashed border-gray-300 py-1.5 text-xs text-gray-500 transition-colors duration-150 hover:border-brand-accent hover:bg-cyan-50/40 hover:text-brand-accent"
+            >
+              <Plus size={12} />
+              {group.lines.length === 0
+                ? `Add the first item to ${group.label}`
+                : `Add item to ${group.label}`}
+            </button>
+          </td>
         </tr>
       )}
 
@@ -575,3 +701,109 @@ function NumCell({
 
 /** Seeded rates carry full precision so totals reconcile; the box shouldn't show 14 decimals. */
 const round = (n: number) => Math.round(n * 100) / 100;
+
+/** Naming a family — used for both creating one and renaming it. */
+function FamilyNameDialog({
+  title,
+  hint,
+  initial = "",
+  onClose,
+  onSave,
+}: {
+  title: string;
+  hint: string;
+  initial?: string;
+  onClose: () => void;
+  onSave: (label: string) => void;
+}) {
+  const [label, setLabel] = useState(initial);
+
+  return (
+    <Modal onClose={onClose}>
+      <div className="w-[400px] max-w-full space-y-4 p-5">
+        <div>
+          <h2 className="text-base font-semibold text-gray-800">{title}</h2>
+          <p className="mt-1 text-xs text-gray-400">{hint}</p>
+        </div>
+        <input
+          value={label}
+          onChange={(e) => setLabel(e.target.value)}
+          autoFocus
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && label.trim()) onSave(label.trim());
+          }}
+          placeholder="Title name"
+          className="w-full rounded-lg border border-gray-200 px-2.5 py-2 text-sm focus:border-brand-accent focus:outline-none"
+        />
+        <button
+          type="button"
+          disabled={!label.trim()}
+          onClick={() => onSave(label.trim())}
+          className="w-full rounded-lg bg-brand-accent py-2.5 text-sm font-semibold text-white transition-all duration-150 hover:opacity-90 active:scale-95 disabled:opacity-40"
+        >
+          Save
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+/**
+ * Deleting a family asks where its items go before it will proceed.
+ *
+ * <p>Removing a heading is a filing decision. Taking its priced lines with it is not what anybody
+ * means by it, and there is no undo.
+ */
+function DeleteFamilyDialog({
+  family,
+  others,
+  onClose,
+  onConfirm,
+}: {
+  family: { key: string; label: string; count: number };
+  others: { key: string; label: string }[];
+  onClose: () => void;
+  onConfirm: (moveTo?: string) => void;
+}) {
+  const [moveTo, setMoveTo] = useState(others[0]?.key ?? "");
+  const empty = family.count === 0;
+
+  return (
+    <Modal onClose={onClose} guardOnClose={false}>
+      <div className="w-[420px] max-w-full space-y-4 p-5">
+        <h2 className="text-base font-semibold text-gray-800">Delete &ldquo;{family.label}&rdquo;?</h2>
+
+        {empty ? (
+          <p className="text-sm text-gray-500">It has nothing in it, so nothing is lost.</p>
+        ) : others.length === 0 ? (
+          <p className="text-sm text-rose-600">
+            It holds {family.count} item(s) and there is no other title to move them into. Add one
+            first.
+          </p>
+        ) : (
+          <>
+            <p className="text-sm text-gray-500">
+              It holds {family.count} item(s). They will be moved rather than deleted — pick where
+              they go.
+            </p>
+            <Select
+              value={moveTo}
+              onChange={setMoveTo}
+              size="sm"
+              options={others.map((g) => ({ value: g.key, label: g.label }))}
+            />
+          </>
+        )}
+
+        <button
+          type="button"
+          disabled={!empty && others.length === 0}
+          onClick={() => onConfirm(empty ? undefined : moveTo)}
+          className="w-full rounded-lg bg-rose-600 py-2.5 text-sm font-semibold text-white transition-all duration-150 hover:opacity-90 active:scale-95 disabled:opacity-40"
+        >
+          {empty ? "Delete" : "Move items and delete"}
+        </button>
+      </div>
+    </Modal>
+  );
+}

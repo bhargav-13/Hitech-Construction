@@ -40,7 +40,8 @@ import { LossReasonModal } from "@/components/tender/LossReasonModal";
 import { ConfirmDialog } from "@/components/tender/ConfirmDialog";
 import { TenderHealthChip } from "@/components/tender/TenderHealthChip";
 import { HandoffDialog } from "@/components/tender/HandoffDialog";
-import { useProjectBoqStore, type HandoffOptions } from "@/lib/projectBoqStore";
+import { type HandoffOptions } from "@/lib/projectBoqStore";
+import { handoffToServer } from "@/lib/projectBoqHandoff";
 import { findAnalysis, useAnalysisStore } from "@/lib/tenderAnalysisStore";
 import { analysisTotals } from "@/lib/tenderAnalysisCalc";
 import { TenderEmpty } from "@/components/tender/TenderShell";
@@ -240,7 +241,6 @@ export function TenderPipeline({ variant }: { variant: PipelineVariant }) {
   const setStageBulk = useTenderStore((s) => s.setStageBulk);
   const linkProject = useTenderStore((s) => s.linkProject);
   const handoffPayloadFor = useTenderStore((s) => s.handoffPayloadFor);
-  const createFromAnalysis = useProjectBoqStore((s) => s.createFromAnalysis);
   const lastUndo = useTenderStore((s) => s.lastUndo);
   const undo = useTenderStore((s) => s.undo);
   const clearUndo = useTenderStore((s) => s.clearUndo);
@@ -456,16 +456,27 @@ export function TenderPipeline({ variant }: { variant: PipelineVariant }) {
    * Convert the tender's analysis into the project's BOQ and targets. Returns a fragment for the
    * flash message, so the user is told what actually landed rather than just "project created".
    */
-  function buildBoq(t: Tender, projectId: number, handoff: HandoffOptions | null): string {
+  async function buildBoq(t: Tender, projectId: number, handoff: HandoffOptions | null): Promise<string> {
     // Say what happened either way. Silently creating an empty project when the user ticked
     // "create the BOQ" is the failure they cannot diagnose from the outside.
     if (!handoff) return " — no BOQ, because this tender has no health analysis";
     const analysis = findAnalysis(useAnalysisStore.getState().analyses, t);
     if (!analysis) return " — but its health analysis could not be found, so the BOQ was not created";
     if (analysis.boqLines.length === 0) return " — its health analysis has no items yet, so the BOQ is empty";
-    const boq = createFromAnalysis(projectId, analysis, handoff);
-    const targets = boq.targets.length;
-    return ` with ${boq.items.length} BOQ items${targets > 0 ? ` and ${targets} targets` : " (no targets — add them on the project's BOQ tab)"}`;
+    try {
+      const boq = await handoffToServer(projectId, analysis, handoff);
+      const targets = boq.targets.length;
+      return ` with ${boq.items.length} BOQ items${
+        targets > 0 ? ` and ${targets} targets` : " (no targets — add them on the project's Target tab)"
+      }`;
+    } catch (e) {
+      // The project landed and the BOQ did not. Naming that is the whole point: a silent failure
+      // here looks identical to a tender with no analysis, and the conversion is the reason anyone
+      // ran the handover.
+      return ` — but its BOQ did not save (${
+        e instanceof Error ? e.message : "the project module refused it"
+      }), so convert it again from the tender`;
+    }
   }
 
   /**
@@ -499,7 +510,7 @@ export function TenderPipeline({ variant }: { variant: PipelineVariant }) {
       }
       linkProject(t.id, res.id, { synced });
       setCreatedProjectId(res.id);
-      const built = buildBoq(t, res.id, handoff);
+      const built = await buildBoq(t, res.id, handoff);
       flash(
         synced
           ? `Project #${res.id} created${built}.`
@@ -510,8 +521,10 @@ export function TenderPipeline({ variant }: { variant: PipelineVariant }) {
       // say so plainly rather than reporting a success that did not happen.
       const localId = -Math.floor(Date.now() / 1000);
       linkProject(t.id, localId, { synced: false });
-      buildBoq(t, localId, handoff);
-      flash("Project module unreachable — the handoff is saved locally and can be pushed later.");
+      // No BOQ is attempted here on purpose. The project never reached the server, so there is
+      // nothing for a BOQ to hang off — writing one to a negative placeholder id would produce a
+      // document that can never be found again.
+      flash("Project module unreachable — the handoff is saved locally and can be pushed later. Its BOQ has not been created.");
     } finally {
       setBusyId(null);
       setProjectPrompt(null);
