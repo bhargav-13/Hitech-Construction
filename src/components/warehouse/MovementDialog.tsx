@@ -201,7 +201,7 @@ export function MovementDialog({
         </DrawerField>
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-          <DrawerField label="Quantity" required>
+          <DrawerField group label="Quantity" required>
             <div className="flex gap-2">
               <input
                 type="number"
@@ -258,7 +258,7 @@ export function MovementDialog({
 
         {isIssue && (
           <>
-            <DrawerField label="Issued to" required>
+            <DrawerField group label="Issued to" required>
               <div className="grid gap-2 sm:grid-cols-2">
                 {(Object.keys(ISSUE_TARGET_META) as IssueTarget[]).map((t) => (
                   <button

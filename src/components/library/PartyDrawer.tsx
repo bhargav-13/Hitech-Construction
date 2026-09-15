@@ -262,7 +262,7 @@ export function PartyDrawer({
         )}
 
         {has("staffType") && (
-          <DrawerField label="Posting">
+          <DrawerField group label="Posting">
             <div className="flex gap-1 rounded-lg border border-gray-200 p-1">
               {([["OFFICE", "Office"], ["SITE", "Site"]] as const).map(([val, lbl]) => (
                 <button

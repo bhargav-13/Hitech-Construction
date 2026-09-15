@@ -394,7 +394,7 @@ function RowDrawer({
           />
         </DrawerField>
 
-        <DrawerField label="Assignee">
+        <DrawerField group label="Assignee">
           {/* The same people as everywhere else in the app — the board keeps no directory of its own. */}
           <PeopleSelect people={people} value={assigneeId} onChange={setAssigneeId} placeholder="Unassigned" />
           {assigneeId && (

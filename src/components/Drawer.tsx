@@ -126,6 +126,7 @@ export function DrawerField({
   label,
   required,
   hint,
+  group,
   children,
   className = "",
 }: {
@@ -133,17 +134,24 @@ export function DrawerField({
   required?: boolean;
   /** One line under the field explaining what it does to the rest of the form. */
   hint?: string;
+  /**
+   * The field holds several controls (a checkbox matrix, a row of buttons). Renders a group instead
+   * of a <label>: a label forwards every click inside it to its first control, so clicking anywhere
+   * in the block would fire that one button or checkbox.
+   */
+  group?: boolean;
   children: React.ReactNode;
   className?: string;
 }) {
+  const Wrapper = group ? "div" : "label";
   return (
-    <label className={`block ${className}`}>
+    <Wrapper className={`block ${className}`} role={group ? "group" : undefined} aria-label={group ? label : undefined}>
       <span className="mb-1.5 block text-[11px] font-medium tracking-wide text-gray-400 uppercase">
         {label}
         {required && <span className="text-rose-500"> *</span>}
       </span>
       {children}
       {hint && <span className="mt-1 block text-xs text-gray-400">{hint}</span>}
-    </label>
+    </Wrapper>
   );
 }

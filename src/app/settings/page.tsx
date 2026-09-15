@@ -33,18 +33,26 @@ import { useDepartments } from "@/lib/useDepartments";
 const SECTIONS = ["Roles & Access", "Multi Level Approval", "Companies"] as const;
 type Section = (typeof SECTIONS)[number];
 
-// Backend module codes that map to a real, usable feature. Everything else is flagged "Coming soon"
-// in the role permission matrix.
-const IMPLEMENTED_MODULES = new Set([
-  "DASHBOARD",
-  "PROJECT",
-  "TASKOPAD",
-  "VYAPAR",
-  "PAYROLL",
-  "AUDIT",
-  "SETTINGS",
-  "USER_MANAGEMENT",
-]);
+// The modules a role can be granted, in sidebar order, each with only the actions the backend
+// actually checks. Every module the database seeds (Report, Finance, CRM, …) used to be listed, with
+// the unbuilt ones parked under "Coming soon" — and Tender, Procurement, Warehouse and Approvals were
+// wrongly among them, so no role other than Super Admin could ever be given those modules and they
+// never appeared in anyone else's sidebar. A module or action not listed here is hidden; any
+// permission a role already holds on it is left untouched on save.
+const ROLE_MODULES: { code: string; actions: string[] }[] = [
+  { code: "DASHBOARD", actions: ["VIEW"] },
+  { code: "TENDER", actions: ["VIEW", "CREATE", "EDIT", "DELETE"] },
+  { code: "PROJECT", actions: ["VIEW", "CREATE", "EDIT", "DELETE"] },
+  { code: "TASKOPAD", actions: ["VIEW", "CREATE", "EDIT", "DELETE"] },
+  { code: "VYAPAR", actions: ["VIEW", "CREATE", "EDIT", "DELETE"] },
+  { code: "PROCUREMENT", actions: ["VIEW", "CREATE", "EDIT", "DELETE"] },
+  { code: "PAYROLL", actions: ["VIEW", "CREATE", "EDIT", "DELETE", "APPROVE"] },
+  { code: "WAREHOUSE", actions: ["VIEW", "CREATE", "EDIT", "APPROVE"] },
+  { code: "AUDIT", actions: ["VIEW"] },
+  { code: "APPROVAL", actions: ["VIEW", "EDIT"] },
+  { code: "USER_MANAGEMENT", actions: ["VIEW", "CREATE", "EDIT", "DELETE"] },
+  { code: "SETTINGS", actions: ["VIEW", "EDIT"] },
+];
 
 export default function SettingsPage() {
   // `?section=Companies` deep-links a tab — how the sidebar's company switcher gets here.
@@ -859,9 +867,18 @@ function RoleDrawer({
     }
   }
 
-  // Built modules first; "coming soon" ones drop to the bottom (V8 sort is stable).
-  const orderedModules = [...modules].sort(
-    (a, b) => Number(IMPLEMENTED_MODULES.has(b.code)) - Number(IMPLEMENTED_MODULES.has(a.code))
+  // Only grantable modules, in sidebar order, trimmed to the actions that do something.
+  const orderedModules = ROLE_MODULES.flatMap(({ code, actions }) => {
+    const mod = modules.find((m) => m.code === code);
+    if (!mod) return [];
+    const permissions = actions
+      .map((action) => mod.permissions.find((p) => p.action === action))
+      .filter((p): p is (typeof mod.permissions)[number] => p !== undefined);
+    return permissions.length ? [{ ...mod, permissions }] : [];
+  });
+  const visibleSelected = orderedModules.reduce(
+    (n, mod) => n + mod.permissions.filter((p) => selected.has(p.id)).length,
+    0
   );
 
   return (
@@ -921,49 +938,37 @@ function RoleDrawer({
           )}
         </DrawerField>
 
-        <DrawerField label={`Module Permissions (${selected.size} selected)`}>
+        {/* A group, not DrawerField's <label>: a label wrapping many controls forwards every click
+            inside it to the first one, so clicking anywhere here toggled Dashboard's "Select all". */}
+        <DrawerField group label={`Module Permissions (${visibleSelected} selected)`}>
           <div className="space-y-3 rounded-lg border border-gray-100 p-3">
             {orderedModules.map((mod) => {
-              const implemented = IMPLEMENTED_MODULES.has(mod.code);
               const allSelected = mod.permissions.every((p) => selected.has(p.id));
               return (
                 <div key={mod.id} className="border-b border-gray-50 pb-2 last:border-b-0 last:pb-0">
                   <div className="mb-1 flex items-center justify-between">
-                    <span className="flex items-center gap-2 text-sm font-medium text-gray-700">
-                      {mod.name}
-                      {!implemented && (
-                        <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-600">
-                          Coming soon
-                        </span>
-                      )}
-                    </span>
-                    {implemented && (
-                      <button
-                        type="button"
-                        onClick={() => toggleModule(mod)}
-                        className="text-xs font-medium text-brand-accent transition-opacity duration-150 hover:underline hover:opacity-80"
-                      >
-                        {allSelected ? "Clear" : "Select all"}
-                      </button>
-                    )}
+                    <span className="text-sm font-medium text-gray-700">{mod.name}</span>
+                    <button
+                      type="button"
+                      onClick={() => toggleModule(mod)}
+                      className="text-xs font-medium text-brand-accent transition-opacity duration-150 hover:underline hover:opacity-80"
+                    >
+                      {allSelected ? "Clear" : "Select all"}
+                    </button>
                   </div>
-                  {implemented ? (
-                    <div className="flex flex-wrap gap-3">
-                      {mod.permissions.map((perm) => (
-                        <label key={perm.id} className="flex items-center gap-1.5 text-xs text-gray-600">
-                          <input
-                            type="checkbox"
-                            checked={selected.has(perm.id)}
-                            onChange={() => toggle(perm.id)}
-                            className="h-3.5 w-3.5 accent-cyan-600"
-                          />
-                          {perm.action}
-                        </label>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="text-xs text-gray-400">Permissions unlock once this module ships.</p>
-                  )}
+                  <div className="flex flex-wrap gap-3">
+                    {mod.permissions.map((perm) => (
+                      <label key={perm.id} className="flex cursor-pointer items-center gap-1.5 text-xs text-gray-600">
+                        <input
+                          type="checkbox"
+                          checked={selected.has(perm.id)}
+                          onChange={() => toggle(perm.id)}
+                          className="h-3.5 w-3.5 accent-cyan-600"
+                        />
+                        {perm.action}
+                      </label>
+                    ))}
+                  </div>
                 </div>
               );
             })}
@@ -1170,7 +1175,7 @@ function UserDrawer({
           />
         </DrawerField>
 
-        <DrawerField label="Staff Type">
+        <DrawerField group label="Staff Type">
           <div className="flex gap-1 rounded-lg border border-gray-200 p-1">
             {([["", "Not set"], ["OFFICE", "Office"], ["SITE", "Site"]] as const).map(([val, lbl]) => (
               <button

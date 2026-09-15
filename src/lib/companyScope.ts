@@ -2,7 +2,7 @@
 
 import { useEffect } from "react";
 import { create } from "zustand";
-import { apiRequest, getActiveCompanyId, setActiveCompanyId } from "./api";
+import { apiRequest, clearActiveCompanyId, getActiveCompanyId, setActiveCompanyId } from "./api";
 
 /**
  * Which of the group's firms the app is currently working in.
@@ -61,6 +61,10 @@ export const useCompanyScope = create<CompanyScopeState>((set) => ({
       const stored = usable.find((c) => c.id === s.companyId);
       const next = stored ?? usable[0] ?? null;
       if (next && next.id !== getActiveCompanyId()) setActiveCompanyId(next.id);
+      // Nothing usable for this user: drop whatever id is left in the browser. The key outlives a
+      // logout, so without this the next person to sign in on the machine keeps sending the previous
+      // user's company — and the backend rejects every call they make with a 403.
+      if (!next && getActiveCompanyId() != null) clearActiveCompanyId();
       return { companies: list, companyId: next?.id ?? null, loading: false };
     }),
 }));
@@ -101,11 +105,26 @@ function ensureCompaniesLoaded(): Promise<void> {
       useCompanyScope.getState().setCompanies(await apiRequest<Company[]>("/api/v1/companies"));
     } catch {
       // Backend not up, or an older build without the endpoint: fall back to no switcher rather
-      // than blocking the sidebar from rendering.
-      useCompanyScope.getState().setCompanies([]);
+      // than blocking the sidebar from rendering. Set directly rather than via setCompanies: a failed
+      // fetch says nothing about access, so it must not clear the stored company.
+      useCompanyScope.setState({ companies: [], loading: false });
     }
   })();
   return inFlight;
+}
+
+/**
+ * Forget the company list and the active company — call on every sign-in and sign-out.
+ *
+ * Both outlive a session: the list is a module-level promise and the active id sits in
+ * localStorage. Logging out and signing in as someone else in the same tab (no page reload) kept the
+ * previous user's list and company, so a member without access to the company the admin had
+ * selected got a 403 on every company-scoped call until they cleared their browser.
+ */
+export function resetCompanyScope() {
+  inFlight = null;
+  clearActiveCompanyId();
+  useCompanyScope.setState({ companies: [], companyId: null, loading: true });
 }
 
 /** The companies this user may work in, plus the active one. */

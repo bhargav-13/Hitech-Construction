@@ -47,6 +47,11 @@ export function setActiveCompanyId(id: number) {
   localStorage.setItem(COMPANY_ID_KEY, String(id));
 }
 
+export function clearActiveCompanyId() {
+  if (typeof window === "undefined") return;
+  localStorage.removeItem(COMPANY_ID_KEY);
+}
+
 // ---- DTO shapes (mirror api-contracts/user-management.yaml) ----
 export interface RoleSummary {
   id: number | null;

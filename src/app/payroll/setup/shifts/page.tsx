@@ -182,7 +182,7 @@ function ShiftDrawer({
           <DrawerField label="End Time"><input type="time" value={endTime} onChange={(e) => setEndTime(e.target.value)} className="input" /></DrawerField>
         </div>
 
-        <DrawerField label="Weekly Offs">
+        <DrawerField group label="Weekly Offs">
           <div className="flex flex-wrap gap-1.5">
             {DAYS.map((d, i) => {
               const on = weeklyOffs.includes(i);

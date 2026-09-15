@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import * as api from "./api";
 import type { CurrentUserResponse } from "./api";
+import { resetCompanyScope } from "./companyScope";
 
 // Real session against the Spring Boot backend — separate from the mock `useAppStore`
 // (which still drives the not-yet-wired-up features). Login bridges the two so existing
@@ -26,6 +27,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     try {
       const res = await api.login(email, password);
       api.setTokens(res.accessToken, res.refreshToken);
+      // A new session starts with no company: the previous user's choice may not be one this user
+      // can open. The list reloads for them and settles on the first company they have.
+      resetCompanyScope();
       set({ user: res.user, loading: false });
       return true;
     } catch (err) {
@@ -45,6 +49,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       }
     }
     api.clearTokens();
+    resetCompanyScope();
     set({ user: null });
   },
 

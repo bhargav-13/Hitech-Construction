@@ -277,7 +277,7 @@ function WarehouseDialog({
           </DrawerField>
         </div>
 
-        <DrawerField label="Kind" required>
+        <DrawerField group label="Kind" required>
           <div className="grid gap-2 sm:grid-cols-2">
             {(["CENTRAL", "SITE"] as const).map((k) => (
               <button
