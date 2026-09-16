@@ -1,201 +1,154 @@
 "use client";
 
-import { useCallback, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useState } from "react";
+import {
+  createRoutine,
+  deleteRoutine,
+  getChecklistScope,
+  listRoutines,
+  toggleRoutineTick,
+  updateRoutine,
+  type ChecklistPeriodApi,
+  type RoutineDto,
+} from "./checklistApi";
 
 /**
  * The recurring-checklist board — a standalone tracker, deliberately wired to nothing else.
  *
- * <p>Hi-Tech runs its routines off a spreadsheet: three blocks (daily / weekly / monthly), a row per
- * routine, and a tick per period. This reproduces that sheet inside Taskopad without turning the
- * rows into tasks — no assignees, no approvals, no notifications, no reports. It is a board people
- * tick, and that is all it is meant to be.
+ * <p>Hi-Tech runs its routines off a spreadsheet: a block per cadence, a row per routine, and a tick
+ * per period. This reproduces that sheet inside Taskopad without turning the rows into tasks — no
+ * approvals, no notifications, no reports.
  *
- * <p>It lives in browser storage, like the other single-user tools in this codebase (party ratings,
- * the "Others" registers). That includes the access list: a Super Admin picks who should see the
- * board, and that choice is remembered on their machine until the backend models this screen.
+ * <p>It used to live in each browser's localStorage, which made it a private notebook: a PM could
+ * not see their team's ticks. It is now one shared board on the server, run by the role ladder —
+ * whoever sits above a person sets up that person's routines; the person (or anyone above) ticks.
  */
 
-const KEY = "hitech.taskopad.checklist.v1";
+export type ChecklistPeriod = "daily" | "weekly" | "monthly" | "quarterly" | "halfYearly" | "yearly";
 
-export type ChecklistPeriod = "daily" | "weekly" | "monthly";
+export const CHECKLIST_PERIODS: ChecklistPeriod[] = ["daily", "weekly", "monthly", "quarterly", "halfYearly", "yearly"];
+
+const TO_API: Record<ChecklistPeriod, ChecklistPeriodApi> = {
+  daily: "DAILY",
+  weekly: "WEEKLY",
+  monthly: "MONTHLY",
+  quarterly: "QUARTERLY",
+  halfYearly: "HALF_YEARLY",
+  yearly: "YEARLY",
+};
+const FROM_API = Object.fromEntries(Object.entries(TO_API).map(([k, v]) => [v, k])) as Record<
+  ChecklistPeriodApi,
+  ChecklistPeriod
+>;
 
 export interface ChecklistRow {
   id: string;
+  period: ChecklistPeriod;
   name: string;
-  /**
-   * Who owns the routine — a real user id from the team directory, not a typed-in name.
-   * The sheet's "Contact" column was free text ("JAY"), which meant the board had its own private
-   * idea of who people are; this points at the same users as the rest of the app.
-   */
-  assigneeId: string | null;
+  assigneeId: string;
   /** The weekly sheet's "Work Alloted / Done" column — a work item, not a person. */
   note: string;
-  /** Ticked periods, keyed by period id ("2026-08-03", "2026-08-W2", "2026-08"). */
+  /** Ticked periods, keyed by period id ("2026-08-03", "2026-08-W2", "2026-08", "FY2026-Q2", "FY2026-H1", "FY2026"). */
   ticks: Record<string, boolean>;
+  canManage: boolean;
+  canTick: boolean;
 }
 
-export interface ChecklistData {
-  daily: ChecklistRow[];
-  weekly: ChecklistRow[];
-  monthly: ChecklistRow[];
-  /** User ids (as strings, matching the team directory) allowed to open the board. */
-  allowedUserIds: string[];
+export interface ChecklistScope {
+  meId: string;
+  superAdmin: boolean;
+  /** People below the signed-in user in the role ladder. Empty for Super Admin, who may pick anyone. */
+  teamUserIds: string[];
 }
 
-const newId = () => `chk-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+export interface RoutineInput {
+  period: ChecklistPeriod;
+  name: string;
+  assigneeId: string;
+  note: string;
+}
 
-const row = (name: string, note = ""): ChecklistRow => ({
-  id: newId(),
-  name,
-  assigneeId: null,
-  note,
-  ticks: {},
-});
-
-/** The routines the client already tracks, so the board is usable the moment it opens. */
-function seed(): ChecklistData {
+function toRow(d: RoutineDto): ChecklistRow {
   return {
-    daily: [
-      row("Attendance Check - 10 AM"),
-      row("Core Value Evaluation / Core Value Entries (EOD)"),
-      row("Vision Reading Regular and understanding its core meaning"),
-      row("Onsite Regular Checking"),
-    ],
-    weekly: [
-      row("Accountant Work Review", "ACCOUNT"),
-      row("Tender Analysis Work review", "Construction Tender Analysis"),
-      row("Tender Analyst Work", "GeM Tender Analysis"),
-      row("Data Analyst Work", "DPR HI-TECH UJJAIN"),
-      row("Data Analyst Work", "Brick plant update strategy"),
-      row("Bonus Calculation Sheet", "Bonus Calculation"),
-      row("Maturity Docket"),
-    ],
-    monthly: [
-      row("Hiring of billing executive"),
-      row("Training schedule / Team Building"),
-      row("Tracking Ujjain Employees site photos in whatsapp group"),
-      row("Bonus sheet Calculation review"),
-      row("Maintaining Maturity Development Docket"),
-      row("Campus placement"),
-      row("Hiring Students for internship also [ Rs 5000 ]"),
-      row("Linkedin platform"),
-      row("Mainting PF sheet for upcoming salary deduction"),
-    ],
-    allowedUserIds: [],
+    id: String(d.id),
+    period: FROM_API[d.period],
+    name: d.name,
+    assigneeId: String(d.assigneeId),
+    note: d.note ?? "",
+    ticks: Object.fromEntries(d.ticks.map((k) => [k, true])),
+    canManage: d.canManage,
+    canTick: d.canTick,
   };
 }
 
-function read(): ChecklistData {
-  if (typeof window === "undefined") return seed();
-  try {
-    const raw = window.localStorage.getItem(KEY);
-    if (!raw) return seed();
-    const parsed = JSON.parse(raw) as Partial<ChecklistData>;
-    return {
-      daily: migrate(parsed.daily),
-      weekly: migrate(parsed.weekly),
-      monthly: migrate(parsed.monthly),
-      allowedUserIds: Array.isArray(parsed.allowedUserIds) ? parsed.allowedUserIds : [],
-    };
-  } catch {
-    return seed();
-  }
-}
-
-/**
- * Bring rows saved before the assignee column existed up to date.
- *
- * <p>They carried a free-text `contact`. There is no safe way to turn a string like "JAY" into a
- * user id here (the directory isn't loaded at this level, and two people can share a first name),
- * so it is kept as the work note and whoever opens the row picks the real person. Nothing is lost.
- */
-function migrate(rows: unknown): ChecklistRow[] {
-  if (!Array.isArray(rows)) return [];
-  return rows.map((r) => {
-    const row = r as Partial<ChecklistRow> & { contact?: string };
-    return {
-      id: String(row.id ?? newId()),
-      name: String(row.name ?? ""),
-      assigneeId: row.assigneeId ?? null,
-      note: row.note ?? row.contact ?? "",
-      ticks: row.ticks ?? {},
-    };
-  });
-}
-
-function write(data: ChecklistData) {
-  if (typeof window === "undefined") return;
-  try {
-    window.localStorage.setItem(KEY, JSON.stringify(data));
-  } catch {
-    // storage full / disabled — the in-memory board still works for this session
-  }
-}
-
-// The board is one shared value for the whole tab, read through useSyncExternalStore so the server
-// render sees an empty board and the client swaps in localStorage without a hydration mismatch.
-const EMPTY: ChecklistData = { daily: [], weekly: [], monthly: [], allowedUserIds: [] };
-let cache: ChecklistData | null = null;
-const listeners = new Set<() => void>();
-
-function subscribe(listener: () => void) {
-  listeners.add(listener);
-  return () => { listeners.delete(listener); };
-}
-
-function snapshot(): ChecklistData {
-  if (cache === null) cache = read();
-  return cache;
-}
-
-function commit(next: ChecklistData) {
-  cache = next;
-  write(next);
-  for (const l of listeners) l();
-}
+const toRequest = (r: RoutineInput) => ({
+  period: TO_API[r.period],
+  name: r.name.trim(),
+  assigneeId: Number(r.assigneeId),
+  note: r.note.trim() || null,
+});
 
 export function useChecklist() {
-  const data = useSyncExternalStore(subscribe, snapshot, () => EMPTY);
-  // False during the server render and the first client paint, so the page can hold off drawing an
-  // empty board for a frame.
-  const ready = useSyncExternalStore(subscribe, () => true, () => false);
+  const [rows, setRows] = useState<ChecklistRow[]>([]);
+  const [scope, setScope] = useState<ChecklistScope | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  const update = useCallback((fn: (prev: ChecklistData) => ChecklistData) => commit(fn(snapshot())), []);
+  // Bumped by reload() to refetch.
+  const [attempt, setAttempt] = useState(0);
 
-  const addRow = useCallback(
-    (period: ChecklistPeriod) => update((p) => ({ ...p, [period]: [...p[period], row("")] })),
-    [update]
-  );
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const [s, list] = await Promise.all([getChecklistScope(), listRoutines()]);
+        if (cancelled) return;
+        setScope({ meId: String(s.meId), superAdmin: s.superAdmin, teamUserIds: s.teamUserIds.map(String) });
+        setRows(list.map(toRow));
+        setError(null);
+      } catch (e) {
+        if (!cancelled) setError(e instanceof Error ? e.message : "Could not load the checklist");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [attempt]);
 
-  const removeRow = useCallback(
-    (period: ChecklistPeriod, id: string) =>
-      update((p) => ({ ...p, [period]: p[period].filter((r) => r.id !== id) })),
-    [update]
-  );
+  const load = useCallback(() => {
+    setLoading(true);
+    setAttempt((n) => n + 1);
+  }, []);
 
-  const patchRow = useCallback(
-    (period: ChecklistPeriod, id: string, patch: Partial<Pick<ChecklistRow, "name" | "note" | "assigneeId">>) =>
-      update((p) => ({ ...p, [period]: p[period].map((r) => (r.id === id ? { ...r, ...patch } : r)) })),
-    [update]
-  );
+  const replace = (next: ChecklistRow) => setRows((prev) => prev.map((r) => (r.id === next.id ? next : r)));
 
-  const toggleTick = useCallback(
-    (period: ChecklistPeriod, id: string, periodKey: string) =>
-      update((p) => ({
-        ...p,
-        [period]: p[period].map((r) =>
-          r.id === id ? { ...r, ticks: { ...r.ticks, [periodKey]: !r.ticks[periodKey] } } : r
-        ),
-      })),
-    [update]
-  );
+  const addRow = useCallback(async (input: RoutineInput) => {
+    const created = toRow(await createRoutine(toRequest(input)));
+    setRows((prev) => [...prev, created]);
+  }, []);
 
-  const setAllowedUsers = useCallback(
-    (ids: string[]) => update((p) => ({ ...p, allowedUserIds: ids })),
-    [update]
-  );
+  const saveRow = useCallback(async (id: string, input: RoutineInput) => {
+    replace(toRow(await updateRoutine(Number(id), toRequest(input))));
+  }, []);
 
-  const reset = useCallback(() => update((p) => ({ ...seed(), allowedUserIds: p.allowedUserIds })), [update]);
+  const removeRow = useCallback(async (id: string) => {
+    await deleteRoutine(Number(id));
+    setRows((prev) => prev.filter((r) => r.id !== id));
+  }, []);
 
-  return { data, ready, addRow, removeRow, patchRow, toggleTick, setAllowedUsers, reset };
+  /** Optimistic — the box flips at once and snaps back if the server refuses. */
+  const toggleTick = useCallback(async (row: ChecklistRow, periodKey: string) => {
+    const flipped = { ...row, ticks: { ...row.ticks, [periodKey]: !row.ticks[periodKey] } };
+    replace(flipped);
+    try {
+      replace(toRow(await toggleRoutineTick(Number(row.id), periodKey)));
+    } catch (e) {
+      replace(row);
+      alert(e instanceof Error ? e.message : "Could not update the tick");
+    }
+  }, []);
+
+  return { rows, scope, loading, error, reload: load, addRow, saveRow, removeRow, toggleTick };
 }
