@@ -31,6 +31,7 @@ import { useTaskStore } from "@/lib/taskStore";
 import { getAccessSelf } from "@/lib/api";
 import { useTaskUnread } from "@/lib/taskNotifications";
 import { isSuperAdminRole, useTaskRights } from "@/lib/taskPermissions";
+import { useCan } from "@/lib/permissions";
 import { TaskImportDrawer, type ParsedTaskRow } from "@/components/task/TaskImportDrawer";
 import type { TaskRights } from "@/lib/taskPermissions";
 import {
@@ -120,6 +121,8 @@ export function TaskWorkspace({ projectId }: { projectId?: string }) {
   // A task's details belong to its creator (and Super Admin); the assignee may only move status
   // and progress. Row controls are disabled to match, so nothing fails on click.
   const { rightsFor } = useTaskRights();
+  // Roles & Access: creating (and importing) tasks is its own permission.
+  const canCreateTasks = useCan()("TASKOPAD_TASKS:CREATE");
   const scopeMode = useTaskStore((s) => s.scope);
   const setStoreScope = useTaskStore((s) => s.setScope);
   const [hasSubtree, setHasSubtree] = useState(false);
@@ -517,13 +520,15 @@ export function TaskWorkspace({ projectId }: { projectId?: string }) {
         </button>
 
         {/* Bulk import / export */}
-        <button
-          onClick={() => setImporting(true)}
-          title="Import tasks from a CSV — a sample file is offered inside"
-          className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-600 transition-all duration-150 hover:bg-gray-50 active:scale-95"
-        >
-          <Upload size={14} className="inline" /> Import
-        </button>
+        {canCreateTasks && (
+          <button
+            onClick={() => setImporting(true)}
+            title="Import tasks from a CSV — a sample file is offered inside"
+            className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-600 transition-all duration-150 hover:bg-gray-50 active:scale-95"
+          >
+            <Upload size={14} className="inline" /> Import
+          </button>
+        )}
         <button
           onClick={exportTasksCsv}
           disabled={tasks.length === 0}
@@ -533,12 +538,14 @@ export function TaskWorkspace({ projectId }: { projectId?: string }) {
           <Download size={14} className="inline" /> Export
         </button>
 
-        <button
-          onClick={() => setCreating(true)}
-          className="rounded-lg bg-brand-accent px-4 py-2 text-sm font-medium text-white transition-all duration-150 hover:opacity-90 active:scale-95"
-        >
-          + Add Task
-        </button>
+        {canCreateTasks && (
+          <button
+            onClick={() => setCreating(true)}
+            className="rounded-lg bg-brand-accent px-4 py-2 text-sm font-medium text-white transition-all duration-150 hover:opacity-90 active:scale-95"
+          >
+            + Add Task
+          </button>
+        )}
       </div>
 
       {/* Bulk action bar — appears once rows are selected */}
@@ -736,7 +743,7 @@ export function TaskWorkspace({ projectId }: { projectId?: string }) {
           <Loader2 className="mr-2 animate-spin" size={18} /> Loading tasks…
         </div>
       ) : tasks.length === 0 ? (
-        <EmptyTasks onAdd={() => setCreating(true)} draft={showDrafts} />
+        <EmptyTasks onAdd={canCreateTasks ? () => setCreating(true) : undefined} draft={showDrafts} />
       ) : view === "List" ? (
         <ListView
           tasks={tasks}
@@ -850,7 +857,7 @@ function FilterSelect({
   );
 }
 
-function EmptyTasks({ onAdd, draft }: { onAdd: () => void; draft: boolean }) {
+function EmptyTasks({ onAdd, draft }: { onAdd?: () => void; draft: boolean }) {
   return (
     <div className="animate-fade-in flex min-h-[320px] flex-col items-center justify-center rounded-xl border border-dashed border-gray-300 bg-white text-center">
       <div className="mb-3 flex h-14 w-14 items-center justify-center rounded-full bg-cyan-50 text-brand-accent">
@@ -862,7 +869,7 @@ function EmptyTasks({ onAdd, draft }: { onAdd: () => void; draft: boolean }) {
       <p className="mt-1 max-w-xs text-sm text-gray-400">
         {draft ? "Tasks you save as draft will appear here." : "Create a task and assign it to your team."}
       </p>
-      {!draft && (
+      {!draft && onAdd && (
         <button
           onClick={onAdd}
           className="mt-4 rounded-lg bg-brand-accent px-4 py-2 text-sm font-medium text-white transition-all duration-150 hover:opacity-90 active:scale-95"

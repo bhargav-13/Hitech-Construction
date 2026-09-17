@@ -7,27 +7,32 @@ import { ChevronRight } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { NotificationBell } from "@/components/task/NotificationBell";
 import { useTaskStore } from "@/lib/taskStore";
+import { useCan } from "@/lib/permissions";
 
 const TABS = [
   { label: "Dashboard", href: "/taskopad" },
-  { label: "Tasks", href: "/taskopad/tasks" },
-  { label: "Approvals", href: "/taskopad/approvals" },
-  { label: "Reports", href: "/taskopad/reports" },
+  { label: "Tasks", href: "/taskopad/tasks", feature: "TASKOPAD_TASKS" },
+  { label: "Approvals", href: "/taskopad/approvals", feature: "TASKOPAD_APPROVALS" },
+  { label: "Reports", href: "/taskopad/reports", feature: "TASKOPAD_REPORTS" },
   // Standalone routine board — see app/taskopad/checklist. Deliberately not tied to tasks.
-  { label: "Checklist", href: "/taskopad/checklist" },
+  { label: "Checklist", href: "/taskopad/checklist", feature: "TASKOPAD_CHECKLIST" },
 ];
 
 /** Shared chrome for the Taskopad module: breadcrumb + horizontal section tabs. */
 export function TaskopadShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  // A tab the role's Roles & Access features don't cover isn't shown.
+  const can = useCan();
+  const tabs = TABS.filter((t) => can(t.feature));
+  const canSeeApprovals = can("TASKOPAD_APPROVALS");
   const active = TABS.slice().reverse().find((t) => pathname === t.href || pathname.startsWith(t.href + "/"));
   const approvalsCount = useTaskStore((s) => s.approvals.length);
   const loadApprovals = useTaskStore((s) => s.loadApprovals);
 
-  // Keep the "Approvals" badge current whenever the module is open.
+  // Keep the "Approvals" badge current whenever the module is open — for roles that have the queue.
   useEffect(() => {
-    loadApprovals();
-  }, [loadApprovals, pathname]);
+    if (canSeeApprovals) loadApprovals();
+  }, [loadApprovals, pathname, canSeeApprovals]);
 
   return (
     <AppShell title="Taskopad">
@@ -44,7 +49,7 @@ export function TaskopadShell({ children }: { children: React.ReactNode }) {
         </div>
 
         <div className="flex gap-5 border-b border-gray-200">
-          {TABS.map((t) => {
+          {tabs.map((t) => {
             const isActive = active?.href === t.href;
             return (
               <Link

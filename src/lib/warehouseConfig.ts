@@ -16,6 +16,8 @@
 export interface WarehouseNavNode {
   label: string;
   href: string;
+  /** Roles & Access feature this screen needs ("TENDER_TRACKER"); hidden from roles without it. */
+  feature?: string | string[];
   icon: string;
   /** Section break rendered above this item. */
   section?: string;
@@ -33,19 +35,20 @@ export const WAREHOUSE_NAV: WarehouseNavNode[] = [
   { label: "Dashboard", href: "/warehouse", icon: "home" },
 
   { label: "Stock on hand", href: "/warehouse/stock", icon: "boxes", section: "Stock", badge: "low" },
-  { label: "Movements", href: "/warehouse/movements", icon: "arrows", hint: "Every receipt, issue and transfer" },
+  { label: "Movements", href: "/warehouse/movements", feature: "WAREHOUSE_STOCK", icon: "arrows", hint: "Every receipt, issue and transfer" },
 
   {
     label: "Material Requests",
     href: "/warehouse/requests",
+    feature: "WAREHOUSE_REQUESTS",
     icon: "clipboard",
     section: "Requests",
     badge: "requests",
   },
-  { label: "Checkouts", href: "/warehouse/checkouts", icon: "handshake", badge: "out", hint: "Returnables still out" },
+  { label: "Checkouts", href: "/warehouse/checkouts", feature: "WAREHOUSE_CHECKOUTS", icon: "handshake", badge: "out", hint: "Returnables still out" },
 
   { label: "Warehouses", href: "/warehouse/locations", icon: "warehouse", section: "Setup" },
-  { label: "Access", href: "/warehouse/access", icon: "users", hint: "Who may work in which store" },
+  { label: "Access", href: "/warehouse/access", feature: "WAREHOUSE_STORES", icon: "users", hint: "Who may work in which store" },
 ];
 
 /** Kind → how it reads and looks. Transit is a system store, not somewhere anyone visits. */

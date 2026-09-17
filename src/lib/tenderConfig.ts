@@ -7,6 +7,8 @@
 export interface TenderNavNode {
   label: string;
   href?: string;
+  /** Roles & Access feature this screen needs ("TENDER_TRACKER"); hidden from roles without it. */
+  feature?: string | string[];
   icon?: string;
   /** Section break rendered above this item. */
   section?: string;
@@ -25,23 +27,23 @@ export const TENDER_NAV: TenderNavNode[] = [
   // entirely — it becomes a record in the existing Project module, reached from the tender itself.
   // There is deliberately no Projects entry in this rail: Tender owns bidding, Project owns
   // execution, and the handoff is a link on the won tender rather than a second project list.
-  { label: "Sorting", href: "/tender/sorting", icon: "filter", section: "Pipeline", badge: "due:SORTING" },
-  { label: "Research", href: "/tender/research", icon: "search", badge: "due:RESEARCH" },
+  { label: "Sorting", href: "/tender/sorting", feature: "TENDER_TENDERS", icon: "filter", section: "Pipeline", badge: "due:SORTING" },
+  { label: "Research", href: "/tender/research", feature: "TENDER_TENDERS", icon: "search", badge: "due:RESEARCH" },
   // Costing sits inside the pipeline rather than beside it: analysis *is* the research step, and
   // the bid percentage it produces is what the Applied stage records.
-  { label: "Health Analysis", href: "/tender/analysis", icon: "clipboard" },
-  { label: "Applied", href: "/tender/applied", icon: "send" },
+  { label: "Health Analysis", href: "/tender/analysis", feature: "TENDER_ANALYSIS", icon: "clipboard" },
+  { label: "Applied", href: "/tender/applied", feature: "TENDER_TENDERS", icon: "send" },
 
   // Time and money.
-  { label: "Calendar", href: "/tender/calendar", icon: "calendar", section: "Planning" },
-  { label: "EMD Register", href: "/tender/emd", icon: "bank", badge: "emd" },
+  { label: "Calendar", href: "/tender/calendar", feature: "TENDER_TENDERS", icon: "calendar", section: "Planning" },
+  { label: "EMD Register", href: "/tender/emd", feature: "TENDER_TENDERS", icon: "bank", badge: "emd" },
 
   // Trackers for applied / won tenders.
-  { label: "Status Tracker", href: "/tender/tracker", icon: "check", section: "Trackers" },
-  { label: "Documents", href: "/tender/documents", icon: "file" },
-  { label: "Hardcopy", href: "/tender/hardcopy", icon: "truck" },
+  { label: "Status Tracker", href: "/tender/tracker", feature: "TENDER_TRACKER", icon: "check", section: "Trackers" },
+  { label: "Documents", href: "/tender/documents", feature: "TENDER_DOCUMENTS", icon: "file" },
+  { label: "Hardcopy", href: "/tender/hardcopy", feature: "TENDER_DOCUMENTS", icon: "truck" },
 
   // Reference data and configuration.
-  { label: "Materials", href: "/tender/materials", icon: "boxes", section: "Reference" },
+  { label: "Materials", href: "/tender/materials", feature: "TENDER_MATERIALS", icon: "boxes", section: "Reference" },
   { label: "Settings", href: "/tender/settings", icon: "settings" },
 ];

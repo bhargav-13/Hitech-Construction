@@ -179,9 +179,9 @@ function Matrix({
   onUnlock: (rfqId: number, quoteId: number) => void;
 }) {
   const router = useRouter();
-  // Raising a PO writes a Vyapar document, so it needs Vyapar rights. Reading the orders afterwards
+  // Raising a PO writes a Vyapar purchase document, so it needs Vyapar Purchases create. Reading the orders afterwards
   // does not — that lives on Procurement's own Purchase Orders screen.
-  const canRaisePo = (useAuthStore((s) => s.user?.permissions) ?? []).includes("VYAPAR:CREATE");
+  const canRaisePo = (useAuthStore((s) => s.user?.permissions) ?? []).includes("VYAPAR_PURCHASE:CREATE");
   const totals = useMemo(() => rfq.quotes.map((q) => quoteTotals(rfq, q)), [rfq]);
 
   /** Focus one vendor's column. Twelve columns is a wall; one at a time is a comparison. */
@@ -731,7 +731,7 @@ function Matrix({
         </div>
 
         {/* One button per winning vendor — because that is one purchase order each, prefilled.
-            Raising one is a Vyapar write, so it stays behind VYAPAR:CREATE; reading the resulting
+            Raising one is a Vyapar write, so it stays behind VYAPAR_PURCHASE:CREATE; reading the resulting
             orders does not, and lives on Procurement's own Purchase Orders screen. */}
         {byVendor.length > 0 && !canRaisePo && (
           <p className="mt-3 border-t border-gray-100 pt-3 text-xs text-amber-700">

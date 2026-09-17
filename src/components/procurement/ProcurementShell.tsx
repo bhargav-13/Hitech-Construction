@@ -7,6 +7,7 @@ import { AppShell } from "@/components/AppShell";
 import { useUiStore } from "@/lib/uiStore";
 import { useRfqs } from "@/lib/useRfqs";
 import { PROCUREMENT_NAV } from "@/lib/procurementConfig";
+import { filterNav, useCan } from "@/lib/permissions";
 import type { ProcNavNode } from "@/lib/procurementConfig";
 import {
   ClipboardList,
@@ -43,6 +44,9 @@ const ICONS: Record<string, React.ComponentType<{ size?: number; className?: str
  * without opening a screen. Flat, no role-gating (that's handled upstream by PROCUREMENT:VIEW).
  */
 export function ProcurementShell({ children }: { children: React.ReactNode }) {
+  // Screens the role's Roles & Access features don't cover are left out of the rail.
+  const can = useCan();
+  const nav = filterNav(PROCUREMENT_NAV, can);
   const pathname = usePathname();
   const railCollapsed = useUiStore((s) => s.procurementRailCollapsed);
   const toggleRail = useUiStore((s) => s.toggleProcurementRail);
@@ -79,7 +83,7 @@ export function ProcurementShell({ children }: { children: React.ReactNode }) {
           </button>
 
           <nav className="space-y-0.5">
-            {PROCUREMENT_NAV.map((node) => (
+            {nav.map((node) => (
               <div key={node.label}>
                 {node.section && !railCollapsed && (
                   <div className="mt-3 mb-1 px-3 text-[10px] font-semibold tracking-wide text-gray-300 uppercase">

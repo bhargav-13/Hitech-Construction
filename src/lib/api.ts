@@ -70,6 +70,12 @@ export interface ModuleResponse {
   id: number;
   code: string;
   name: string;
+  /**
+   * Set on a feature: the module it belongs to (VYAPAR_SALE → VYAPAR). Null on a module, whose VIEW
+   * is its ON/OFF switch in Roles & Access.
+   */
+  parentCode?: string | null;
+  sortOrder?: number;
   permissions: PermissionResponse[];
 }
 

@@ -11,12 +11,12 @@ import { projectAvatarColor } from "@/lib/projectHelpers";
 /**
  * Manage who can access a project. Membership drives per-user project visibility (a non-admin only
  * sees projects they're a member of, and only those show in the header project dropdown). Editing
- * requires PROJECT:EDIT; otherwise the list is read-only.
+ * requires the Members feature's edit (PROJECT_MEMBERS:EDIT); otherwise the list is read-only.
  */
 export function ProjectMembers({ projectId }: { projectId: string }) {
   const { users, loading: usersLoading } = useUsers();
   const permissions = useAuthStore((s) => s.user?.permissions ?? []);
-  const canEdit = permissions.includes("PROJECT:EDIT");
+  const canEdit = permissions.includes("PROJECT_MEMBERS:EDIT");
 
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [initial, setInitial] = useState<Set<string>>(new Set());

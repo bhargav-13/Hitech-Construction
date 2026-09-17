@@ -33,6 +33,7 @@ import { ProjectActivity } from "@/components/project/ProjectActivity";
 import * as api from "@/lib/api";
 import type { ProjectResponse, ProjectSummary } from "@/lib/api";
 import { projectInitials } from "@/lib/projectHelpers";
+import { useCan, type Need } from "@/lib/permissions";
 import { inr } from "@/lib/format";
 
 // Deliberately NOT `runtime = "edge"`. This page is a client component, so edge bought nothing —
@@ -67,6 +68,19 @@ const TABS = [
 ] as const;
 type Tab = (typeof TABS)[number];
 
+/** What each tab reads, in Roles & Access terms. A tab the role can't use isn't shown. */
+const TAB_NEEDS: Partial<Record<Tab, Need>> = {
+  Site: "PROJECT_LOCATIONS",
+  BOQ: ["PROJECT_BOQ", "PROJECT_PROGRESS"],
+  Target: ["PROJECT_BOQ", "PROJECT_PROGRESS"],
+  Transaction: "VYAPAR:VIEW",
+  Party: "VYAPAR:VIEW",
+  Material: "VYAPAR:VIEW",
+  Attendance: "PAYROLL_ATTENDANCE",
+  Members: "PROJECT_MEMBERS",
+  Tender: "TENDER:VIEW",
+};
+
 const STATUS_DISPLAY: Record<ProjectResponse["status"], string> = {
   NOT_STARTED: "Not Started",
   ONGOING: "Ongoing",
@@ -92,6 +106,8 @@ export default function ProjectDetailPage() {
   const params = useParams<{ id: string }>();
   const projectId = Number(params.id);
   const [tab, setTab] = useState<Tab>("Dashboard");
+  const can = useCan();
+  const tabs = TABS.filter((t) => can(TAB_NEEDS[t]));
   const [editing, setEditing] = useState(false);
 
   const [project, setProject] = useState<ProjectResponse | null>(null);
@@ -182,7 +198,7 @@ export default function ProjectDetailPage() {
       </div>
 
       <div className="mb-5 flex gap-6 overflow-x-auto border-b border-slate-200">
-        {TABS.map((t) => (
+        {tabs.map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}

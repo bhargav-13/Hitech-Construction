@@ -7,6 +7,8 @@
 export interface PayrollNavNode {
   label: string;
   href?: string;
+  /** Roles & Access feature this screen needs ("TENDER_TRACKER"); hidden from roles without it. */
+  feature?: string | string[];
   icon?: string;
   children?: PayrollNavNode[];
   badge?: string;
@@ -18,19 +20,19 @@ export interface PayrollNavNode {
 export const PAYROLL_NAV: PayrollNavNode[] = [
   { label: "Dashboard", href: "/payroll", icon: "home" },
   // Pre-setup: reusable policies (shifts, holidays, leave) configured once and assigned to people.
-  { label: "Setup", href: "/payroll/setup", icon: "sliders" },
-  { label: "People", href: "/payroll/staff", icon: "users" },
-  { label: "Locations", href: "/payroll/locations", icon: "pin" },
+  { label: "Setup", href: "/payroll/setup", feature: "PAYROLL_SETUP", icon: "sliders" },
+  { label: "People", href: "/payroll/staff", feature: "PAYROLL_STAFF", icon: "users" },
+  { label: "Locations", href: "/payroll/locations", feature: "PAYROLL_SETUP", icon: "pin" },
   // Combined Day + Month view (formerly two pages).
-  { label: "Attendance", href: "/payroll/attendance", icon: "calendar" },
+  { label: "Attendance", href: "/payroll/attendance", feature: "PAYROLL_ATTENDANCE", icon: "calendar" },
   // All Requests + Approval Queue are now tabs on one page.
-  { label: "Leave", href: "/payroll/leave", icon: "calendar" },
-  { label: "Monthly Runs", href: "/payroll/run", icon: "wallet" },
-  { label: "Loans", href: "/payroll/loans", icon: "landmark" },
-  { label: "Reimbursements", href: "/payroll/reimbursements", icon: "receipt" },
+  { label: "Leave", href: "/payroll/leave", feature: "PAYROLL_LEAVE", icon: "calendar" },
+  { label: "Monthly Runs", href: "/payroll/run", feature: "PAYROLL_RUN", icon: "wallet" },
+  { label: "Loans", href: "/payroll/loans", feature: "PAYROLL_LOANS", icon: "landmark" },
+  { label: "Reimbursements", href: "/payroll/reimbursements", feature: "PAYROLL_REIMBURSEMENTS", icon: "receipt" },
   // Payments (payout tracking) and Tax Profiles are not wired to the backend yet — hidden from
   // nav so no mock data reaches users. Re-add once Phase 6 (payroll_payments) ships.
-  { label: "Reports", href: "/payroll/reports", icon: "chart" },
+  { label: "Reports", href: "/payroll/reports", feature: "PAYROLL_STAFF", icon: "chart" },
   { label: "Others", href: "/payroll/others", icon: "grid" },
   // Admins are employees too — they need somewhere to apply for their own leave and read their own
   // payslip. Without this the only "Leave" in the rail was the approval queue, which anyone without

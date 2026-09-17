@@ -643,7 +643,6 @@ export function computePayslip(emp: Employee, overrides: Record<string, Attendan
 
 // ---------------- Access model (admin vs self-service) ----------------
 
-const MANAGE_ACTIONS = ["PAYROLL:CREATE", "PAYROLL:EDIT", "PAYROLL:DELETE", "PAYROLL:APPROVE"];
 
 export interface PayrollAccess {
   /** Can view the module at all (nav is already gated on this). */
@@ -651,7 +650,7 @@ export interface PayrollAccess {
   /** Full HR/admin module: all staff, payroll runs, approvals, everyone's salaries. */
   isAdmin: boolean;
   /**
-   * Holds PAYROLL:APPROVE specifically. Distinct from `isAdmin` because a member with only
+   * Holds Team Leave approve specifically. Distinct from `isAdmin` because a member with only
    * CREATE/EDIT counts as an admin here but is refused by every /leave approval endpoint — showing
    * them the Leave queue is what produced "Access is denied" with nowhere else to apply for leave.
    */
@@ -661,14 +660,15 @@ export interface PayrollAccess {
 }
 
 /**
- * What the signed-in user may do in Payroll. Anyone holding a manage action (CREATE/EDIT/DELETE/
- * APPROVE) is treated as an HR admin and gets the full module; a plain PAYROLL:VIEW is self-service.
+ * What the signed-in user may do in Payroll. Payroll switched on (PAYROLL:VIEW) is self-service; any
+ * of Payroll's team features in Roles & Access (People, Team Attendance, Monthly Runs, …) adds the
+ * team side of the module, with each screen then shown per feature. Mirrors PayrollController.isManager.
  */
 export function usePayrollAccess(): PayrollAccess {
   const perms = useAuthStore((s) => s.user?.permissions) ?? [];
   const canView = perms.includes("PAYROLL:VIEW");
-  const isAdmin = MANAGE_ACTIONS.some((p) => perms.includes(p));
-  const canApprove = perms.includes("PAYROLL:APPROVE");
+  const isAdmin = canView && perms.some((p) => p.startsWith("PAYROLL_"));
+  const canApprove = perms.includes("PAYROLL_LEAVE:APPROVE");
   return { canView, isAdmin, canApprove, isSelfService: canView && !isAdmin };
 }
 

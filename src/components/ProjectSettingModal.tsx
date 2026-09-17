@@ -54,7 +54,7 @@ export function ProjectSettingModal({
   onSaved?: () => void;
 }) {
   const router = useRouter();
-  const canDelete = useAuthStore((s) => s.user?.permissions.includes("PROJECT:DELETE") ?? false);
+  const canDelete = useAuthStore((s) => s.user?.permissions.includes("PROJECT_PROJECTS:DELETE") ?? false);
   // A settings form: every tab holds typed work, so the backdrop asks before discarding it.
   const { panelRef, confirmDiscard } = useDiscardGuard();
   const { closing, requestClose } = useDrawerDismiss(onClose, undefined, confirmDiscard);

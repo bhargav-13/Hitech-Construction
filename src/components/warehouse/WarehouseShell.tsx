@@ -7,6 +7,7 @@ import { AppShell } from "@/components/AppShell";
 import { Select } from "@/components/Select";
 import { useUiStore } from "@/lib/uiStore";
 import { WAREHOUSE_NAV, type WarehouseNavNode } from "@/lib/warehouseConfig";
+import { filterNav, useCan } from "@/lib/permissions";
 import { useWarehouseStore, checkoutsOf, stockByItem } from "@/lib/warehouseStore";
 import { useWarehouseScope } from "@/lib/warehouseScope";
 import {
@@ -46,6 +47,9 @@ const ICONS: Record<string, React.ComponentType<{ size?: number; className?: str
  * reorder level, returnables still out. Those are the reasons someone opens this module unprompted.
  */
 export function WarehouseShell({ children }: { children: React.ReactNode }) {
+  // Screens the role's Roles & Access features don't cover are left out of the rail.
+  const can = useCan();
+  const nav = filterNav(WAREHOUSE_NAV, can);
   const pathname = usePathname();
   const railCollapsed = useUiStore((s) => s.procurementRailCollapsed);
   const toggleRail = useUiStore((s) => s.toggleProcurementRail);
@@ -120,7 +124,7 @@ export function WarehouseShell({ children }: { children: React.ReactNode }) {
           </button>
 
           <nav className="space-y-0.5">
-            {WAREHOUSE_NAV.map((node) => (
+            {nav.map((node) => (
               <div key={node.href}>
                 {node.section && !railCollapsed && (
                   <div className="mt-3 mb-1 px-3 text-[10px] font-semibold tracking-wide text-gray-300 uppercase">

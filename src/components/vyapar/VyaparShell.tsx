@@ -4,7 +4,8 @@ import { Suspense, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { AppShell } from "@/components/AppShell";
-import { VYAPAR_NAV, DOC_CONFIGS } from "@/lib/vyaparConfig";
+import { VYAPAR_NAV, DOC_CONFIGS, docFeature } from "@/lib/vyaparConfig";
+import { filterNav, useCan } from "@/lib/permissions";
 import type { NavNode } from "@/lib/vyaparConfig";
 import { useUiStore } from "@/lib/uiStore";
 import { useVyaparSettings } from "@/lib/useVyaparSettings";
@@ -48,6 +49,11 @@ export function VyaparShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const [addOpen, setAddOpen] = useState(false);
+  // Screens and quick-create entries the role's Roles & Access features don't cover are left out.
+  const can = useCan();
+  const nav = filterNav(VYAPAR_NAV, can);
+  const canCreate = (type: string) => can(`${docFeature(type)}:CREATE`);
+  const creatable = DOC_CONFIGS.filter((d) => canCreate(d.type));
   const [calcOpen, setCalcOpen] = useState(false);
   // Persisted alongside the main sidebar so both survive route changes.
   const railCollapsed = useUiStore((s) => s.vyaparRailCollapsed);
@@ -89,7 +95,7 @@ export function VyaparShell({ children }: { children: React.ReactNode }) {
             {railCollapsed ? <PanelLeftOpen size={15} /> : <PanelLeftClose size={15} />}
           </button>
           <nav className="space-y-0.5">
-            {VYAPAR_NAV.map((node) => (
+            {nav.map((node) => (
               <NavItem
                 key={node.label}
                 node={node}
@@ -116,18 +122,22 @@ export function VyaparShell({ children }: { children: React.ReactNode }) {
               />
             </div>
 
+            {canCreate("SALE") && (
             <Link
               href="/vyapar/sale?new=1"
               className="flex items-center gap-1 rounded-lg bg-rose-50 px-3 py-1.5 text-sm font-semibold text-rose-600 transition-all duration-150 hover:bg-rose-100 active:scale-95"
             >
               <Plus size={14} /> Add Sale
             </Link>
+            )}
+            {canCreate("PURCHASE") && (
             <Link
               href="/vyapar/purchase?new=1"
               className="flex items-center gap-1 rounded-lg bg-cyan-50 px-3 py-1.5 text-sm font-semibold text-brand-accent transition-all duration-150 hover:bg-cyan-100 active:scale-95"
             >
               <Plus size={14} /> Add Purchase
             </Link>
+            )}
 
             {/* Vyapar puts a calculator in its title bar. Theirs launches the Windows Calculator;
                 a web app can't, so this is our own — see CalculatorPanel. */}
@@ -147,6 +157,7 @@ export function VyaparShell({ children }: { children: React.ReactNode }) {
             </div>
 
             {/* Add More — the full quick-create menu, mirroring Vyapar's Ctrl+Enter panel */}
+            {creatable.length > 0 && (
             <div className="relative">
               <button
                 onClick={() => setAddOpen((o) => !o)}
@@ -167,7 +178,7 @@ export function VyaparShell({ children }: { children: React.ReactNode }) {
                             {group}
                           </div>
                           <div className="space-y-0.5">
-                            {DOC_CONFIGS.filter((d) => d.group === group).map((d) => (
+                            {creatable.filter((d) => d.group === group).map((d) => (
                               <Link
                                 key={d.type}
                                 href={`/vyapar/${d.slug}?new=1`}
@@ -185,6 +196,7 @@ export function VyaparShell({ children }: { children: React.ReactNode }) {
                 </>
               )}
             </div>
+            )}
           </div>
 
           {/*

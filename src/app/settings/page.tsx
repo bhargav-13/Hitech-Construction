@@ -4,6 +4,7 @@ import { type ChangeEvent, type ComponentType, useEffect, useMemo, useState } fr
 import { AppShell } from "@/components/AppShell";
 import { MultiLevelApproval } from "@/components/settings/MultiLevelApproval";
 import { CompanySettings } from "@/components/settings/CompanySettings";
+import { RoleEditor } from "@/components/settings/RoleEditor";
 import { Drawer, DrawerField } from "@/components/Drawer";
 import { Spinner } from "@/components/Spinner";
 import { Select } from "@/components/Select";
@@ -27,32 +28,9 @@ import {
 import { RowMenu, RowMenuDivider, RowMenuItem } from "@/components/RowMenu";
 import { useDepartments } from "@/lib/useDepartments";
 
-// Roles & Access is the only built Settings section. Unimplemented sections used to be listed here
-// as "Coming soon" placeholders — that's been removed. The "coming soon" hint now lives in the
-// New/Manage Role permission matrix (RoleDrawer), against modules whose feature isn't built yet.
+// Unimplemented sections used to be listed here as "Coming soon" placeholders — that's been removed.
 const SECTIONS = ["Roles & Access", "Multi Level Approval", "Companies"] as const;
 type Section = (typeof SECTIONS)[number];
-
-// The modules a role can be granted, in sidebar order, each with only the actions the backend
-// actually checks. Every module the database seeds (Report, Finance, CRM, …) used to be listed, with
-// the unbuilt ones parked under "Coming soon" — and Tender, Procurement, Warehouse and Approvals were
-// wrongly among them, so no role other than Super Admin could ever be given those modules and they
-// never appeared in anyone else's sidebar. A module or action not listed here is hidden; any
-// permission a role already holds on it is left untouched on save.
-const ROLE_MODULES: { code: string; actions: string[] }[] = [
-  { code: "DASHBOARD", actions: ["VIEW"] },
-  { code: "TENDER", actions: ["VIEW", "CREATE", "EDIT", "DELETE"] },
-  { code: "PROJECT", actions: ["VIEW", "CREATE", "EDIT", "DELETE"] },
-  { code: "TASKOPAD", actions: ["VIEW", "CREATE", "EDIT", "DELETE"] },
-  { code: "VYAPAR", actions: ["VIEW", "CREATE", "EDIT", "DELETE"] },
-  { code: "PROCUREMENT", actions: ["VIEW", "CREATE", "EDIT", "DELETE"] },
-  { code: "PAYROLL", actions: ["VIEW", "CREATE", "EDIT", "DELETE", "APPROVE"] },
-  { code: "WAREHOUSE", actions: ["VIEW", "CREATE", "EDIT", "APPROVE"] },
-  { code: "AUDIT", actions: ["VIEW"] },
-  { code: "APPROVAL", actions: ["VIEW", "EDIT"] },
-  { code: "USER_MANAGEMENT", actions: ["VIEW", "CREATE", "EDIT", "DELETE"] },
-  { code: "SETTINGS", actions: ["VIEW", "EDIT"] },
-];
 
 export default function SettingsPage() {
   // `?section=Companies` deep-links a tab — how the sidebar's company switcher gets here.
@@ -117,8 +95,7 @@ export default function SettingsPage() {
 }
 
 // ---- Roles & Access: real data from the Spring Boot backend ----
-// UX loosely inspired by admin-panel "role cards + accounts table" patterns; no popups —
-// create/edit flows open in a right-side Drawer instead.
+// Members open in a right-side Drawer; a role opens the full-width RoleEditor in place of the list.
 type RoleDrawerState = { mode: "create" } | { mode: "edit"; role: RoleResponse } | null;
 type UserDrawerState = { mode: "create"; roleId?: number } | { mode: "edit"; user: UserResponse } | null;
 
@@ -173,6 +150,23 @@ function RolesAndAccess() {
         <Spinner size={16} className="text-brand-accent" />
         Loading…
       </div>
+    );
+  }
+
+  // Creating or editing a role takes over the section, like the rest of the module editors: the
+  // per-module permission grids need the full width a drawer can't give them.
+  if (roleDrawer) {
+    return (
+      <RoleEditor
+        modules={modules}
+        roles={roles}
+        existing={roleDrawer.mode === "edit" ? roleDrawer.role : undefined}
+        onCancel={() => setRoleDrawer(null)}
+        onSaved={() => {
+          setRoleDrawer(null);
+          refresh();
+        }}
+      />
     );
   }
 
@@ -265,19 +259,6 @@ function RolesAndAccess() {
           }
         }}
       />
-
-      {roleDrawer && (
-        <RoleDrawer
-          modules={modules}
-          roles={roles}
-          existing={roleDrawer.mode === "edit" ? roleDrawer.role : undefined}
-          onClose={() => setRoleDrawer(null)}
-          onSaved={() => {
-            setRoleDrawer(null);
-            refresh();
-          }}
-        />
-      )}
 
       {userDrawer && (
         <UserDrawer
@@ -790,194 +771,6 @@ function ViewToggle<T extends string>({
         );
       })}
     </div>
-  );
-}
-
-function RoleDrawer({
-  modules,
-  roles,
-  existing,
-  onClose,
-  onSaved,
-}: {
-  modules: ModuleResponse[];
-  roles: RoleResponse[];
-  existing?: RoleResponse;
-  onClose: () => void;
-  onSaved: () => void;
-}) {
-  const [name, setName] = useState(existing?.name ?? "");
-  const [description, setDescription] = useState(existing?.description ?? "");
-  const [reportsToRoleId, setReportsToRoleId] = useState<number | "">(existing?.reportsToRoleId ?? "");
-  const [selected, setSelected] = useState<Set<number>>(
-    new Set(existing?.permissions.map((p) => p.id) ?? [])
-  );
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState("");
-
-  // Super Admin is the fixed top of the ladder — it can't report to anyone, so its "Reports to" is frozen.
-  const isSuperAdmin = existing != null && existing.name.toLowerCase() === "super admin";
-  // A role can't report to itself; other roles are valid parents (the backend rejects deeper loops).
-  const parentOptions = roles.filter((r) => r.id !== existing?.id);
-
-  function toggle(id: number) {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }
-
-  function toggleModule(mod: ModuleResponse) {
-    const allSelected = mod.permissions.every((p) => selected.has(p.id));
-    setSelected((prev) => {
-      const next = new Set(prev);
-      for (const p of mod.permissions) {
-        if (allSelected) next.delete(p.id);
-        else next.add(p.id);
-      }
-      return next;
-    });
-  }
-
-  async function submit() {
-    if (!name.trim()) {
-      setError("Role name is required.");
-      return;
-    }
-    setSaving(true);
-    setError("");
-    try {
-      const body = {
-        name: name.trim(),
-        description: description.trim() || undefined,
-        reportsToRoleId: reportsToRoleId === "" ? null : reportsToRoleId,
-        permissionIds: Array.from(selected),
-      };
-      if (existing) {
-        await api.updateRole(existing.id, body);
-      } else {
-        await api.createRole(body);
-      }
-      onSaved();
-    } catch (err) {
-      setError(err instanceof api.ApiError ? err.message : "Unable to save the role.");
-      setSaving(false);
-    }
-  }
-
-  // Only grantable modules, in sidebar order, trimmed to the actions that do something.
-  const orderedModules = ROLE_MODULES.flatMap(({ code, actions }) => {
-    const mod = modules.find((m) => m.code === code);
-    if (!mod) return [];
-    const permissions = actions
-      .map((action) => mod.permissions.find((p) => p.action === action))
-      .filter((p): p is (typeof mod.permissions)[number] => p !== undefined);
-    return permissions.length ? [{ ...mod, permissions }] : [];
-  });
-  const visibleSelected = orderedModules.reduce(
-    (n, mod) => n + mod.permissions.filter((p) => selected.has(p.id)).length,
-    0
-  );
-
-  return (
-    <Drawer
-      title={existing ? "Manage Role" : "New Role"}
-      onClose={onClose}
-      onSave={submit}
-      saveLabel={saving ? "Saving…" : "Save"}
-    >
-      <div className="space-y-4">
-        {existing?.isSystem && (
-          <div className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700">
-            This is a system role. Changing its permissions affects everyone assigned to it.
-          </div>
-        )}
-
-        <DrawerField label="Role Name" required>
-          <input value={name} onChange={(e) => setName(e.target.value)} className="input" placeholder="e.g. Project Manager" />
-        </DrawerField>
-
-        <DrawerField label="Description">
-          <input
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            className="input"
-            placeholder="What can this role do?"
-          />
-        </DrawerField>
-
-        <DrawerField label="Reports to">
-          {isSuperAdmin ? (
-            <>
-              <div className="flex items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-500">
-                <span className="rounded-full bg-gray-200 px-1.5 py-0.5 text-[10px] font-medium text-gray-600">Top</span>
-                Top of the ladder — reports to no one
-              </div>
-              <p className="mt-1 text-xs text-gray-400">
-                Super Admin is the superior role. Every other role sits under it, so this can&apos;t be changed.
-              </p>
-            </>
-          ) : (
-            <>
-              <select
-                value={reportsToRoleId}
-                onChange={(e) => setReportsToRoleId(e.target.value === "" ? "" : Number(e.target.value))}
-                className="input"
-              >
-                <option value="">— Reports to Super Admin —</option>
-                {parentOptions.map((r) => (
-                  <option key={r.id} value={r.id}>{r.name}</option>
-                ))}
-              </select>
-              <p className="mt-1 text-xs text-gray-400">
-                Who this role answers to. This builds your org ladder — a manager can see the attendance of the roles below them. Left unset, it sits directly under Super Admin.
-              </p>
-            </>
-          )}
-        </DrawerField>
-
-        {/* A group, not DrawerField's <label>: a label wrapping many controls forwards every click
-            inside it to the first one, so clicking anywhere here toggled Dashboard's "Select all". */}
-        <DrawerField group label={`Module Permissions (${visibleSelected} selected)`}>
-          <div className="space-y-3 rounded-lg border border-gray-100 p-3">
-            {orderedModules.map((mod) => {
-              const allSelected = mod.permissions.every((p) => selected.has(p.id));
-              return (
-                <div key={mod.id} className="border-b border-gray-50 pb-2 last:border-b-0 last:pb-0">
-                  <div className="mb-1 flex items-center justify-between">
-                    <span className="text-sm font-medium text-gray-700">{mod.name}</span>
-                    <button
-                      type="button"
-                      onClick={() => toggleModule(mod)}
-                      className="text-xs font-medium text-brand-accent transition-opacity duration-150 hover:underline hover:opacity-80"
-                    >
-                      {allSelected ? "Clear" : "Select all"}
-                    </button>
-                  </div>
-                  <div className="flex flex-wrap gap-3">
-                    {mod.permissions.map((perm) => (
-                      <label key={perm.id} className="flex cursor-pointer items-center gap-1.5 text-xs text-gray-600">
-                        <input
-                          type="checkbox"
-                          checked={selected.has(perm.id)}
-                          onChange={() => toggle(perm.id)}
-                          className="h-3.5 w-3.5 accent-cyan-600"
-                        />
-                        {perm.action}
-                      </label>
-                    ))}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </DrawerField>
-
-        {error && <div className="text-xs font-medium text-rose-600">{error}</div>}
-      </div>
-    </Drawer>
   );
 }
 

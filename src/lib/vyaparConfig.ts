@@ -55,6 +55,24 @@ export const DOC_CONFIGS: DocConfig[] = [
   { type: "PARTY_TRANSFER", label: "Party To Party Transfer", title: "Party To Party Transfer", slug: "party-transfer", group: "OTHERS", prefix: "PTP", flow: "out", posts: true, hasLines: false },
 ];
 
+/** The Roles & Access feature a document type belongs to. Mirrors VyaparController.featureOf. */
+export function docFeature(type: string): string {
+  switch (type) {
+    case "PURCHASE":
+    case "PURCHASE_ORDER":
+    case "PURCHASE_RETURN":
+      return "VYAPAR_PURCHASE";
+    case "EXPENSE":
+      return "VYAPAR_EXPENSE";
+    case "PAYMENT_IN":
+    case "PAYMENT_OUT":
+    case "PARTY_TRANSFER":
+      return "VYAPAR_PAYMENT";
+    default:
+      return "VYAPAR_SALE";
+  }
+}
+
 export const docBySlug = (slug: string) => DOC_CONFIGS.find((d) => d.slug === slug);
 export const docByType = (type: VyaparDocType) => DOC_CONFIGS.find((d) => d.type === type)!;
 
@@ -62,6 +80,8 @@ export const docByType = (type: VyaparDocType) => DOC_CONFIGS.find((d) => d.type
 export interface NavNode {
   label: string;
   href?: string;
+  /** Roles & Access feature this screen needs ("TENDER_TRACKER"); hidden from roles without it. */
+  feature?: string | string[];
   icon?: string;
   children?: NavNode[];
   badge?: string;
@@ -71,53 +91,53 @@ export const VYAPAR_NAV: NavNode[] = [
   { label: "Home", href: "/vyapar", icon: "home" },
   // Parties is a direct link — Details and Groups live as tabs on the one page, and Party
   // Settings is reached from the main Settings hub, so there's no sub-menu to expand.
-  { label: "Parties", href: "/vyapar/parties", icon: "users" },
-  { label: "Items", href: "/vyapar/items", icon: "boxes" },
+  { label: "Parties", href: "/vyapar/parties", feature: "VYAPAR_PARTY", icon: "users" },
+  { label: "Items", href: "/vyapar/items", feature: "VYAPAR_ITEM", icon: "boxes" },
   {
     label: "Sale",
     icon: "file",
     children: [
-      { label: "Sale Invoices", href: "/vyapar/sale" },
-      { label: "Estimate / Quotation", href: "/vyapar/estimate" },
-      { label: "Proforma Invoice", href: "/vyapar/proforma" },
-      { label: "Payment-In", href: "/vyapar/payment-in" },
-      { label: "Sale Order", href: "/vyapar/sale-order" },
-      { label: "Delivery Challan", href: "/vyapar/delivery-challan" },
-      { label: "Sale Return / Credit Note", href: "/vyapar/sale-return" },
+      { label: "Sale Invoices", href: "/vyapar/sale", feature: "VYAPAR_SALE" },
+      { label: "Estimate / Quotation", href: "/vyapar/estimate", feature: "VYAPAR_SALE" },
+      { label: "Proforma Invoice", href: "/vyapar/proforma", feature: "VYAPAR_SALE" },
+      { label: "Payment-In", href: "/vyapar/payment-in", feature: "VYAPAR_PAYMENT" },
+      { label: "Sale Order", href: "/vyapar/sale-order", feature: "VYAPAR_SALE" },
+      { label: "Delivery Challan", href: "/vyapar/delivery-challan", feature: "VYAPAR_SALE" },
+      { label: "Sale Return / Credit Note", href: "/vyapar/sale-return", feature: "VYAPAR_SALE" },
     ],
   },
   {
     label: "Purchase & Expense",
     icon: "cart",
     children: [
-      { label: "Purchase Bills", href: "/vyapar/purchase" },
-      { label: "Payment-Out", href: "/vyapar/payment-out" },
-      { label: "Expenses", href: "/vyapar/expenses" },
-      { label: "Purchase Order", href: "/vyapar/purchase-order" },
-      { label: "Purchase Return / Dr. Note", href: "/vyapar/purchase-return" },
+      { label: "Purchase Bills", href: "/vyapar/purchase", feature: "VYAPAR_PURCHASE" },
+      { label: "Payment-Out", href: "/vyapar/payment-out", feature: "VYAPAR_PAYMENT" },
+      { label: "Expenses", href: "/vyapar/expenses", feature: "VYAPAR_EXPENSE" },
+      { label: "Purchase Order", href: "/vyapar/purchase-order", feature: "VYAPAR_PURCHASE" },
+      { label: "Purchase Return / Dr. Note", href: "/vyapar/purchase-return", feature: "VYAPAR_PURCHASE" },
     ],
   },
   {
     label: "Cash & Bank",
     icon: "bank",
     children: [
-      { label: "Bank Accounts", href: "/vyapar/bank" },
-      { label: "Cash In Hand", href: "/vyapar/cash" },
-      { label: "Cheques", href: "/vyapar/cheques" },
-      { label: "Loan Accounts", href: "/vyapar/loans" },
+      { label: "Bank Accounts", href: "/vyapar/bank", feature: "VYAPAR_CASH_BANK" },
+      { label: "Cash In Hand", href: "/vyapar/cash", feature: "VYAPAR_CASH_BANK" },
+      { label: "Cheques", href: "/vyapar/cheques", feature: "VYAPAR_CASH_BANK" },
+      { label: "Loan Accounts", href: "/vyapar/loans", feature: "VYAPAR_CASH_BANK" },
     ],
   },
-  { label: "Reports", href: "/vyapar/reports", icon: "chart" },
+  { label: "Reports", href: "/vyapar/reports", feature: "VYAPAR_REPORTS", icon: "chart" },
   {
     label: "Utilities",
     icon: "tool",
     children: [
-      { label: "Import Items", href: "/vyapar/utilities/import-items" },
-      { label: "Import Parties", href: "/vyapar/utilities/import-parties" },
-      { label: "Bulk Update Items", href: "/vyapar/utilities/bulk-items" },
+      { label: "Import Items", href: "/vyapar/utilities/import-items", feature: "VYAPAR_ITEM:CREATE" },
+      { label: "Import Parties", href: "/vyapar/utilities/import-parties", feature: "VYAPAR_PARTY:CREATE" },
+      { label: "Bulk Update Items", href: "/vyapar/utilities/bulk-items", feature: "VYAPAR_ITEM:EDIT" },
     ],
   },
-  { label: "Settings", href: "/vyapar/settings", icon: "settings" },
+  { label: "Settings", href: "/vyapar/settings", feature: "VYAPAR_SETTINGS", icon: "settings" },
 ];
 
 /**

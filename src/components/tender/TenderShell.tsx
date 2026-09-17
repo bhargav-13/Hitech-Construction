@@ -9,6 +9,7 @@ import { useTenderStore } from "@/lib/tenderStore";
 import { getAccessToken } from "@/lib/api";
 import { dueSoonCount, exposure } from "@/lib/tenderMetrics";
 import { TENDER_NAV } from "@/lib/tenderConfig";
+import { filterNav, useCan } from "@/lib/permissions";
 import type { TenderNavNode } from "@/lib/tenderConfig";
 import {
   Boxes,
@@ -49,6 +50,9 @@ const ICONS: Record<string, React.ComponentType<{ size?: number; className?: str
  * Flat, no role-gating: visibility is handled upstream by TENDER:VIEW.
  */
 export function TenderShell({ children }: { children: React.ReactNode }) {
+  // Screens the role's Roles & Access features don't cover are left out of the rail.
+  const can = useCan();
+  const nav = filterNav(TENDER_NAV, can);
   const pathname = usePathname();
   const railCollapsed = useUiStore((s) => s.tenderRailCollapsed);
   const toggleRail = useUiStore((s) => s.toggleTenderRail);
@@ -95,7 +99,7 @@ export function TenderShell({ children }: { children: React.ReactNode }) {
             {railCollapsed ? <PanelLeftOpen size={15} /> : <PanelLeftClose size={15} />}
           </button>
           <nav className="space-y-0.5">
-            {TENDER_NAV.map((node) => (
+            {nav.map((node) => (
               <div key={node.label}>
                 {node.section && !railCollapsed && (
                   <div className="mt-3 mb-1 px-3 text-[10px] font-semibold tracking-wide text-gray-300 uppercase">

@@ -9,6 +9,7 @@ import { useUiStore } from "@/lib/uiStore";
 import { useAuthStore } from "@/lib/authStore";
 import { usePayrollAccess } from "@/lib/payrollApi";
 import { PAYROLL_NAV, PAYROLL_SELF_NAV } from "@/lib/payrollConfig";
+import { filterNav, useCan } from "@/lib/permissions";
 import type { PayrollNavNode } from "@/lib/payrollConfig";
 import {
   Banknote,
@@ -84,11 +85,10 @@ export function PayrollShell({
 
   // The Leave queue only works for approvers, so it's hidden from admins who lack the right —
   // they reach their own requests through Self Service instead.
-  const nav = isAdmin
-    ? canApprove
-      ? PAYROLL_NAV
-      : PAYROLL_NAV.filter((n) => n.href !== "/payroll/leave")
-    : PAYROLL_SELF_NAV;
+  // Each team screen shows only if the role holds its Roles & Access feature — Leave's queue
+  // included, which needs the Team Leave feature.
+  const can = useCan();
+  const nav = isAdmin ? filterNav(PAYROLL_NAV, can) : PAYROLL_SELF_NAV;
 
   const [open, setOpen] = useState<Record<string, boolean>>(() => {
     const init: Record<string, boolean> = {};

@@ -78,9 +78,9 @@ export function useWarehouseRights(warehouseId: string): {
   const canView = has("WAREHOUSE:VIEW") || isSuperAdmin;
   const inStore = warehouseId !== "all" && role !== null;
 
-  const canMove = canView && inStore && role !== "VIEWER" && (has("WAREHOUSE:CREATE") || isSuperAdmin);
-  const canApprove = canView && inStore && role === "SUPERVISOR" && (has("WAREHOUSE:APPROVE") || isSuperAdmin);
-  const canAdminister = has("WAREHOUSE:EDIT") || isSuperAdmin;
+  const canMove = canView && inStore && role !== "VIEWER" && (has("WAREHOUSE_STOCK:CREATE") || isSuperAdmin);
+  const canApprove = canView && inStore && role === "SUPERVISOR" && (has("WAREHOUSE_REQUESTS:APPROVE") || isSuperAdmin);
+  const canAdminister = has("WAREHOUSE_STORES:EDIT") || isSuperAdmin;
 
   // Until the standings arrive, everything is read-only and says so honestly. Failing closed is the
   // right way round — the alternative offers buttons the server is about to refuse — but "you

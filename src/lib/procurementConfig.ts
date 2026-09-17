@@ -17,6 +17,8 @@
 export interface ProcNavNode {
   label: string;
   href?: string;
+  /** Roles & Access feature this screen needs ("TENDER_TRACKER"); hidden from roles without it. */
+  feature?: string | string[];
   icon?: string;
   /** Section break rendered above this item. */
   section?: string;
@@ -34,12 +36,12 @@ export interface ProcNavNode {
 export const PROCUREMENT_NAV: ProcNavNode[] = [
   { label: "Dashboard", href: "/procurement", icon: "home" },
 
-  { label: "RFQ", href: "/procurement/rfq", icon: "send", section: "Sourcing", badge: "rfq" },
-  { label: "Comparison", href: "/procurement/compare", icon: "scale" },
+  { label: "RFQ", href: "/procurement/rfq", feature: "PROCUREMENT_RFQ", icon: "send", section: "Sourcing", badge: "rfq" },
+  { label: "Comparison", href: "/procurement/compare", feature: "PROCUREMENT_RFQ", icon: "scale" },
 
   // Subcontracts. The labour half of buying: same spine as an award, but billed in instalments
   // over months and carrying the material we issue the contractor against his order.
-  { label: "Work Orders", href: "/procurement/work-order", icon: "hammer", section: "Subcontract" },
+  { label: "Work Orders", href: "/procurement/work-order", feature: "PROCUREMENT_WORK_ORDER", icon: "hammer", section: "Subcontract" },
 
   // Still one purchase order, one vendor list and one set of books — Vyapar's — but read through
   // Procurement's own endpoints and rendered here. These used to be external links into Vyapar,
@@ -49,12 +51,13 @@ export const PROCUREMENT_NAV: ProcNavNode[] = [
   {
     label: "Purchase Orders",
     href: "/procurement/purchase-order",
+    feature: ["PROCUREMENT_PURCHASES", "VYAPAR:VIEW"],
     icon: "file",
     section: "Buying",
     hint: "Orders raised on suppliers",
   },
-  { label: "Purchase Bills", href: "/procurement/purchase-bill", icon: "receipt", hint: "What was invoiced" },
-  { label: "Vendors", href: "/procurement/vendors", icon: "users", hint: "Suppliers and their history" },
+  { label: "Purchase Bills", href: "/procurement/purchase-bill", feature: ["PROCUREMENT_PURCHASES", "VYAPAR:VIEW"], icon: "receipt", hint: "What was invoiced" },
+  { label: "Vendors", href: "/procurement/vendors", feature: ["PROCUREMENT_PURCHASES", "VYAPAR:VIEW"], icon: "users", hint: "Suppliers and their history" },
 ];
 
 // ---- Shared status → chip class maps ----
