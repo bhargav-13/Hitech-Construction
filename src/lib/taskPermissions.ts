@@ -29,7 +29,10 @@ export interface TaskRights {
   canToggleSubtasks: boolean;
   /** Deleting is a record-level act, so it tracks canEditAll. */
   canDelete: boolean;
-  /** Approving a completion request is the creator's call (or Super Admin's). */
+  /**
+   * Not used for completion sign-off: who approves is decided by the server from the reporting
+   * chain (the role above whoever completed the task), and Taskopad → Approvals shows only that queue.
+   */
   canApprove: boolean;
   /** Why the editing controls are disabled — shown as a hint in the drawer. */
   reason: string | null;

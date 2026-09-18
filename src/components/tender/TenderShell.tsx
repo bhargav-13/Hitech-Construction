@@ -12,6 +12,7 @@ import { TENDER_NAV } from "@/lib/tenderConfig";
 import { filterNav, useCan } from "@/lib/permissions";
 import type { TenderNavNode } from "@/lib/tenderConfig";
 import {
+  BadgeCheck,
   Boxes,
   CalendarDays,
   ClipboardList,
@@ -41,6 +42,7 @@ const ICONS: Record<string, React.ComponentType<{ size?: number; className?: str
   boxes: Boxes,
   clipboard: ClipboardList,
   settings: Settings,
+  approval: BadgeCheck,
 };
 
 /**
@@ -73,6 +75,7 @@ export function TenderShell({ children }: { children: React.ReactNode }) {
       "due:RESEARCH": dueSoonCount(tenders, "RESEARCH"),
       "due:APPLIED": dueSoonCount(tenders, "APPLIED"),
       emd: recoverable > 0 ? tenders.filter((t) => t.emdState === "PAID" && !t.emdReleasedOn && (t.stage === "LOST")).length : 0,
+      approvals: tenders.filter((t) => t.pendingStage && t.canActNow).length,
     };
   }, [tenders]);
 
@@ -139,7 +142,7 @@ function NavItem({
 }) {
   const Icon = ICONS[node.icon ?? ""] ?? FileText;
   // EMD-to-recover is money going astray; deadlines are merely urgent.
-  const tone = node.badge === "emd" ? "bg-rose-100 text-rose-700" : "bg-amber-100 text-amber-700";
+  const tone = node.badge === "emd" || node.badge === "approvals" ? "bg-rose-100 text-rose-700" : "bg-amber-100 text-amber-700";
 
   if (collapsed) {
     return (
@@ -153,7 +156,7 @@ function NavItem({
       >
         <Icon size={17} />
         {count > 0 && (
-          <span className={`absolute top-1 right-1 h-1.5 w-1.5 rounded-full ${node.badge === "emd" ? "bg-rose-500" : "bg-amber-500"}`} />
+          <span className={`absolute top-1 right-1 h-1.5 w-1.5 rounded-full ${node.badge === "emd" || node.badge === "approvals" ? "bg-rose-500" : "bg-amber-500"}`} />
         )}
       </Link>
     );

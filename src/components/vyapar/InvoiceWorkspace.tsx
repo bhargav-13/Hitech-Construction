@@ -25,6 +25,8 @@ import * as vyapar from "@/lib/vyaparApi";
 import { fullInvoiceNo } from "@/lib/vyaparApi";
 import type { DocType, Invoice, InvoiceLine, Item, Party } from "@/lib/vyaparApi";
 import { Download, FileText, Plus, Search, Upload } from "lucide-react";
+import { ApprovalBadge } from "@/components/approval/ApprovalBadge";
+import { DOC_APPROVAL_TYPE, useApprovalStates } from "@/lib/approvals";
 
 const PAYMENT_TYPES = ["Cash", "Credit", "Bank", "UPI", "Cheque"];
 
@@ -71,6 +73,10 @@ export function InvoiceWorkspace({
           : docType === "ESTIMATE" || docType === "PROFORMA" ? "Ref no"
             : "Invoice no";
   const [invoices, setInvoices] = useState<Invoice[]>([]);
+  // Where each document stands on its approval ladder (Settings → Multi Level Approval).
+  const approvalType = DOC_APPROVAL_TYPE[docType] ?? null;
+  const invoiceIds = useMemo(() => invoices.map((i) => i.id), [invoices]);
+  const { states: approvals, reload: reloadApprovals } = useApprovalStates(approvalType, invoiceIds);
   const [parties, setParties] = useState<Party[]>([]);
   const [items, setItems] = useState<Item[]>([]);
   const [loading, setLoading] = useState(true);
@@ -157,7 +163,8 @@ export function InvoiceWorkspace({
   // Vyapar-style per-column funnels stack on top of the search/status filter.
   const columns = useMemo(
     () => ({
-      date: { get: (i: Invoice) => i.invoiceDate ?? "", type: "text" as const },
+      // Match what the table shows (02/08/2026) as well as the stored ISO date (2026-08-02).
+      date: { get: (i: Invoice) => `${bookDate(i.invoiceDate)} ${i.invoiceDate ?? ""}`, type: "text" as const },
       number: { get: (i: Invoice) => fullInvoiceNo(i), type: "text" as const },
       party: { get: (i: Invoice) => i.partyName ?? "", type: "text" as const },
       // `options` here is only a floor — the real list is whatever the rows contain, since a
@@ -523,7 +530,10 @@ export function InvoiceWorkspace({
                 >
                   <td className="px-4 py-2.5 whitespace-nowrap text-gray-600">{bookDate(i.invoiceDate)}</td>
                   <td className={`px-4 py-2.5 font-medium text-gray-800 ${i.cancelled ? "line-through decoration-rose-400" : ""}`}>
-                    {fullInvoiceNo(i)}
+                    <span className="flex items-center gap-2">
+                      {fullInvoiceNo(i)}
+                      <ApprovalBadge state={approvals[i.id]} />
+                    </span>
                   </td>
                   <td className="px-4 py-2.5 text-gray-700">{i.partyName ?? "—"}</td>
                   <td className="px-4 py-2.5 text-gray-600">{noun}</td>
@@ -577,6 +587,12 @@ export function InvoiceWorkspace({
           projectId={projectOverride}
           initialAttachment={uploadedBill ?? undefined}
           prefill={prefill ?? undefined}
+          approvalType={approvalType}
+          approval={editing ? approvals[editing.id] : undefined}
+          onApprovalChanged={() => {
+            void reloadApprovals();
+            load();
+          }}
           // An inline-created master joins the local lists immediately, so the picker shows it
           // without waiting for a round trip.
           onItemCreated={(item) => setItems((prev) => [item, ...prev])}

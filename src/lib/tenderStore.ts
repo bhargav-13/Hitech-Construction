@@ -15,7 +15,7 @@ import type {
   HardcopyDispatch,
   MaterialParty,
 } from "./tenderTypes";
-import { MILESTONE_STEPS, DOCUMENT_STEPS } from "./tenderTypes";
+import { MILESTONE_STEPS, DOCUMENT_STEPS, STAGE_META } from "./tenderTypes";
 import { taddMonths, tiso } from "./tenderHelpers";
 import { TENDER_SEED, MATERIAL_SEED, MILESTONE_SEED, DOCUMENT_SEED, HARDCOPY_SEED } from "./tenderSeed";
 import {
@@ -202,7 +202,7 @@ const snapshot = (tenders: Tender[], ids: Set<string>, label: string): UndoEntry
 function stageOutcomeMessage(after: Tender): string | null {
   if (!after.pendingStage) return null;
   const who = after.approval?.awaitingRoleNames;
-  return `Stage change to ${after.pendingStage} sent for approval${who ? ` — waiting on ${who}` : ""}.`;
+  return `Move to ${STAGE_META[after.pendingStage].label} sent for approval${who ? ` — waiting on ${who}` : ""}. Track it under Approvals.`;
 }
 
 /**
@@ -254,6 +254,16 @@ async function moveStage(
     }
   }
   if (failures > 1) message = `${failures} of ${ids.length} tenders could not be moved.`;
+  // Only a move that actually landed can be undone. A parked or refused one left the tender where
+  // it was, and the "… applied. Undo" bar sitting under "sent for approval" read as a contradiction.
+  set((s) => {
+    if (!s.lastUndo) return {};
+    const moved = s.lastUndo.tenders.filter((before) => {
+      const now = s.tenders.find((t) => t.id === before.id);
+      return now != null && (now.stage !== before.stage || now.status !== before.status);
+    });
+    return { lastUndo: moved.length > 0 ? { ...s.lastUndo, tenders: moved } : null };
+  });
   return message;
 }
 
@@ -384,7 +394,8 @@ export const useTenderStore = create<TenderState>()(
 
       removeTender: (id) => {
         set((s) => ({
-          lastUndo: snapshot(s.tenders, new Set([id]), "Delete"),
+          // A server-side delete can't be undone by restoring the local row — offer Undo offline only.
+          lastUndo: s.backend ? null : snapshot(s.tenders, new Set([id]), "Delete"),
           tenders: s.tenders.filter((t) => t.id !== id),
         }));
         if (get().backend) deleteTenderApi(id).catch(warn("Tender delete failed to sync"));

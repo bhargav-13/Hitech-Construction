@@ -409,6 +409,9 @@ export async function downloadPdf(
   rows: Cell[][],
   opts?: { subtitle?: string; landscape?: boolean; rightAlignFrom?: number }
 ) {
+  // jsPDF's built-in fonts have no ₹ glyph — it printed as "¹" and broke the column widths. Every
+  // caller passes `inr()` strings, so swap the symbol here once rather than at forty call sites.
+  rows = rows.map((r) => r.map((c) => (typeof c === "string" ? c.replace(/₹\s?/g, "Rs. ") : c)));
   const [{ jsPDF }, autoTableMod, firm] = await Promise.all([
     import("jspdf"),
     import("jspdf-autotable"),

@@ -38,6 +38,8 @@ import { TenderForm } from "@/components/tender/TenderForm";
 import { ImportDrawer } from "@/components/tender/ImportDrawer";
 import { LossReasonModal } from "@/components/tender/LossReasonModal";
 import { ConfirmDialog } from "@/components/tender/ConfirmDialog";
+import { useAuthStore } from "@/lib/authStore";
+import { isSuperAdminRole } from "@/lib/taskPermissions";
 import { TenderHealthChip } from "@/components/tender/TenderHealthChip";
 import { HandoffDialog } from "@/components/tender/HandoffDialog";
 import { type HandoffOptions } from "@/lib/projectBoqStore";
@@ -56,7 +58,9 @@ import {
   Download,
   ExternalLink,
   FolderPlus,
+  Hourglass,
   Pencil,
+  Trash2,
   Plus,
   Rows3,
   Search,
@@ -95,9 +99,26 @@ const healthCol: Col = {
   cell: (t) => <TenderHealthChip tender={t} showBid={false} />,
 };
 
+/**
+ * A tender whose move is parked for approval still sits in its old stage, so the row says so —
+ * otherwise it looks like the button did nothing, and the approver has no way to spot it here.
+ */
 const nameCell = (t: Tender) => (
-  <span className="block max-w-[420px] truncate" title={t.nameOfWork ?? ""}>
-    {tval(t.nameOfWork)}
+  <span className="flex max-w-[460px] items-center gap-2">
+    <span className="truncate" title={t.nameOfWork ?? ""}>
+      {tval(t.nameOfWork)}
+    </span>
+    {t.pendingStage && (
+      <span
+        title={t.approval?.awaitingRoleNames ? `Waiting on ${t.approval.awaitingRoleNames}` : "Awaiting approval"}
+        className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold whitespace-nowrap ring-1 ring-inset ${
+          t.canActNow ? "bg-rose-50 text-rose-700 ring-rose-600/20" : "bg-amber-50 text-amber-700 ring-amber-600/20"
+        }`}
+      >
+        <Hourglass size={10} />
+        {t.canActNow ? "Your approval" : "Pending"} → {STAGE_META[t.pendingStage].label}
+      </span>
+    )}
   </span>
 );
 
@@ -242,6 +263,10 @@ export function TenderPipeline({ variant }: { variant: PipelineVariant }) {
   const linkProject = useTenderStore((s) => s.linkProject);
   const handoffPayloadFor = useTenderStore((s) => s.handoffPayloadFor);
   const lastUndo = useTenderStore((s) => s.lastUndo);
+  const removeTender = useTenderStore((s) => s.removeTender);
+  // Deleting a tender wipes its whole history, so only Super Admin is offered it.
+  const superAdmin = isSuperAdminRole(useAuthStore((s) => s.user?.role?.name));
+  const [deletePrompt, setDeletePrompt] = useState<Tender | null>(null);
   const undo = useTenderStore((s) => s.undo);
   const clearUndo = useTenderStore((s) => s.clearUndo);
 
@@ -857,6 +882,7 @@ export function TenderPipeline({ variant }: { variant: PipelineVariant }) {
                           onView={() => setSelectedId(t.id)}
                           onEdit={() => setEditing(t)}
                           onAnalyse={() => router.push(`/tender/analysis/${t.id}`)}
+                          onDelete={superAdmin ? () => setDeletePrompt(t) : undefined}
                         />
                       </td>
                     </tr>
@@ -915,6 +941,27 @@ export function TenderPipeline({ variant }: { variant: PipelineVariant }) {
               : await setStage(lossPrompt.tender.id, lossPrompt.to, null, patch);
             setLossPrompt(null);
             flash(message ?? "Outcome recorded.");
+          }}
+        />
+      )}
+
+      {deletePrompt && (
+        <ConfirmDialog
+          title="Delete tender"
+          tone="danger"
+          confirmLabel="Delete permanently"
+          body={
+            <>
+              <strong>{deletePrompt.nameOfWork || `Tender ${deletePrompt.tenderId || "(no ID)"}`}</strong> and its details
+              will be deleted for everyone. This can&apos;t be undone.
+            </>
+          }
+          onCancel={() => setDeletePrompt(null)}
+          onConfirm={() => {
+            removeTender(deletePrompt.id);
+            if (selectedId === deletePrompt.id) setSelectedId(null);
+            setDeletePrompt(null);
+            flash("Tender deleted.");
           }}
         />
       )}
@@ -1173,6 +1220,7 @@ function RowActions({
   onView,
   onEdit,
   onAnalyse,
+  onDelete,
 }: {
   t: Tender;
   busy: boolean;
@@ -1183,6 +1231,8 @@ function RowActions({
   onView: () => void;
   onEdit: () => void;
   onAnalyse: () => void;
+  /** Only passed for Super Admin. */
+  onDelete?: () => void;
 }) {
   const transitions = transitionsFor(t.stage);
   return (
@@ -1222,6 +1272,12 @@ function RowActions({
                   onClick={() => { close(); onSetStatus(s); }}
                 />
               ))}
+            </>
+          )}
+          {onDelete && (
+            <>
+              <RowMenuDivider />
+              <RowMenuItem icon={Trash2} label="Delete tender" tone="danger" onClick={() => { close(); onDelete(); }} />
             </>
           )}
         </>

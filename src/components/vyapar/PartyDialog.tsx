@@ -9,7 +9,7 @@ import { useVyaparProjectId } from "@/lib/projectScope";
 import { GST_TYPES, STATES_OF_SUPPLY } from "@/lib/vyaparApi";
 import type { Party } from "@/lib/vyaparApi";
 import { usePartySettings } from "@/lib/usePartySettings";
-import { Info, Plus, X } from "lucide-react";
+import { Info } from "lucide-react";
 
 const TABS = ["GST & Address", "Credit & Balance", "Additional Fields"] as const;
 type Tab = (typeof TABS)[number];
@@ -45,8 +45,6 @@ export function PartyDialog({
   const [state, setState] = useState(existing?.state ?? "");
   const [email, setEmail] = useState(existing?.email ?? "");
   const [billingAddress, setBillingAddress] = useState(existing?.billingAddress ?? "");
-  const [shippingAddress, setShippingAddress] = useState(existing?.shippingAddress ?? "");
-  const [shipOpen, setShipOpen] = useState(!!existing?.shippingAddress);
   const [partyGroup, setPartyGroup] = useState(existing?.partyGroup ?? "");
 
   const [openingBalance, setOpeningBalance] = useState(existing?.openingBalance ?? 0);
@@ -83,7 +81,8 @@ export function PartyDialog({
       email: email.trim() || null,
       state: state || null,
       billingAddress: billingAddress.trim() || null,
-      shippingAddress: shipOpen ? shippingAddress.trim() || null : null,
+      // Only the one address is asked for now (client's call); a shipping address already on file is kept.
+      shippingAddress: existing?.shippingAddress ?? null,
       partyGroup: partyGroup || null,
       openingBalance: Number(openingBalance) || 0,
       openingDate,
@@ -99,7 +98,7 @@ export function PartyDialog({
       if (again) {
         // "Save & New" keeps the dialog open with a clean form.
         setName(""); setGstin(""); setPhone(""); setEmail("");
-        setBillingAddress(""); setShippingAddress(""); setOpeningBalance(0);
+        setBillingAddress(""); setOpeningBalance(0);
         setF1(""); setF2(""); setF3(""); setF4("");
         setTab("GST & Address");
         setSaving(false);
@@ -170,7 +169,7 @@ export function PartyDialog({
         </div>
 
         {tab === "GST & Address" && (
-          <div className="animate-fade-in grid grid-cols-1 gap-5 lg:grid-cols-3">
+          <div className="animate-fade-in grid grid-cols-1 gap-5 lg:grid-cols-2">
             <div className="space-y-3">
               <Field label="Party Type">
                 <Select
@@ -209,7 +208,7 @@ export function PartyDialog({
             </div>
 
             <div>
-              <Field label="Billing Address">
+              <Field label="Address">
                 <textarea
                   value={billingAddress}
                   onChange={(e) => setBillingAddress(e.target.value)}
@@ -219,45 +218,6 @@ export function PartyDialog({
               </Field>
             </div>
 
-            <div>
-              <div className="mb-1.5 flex items-center justify-between">
-                <span className="text-[11px] font-medium tracking-wide text-gray-400 uppercase">Shipping Address</span>
-                {shipOpen && (
-                  <button
-                    onClick={() => {
-                      setShipOpen(false);
-                      setShippingAddress("");
-                    }}
-                    className="text-gray-300 transition-colors duration-150 hover:text-rose-600"
-                  >
-                    <X size={13} />
-                  </button>
-                )}
-              </div>
-              {shipOpen ? (
-                <>
-                  <textarea
-                    value={shippingAddress}
-                    onChange={(e) => setShippingAddress(e.target.value)}
-                    rows={5}
-                    className="input resize-none"
-                  />
-                  <button
-                    onClick={() => setShippingAddress(billingAddress)}
-                    className="mt-1.5 text-xs font-medium text-brand-accent transition-colors duration-150 hover:underline"
-                  >
-                    Same as billing address
-                  </button>
-                </>
-              ) : (
-                <button
-                  onClick={() => setShipOpen(true)}
-                  className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-gray-300 py-6 text-sm font-medium text-brand-accent transition-all duration-150 hover:border-brand-accent hover:bg-cyan-50/40"
-                >
-                  <Plus size={14} /> Enable Shipping Address
-                </button>
-              )}
-            </div>
           </div>
         )}
 

@@ -11,6 +11,11 @@ import { SortTh } from "@/components/vyapar/SortTh";
 import { DateRangeFilter, defaultRange, inRange, type DateRange } from "@/components/vyapar/DateRangeFilter";
 import { LinkPaymentDialog } from "@/components/vyapar/LinkPaymentDialog";
 import { TxnRowActions } from "@/components/vyapar/TxnRowActions";
+import { TransactionDetailDrawer } from "@/components/vyapar/TransactionDetailDrawer";
+import { docTypeHref } from "@/lib/vyaparLinks";
+import { ApprovalBadge, ApprovalPanel } from "@/components/approval/ApprovalBadge";
+import { PAYMENT_APPROVAL_TYPE, useApprovalStates } from "@/lib/approvals";
+import type { ApprovalState } from "@/lib/api";
 import { useTableSort } from "@/lib/useTableSort";
 import { inr } from "@/lib/format";
 import { usePaymentTypeOptions, useBankAccountResolver } from "@/lib/bankScope";
@@ -54,6 +59,10 @@ export function PaymentWorkspace({
   const [importing, setImporting] = useState(false);
   // Re-linking a payment that's already saved — Vyapar reopens the same dialog from the row menu.
   const [relinking, setRelinking] = useState<Payment | null>(null);
+  // The receipt view. Clicking a row opens this; editing (the links) is one step further in.
+  const [viewing, setViewing] = useState<Payment | null>(null);
+  const paymentIds = useMemo(() => payments.map((p) => p.id), [payments]);
+  const { states: approvals, reload: reloadApprovals } = useApprovalStates(PAYMENT_APPROVAL_TYPE, paymentIds);
   const [range, setRange] = useState<DateRange>(() => defaultRange("This Year"));
   const [exporting, setExporting] = useState(false);
   const { projects } = useProjects();
@@ -296,14 +305,19 @@ export function PaymentWorkspace({
                 <tr
                   key={p.id}
                   ref={highlighted ? highlightRef : undefined}
-                  onClick={() => setRelinking(p)}
+                  onClick={() => setViewing(p)}
                   className={`cursor-pointer border-b border-gray-50 transition-colors duration-150 last:border-b-0 even:bg-gray-50/40 hover:bg-cyan-50/40 ${
                     highlighted ? "bg-amber-50 ring-2 ring-inset ring-amber-300" : ""
                   }`}
                 >
 
                   <td className="px-4 py-2.5 whitespace-nowrap text-gray-600">{formatDate(p.paymentDate)}</td>
-                  <td className="px-4 py-2.5 font-medium text-gray-800">{p.partyName ?? "—"}</td>
+                  <td className="px-4 py-2.5 font-medium text-gray-800">
+                    <span className="flex items-center gap-2">
+                      {p.partyName ?? "—"}
+                      <ApprovalBadge state={approvals[p.id]} />
+                    </span>
+                  </td>
                   <td className="px-4 py-2.5 text-gray-600">{p.mode}</td>
                   <td className="px-4 py-2.5 text-gray-500">{p.reference || "—"}</td>
                   <td className={`px-4 py-2.5 text-right font-semibold ${isIn ? "text-emerald-600" : "text-rose-600"}`}>
@@ -331,6 +345,22 @@ export function PaymentWorkspace({
             </tbody>
           </table>
         </div>
+      )}
+
+      {viewing && (
+        <PaymentDetail
+          payment={viewing}
+          approval={approvals[viewing.id]}
+          onApprovalChanged={() => void reloadApprovals()}
+          projectName={projects.find((x) => x.id === String(viewing.projectId))?.name ?? null}
+          onClose={() => setViewing(null)}
+          onEdit={viewing.partyId != null ? () => { setRelinking(viewing); setViewing(null); } : undefined}
+          onDownload={() => printOne(viewing)}
+          onDelete={async () => {
+            setViewing(null);
+            await remove(viewing);
+          }}
+        />
       )}
 
       {creating && (
@@ -584,6 +614,83 @@ function PaymentForm({
 }
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+/** The receipt view of one payment — who paid whom, what it settled, and what is still unapplied. */
+function PaymentDetail({
+  payment: p,
+  projectName,
+  approval,
+  onApprovalChanged,
+  onClose,
+  onEdit,
+  onDownload,
+  onDelete,
+}: {
+  payment: Payment;
+  projectName: string | null;
+  approval?: ApprovalState;
+  onApprovalChanged: () => void;
+  onClose: () => void;
+  onEdit?: () => void;
+  onDownload: () => void;
+  onDelete: () => void;
+}) {
+  const isIn = p.direction === "IN";
+  const account = { caption: isIn ? "Received in" : "Paid by", name: p.mode || "—", kind: "account" as const };
+  const party = { caption: isIn ? "Received from" : "Paid to", name: p.partyName ?? "—", kind: "party" as const };
+  const status =
+    p.unusedAmount <= 0
+      ? { label: "Fully settled", tone: "good" as const }
+      : p.linkedAmount > 0
+        ? { label: `Partly settled · ${inr(p.unusedAmount)} unused`, tone: "warn" as const }
+        : { label: "Advance · not linked to a bill", tone: "muted" as const };
+
+  return (
+    <TransactionDetailDrawer
+      title={isIn ? "Payment In" : "Payment Out"}
+      subtitle={formatDate(p.paymentDate)}
+      tone={isIn ? "in" : "out"}
+      number={`${isIn ? "PI" : "PO"}-${p.id}`}
+      amountLabel={isIn ? "Amount received" : "Amount paid"}
+      amount={p.amount}
+      status={status}
+      from={isIn ? party : account}
+      to={isIn ? account : party}
+      rows={[
+        { label: "Date", value: formatDate(p.paymentDate) },
+        { label: "Project", value: projectName ?? "—" },
+        { label: "Payment type", value: p.mode || "—" },
+        { label: "Reference no.", value: p.reference || "—" },
+        { label: "Settled", value: inr(p.linkedAmount) },
+        { label: "Unused / advance", value: p.unusedAmount > 0 ? inr(p.unusedAmount) : "—" },
+        { label: "Notes", value: p.notes || "—" },
+      ]}
+      linked={p.links.map((l) => ({
+        key: `${l.invoiceId}`,
+        label: l.invoiceNo || `Document ${l.invoiceId}`,
+        sub: l.docType ? l.docType.replace(/_/g, " ").toLowerCase().replace(/^\w/, (c) => c.toUpperCase()) : undefined,
+        amount: l.amount,
+        href: docTypeHref(l.docType, l.invoiceId),
+      }))}
+      approval={
+        approval && approval.status !== "CANCELLED" ? (
+          <ApprovalPanel
+            entityType={PAYMENT_APPROVAL_TYPE}
+            entityId={p.id}
+            state={approval}
+            onChanged={onApprovalChanged}
+            rejectHint="Rejecting marks this payment rejected; it doesn't reverse money already moved."
+          />
+        ) : undefined
+      }
+      onClose={onClose}
+      onEdit={onEdit}
+      editLabel="Edit links"
+      onDownload={onDownload}
+      onDelete={onDelete}
+    />
+  );
+}
+
 function formatDate(iso: string | null): string {
   if (!iso || iso.length < 10) return "—";
   const [y, m, d] = iso.slice(0, 10).split("-");

@@ -9,6 +9,8 @@ import { usePayrollProfiles } from "@/lib/usePayrollSetup";
 import { ApiError, editPayslip } from "@/lib/api";
 import type { PayslipApi, UnmarkedDayPolicy } from "@/lib/api";
 import { Select } from "@/components/Select";
+import { ApprovalPanel } from "@/components/approval/ApprovalBadge";
+import { useApprovalStates } from "@/lib/approvals";
 import { inr } from "@/lib/format";
 import { exportRowsToCsv } from "@/lib/vyaparExport";
 import { downloadPayslip } from "@/lib/payslipExport";
@@ -31,6 +33,10 @@ export default function PayrollRunPage() {
 
   const { runs, refresh: refreshList, generate, lock, unlock, pay } = usePayrollRuns();
   const { run, loading, error, refresh: refreshRun } = usePayrollRun(monthKey);
+  // A locked run climbs the Payroll Run ladder (Settings → Multi Level Approval) before it can be paid.
+  const runIds = useMemo(() => (run ? [run.id] : []), [run]);
+  const { states: runApproval, reload: reloadRunApproval } = useApprovalStates("PAYROLL_RUN", runIds);
+  const approval = run ? runApproval[run.id] : undefined;
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState("");
   const [editing, setEditing] = useState<PayslipApi | null>(null);
@@ -62,13 +68,13 @@ export default function PayrollRunPage() {
   }
   async function doLock() {
     setBusy(true); setActionError("");
-    try { await lock(monthKey); await refreshRun(); await refreshList(); }
+    try { await lock(monthKey); await refreshRun(); await refreshList(); await reloadRunApproval(); }
     catch (err) { setActionError(err instanceof ApiError ? err.message : "Unable to lock the run."); }
     finally { setBusy(false); }
   }
   async function doUnlock() {
     setBusy(true); setActionError("");
-    try { await unlock(monthKey); await refreshRun(); await refreshList(); }
+    try { await unlock(monthKey); await refreshRun(); await refreshList(); await reloadRunApproval(); }
     catch (err) { setActionError(err instanceof ApiError ? err.message : "Unable to unlock the run."); }
     finally { setBusy(false); }
   }
@@ -208,6 +214,19 @@ export default function PayrollRunPage() {
             )}
           </div>
         </div>
+
+        {run && approval && approval.status !== "CANCELLED" && (
+          <ApprovalPanel
+            entityType="PAYROLL_RUN"
+            entityId={run.id}
+            state={approval}
+            onChanged={() => {
+              void reloadRunApproval();
+              refreshRun();
+            }}
+            rejectHint="Rejecting sends the run back to draft so it can be corrected and regenerated."
+          />
+        )}
 
         {/* Stats */}
         {run && (

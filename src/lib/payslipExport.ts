@@ -16,6 +16,16 @@ import { getCachedFirmProfile, amountInWords } from "./vyaparExport";
 import { inr } from "./format";
 import type { PayslipApi, PayrollProfileResponse, UserResponse } from "./api";
 
+/**
+ * Money for the PDF. jsPDF's built-in fonts have no ₹ glyph: it printed as "¹" and threw off the
+ * width maths, so digits came out spaced apart and the Net Pay figure ran past the edge of its band.
+ * The printed slip uses "Rs." and two decimals, the same as the invoice PDF.
+ */
+function pdfMoney(n: number): string {
+  const v = Number.isFinite(n) ? n : 0;
+  return `${v < 0 ? "-" : ""}Rs. ${Math.abs(v).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
 /** Component/amount rows for a payslip: gross, each deduction (negative), loan/reimb, then net. */
 export function payslipRows(s: PayslipApi): (string | number)[][] {
   const rows: (string | number)[][] = [["Gross Salary", inr(s.gross)]];
@@ -169,13 +179,13 @@ export async function downloadPayslip(s: PayslipApi, memberName: string, ctx: Pa
       gray(70);
       doc.text(earnings[i][0], margin + 10, rowY, { maxWidth: halfW - 90 });
       setText(INK);
-      doc.text(inr(earnings[i][1]), margin + halfW - 10, rowY, { align: "right" });
+      doc.text(pdfMoney(earnings[i][1]), margin + halfW - 10, rowY, { align: "right" });
     }
     if (deductions[i]) {
       gray(70);
       doc.text(deductions[i][0], rightX + 10, rowY, { maxWidth: halfW - 90 });
       setText(INK);
-      doc.text(inr(deductions[i][1]), rightX + halfW - 10, rowY, { align: "right" });
+      doc.text(pdfMoney(deductions[i][1]), rightX + halfW - 10, rowY, { align: "right" });
     }
   }
 
@@ -193,9 +203,9 @@ export async function downloadPayslip(s: PayslipApi, memberName: string, ctx: Pa
   doc.setFontSize(9);
   setText(INK);
   doc.text("Total Earnings", margin + 10, totalsY + 14);
-  doc.text(inr(totalEarnings), margin + halfW - 10, totalsY + 14, { align: "right" });
+  doc.text(pdfMoney(totalEarnings), margin + halfW - 10, totalsY + 14, { align: "right" });
   doc.text("Total Deductions", rightX + 10, totalsY + 14);
-  doc.text(inr(totalDeductions), rightX + halfW - 10, totalsY + 14, { align: "right" });
+  doc.text(pdfMoney(totalDeductions), rightX + halfW - 10, totalsY + 14, { align: "right" });
 
   y = totalsY + rowH + 24;
 
@@ -207,7 +217,7 @@ export async function downloadPayslip(s: PayslipApi, memberName: string, ctx: Pa
   doc.setFontSize(11);
   doc.setTextColor(255, 255, 255);
   doc.text("NET PAY", margin + 12, y + 20);
-  doc.text(inr(s.net), pageWidth - margin - 12, y + 20, { align: "right" });
+  doc.text(pdfMoney(s.net), pageWidth - margin - 12, y + 20, { align: "right" });
   y += netH + 16;
 
   doc.setFont("helvetica", "normal");

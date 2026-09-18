@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { CheckCircle2, ClipboardCheck, Loader2, Lock, X } from "lucide-react";
+import { CheckCircle2, ClipboardCheck, Loader2, X } from "lucide-react";
 import { TaskopadShell } from "@/components/task/TaskopadShell";
 import { TaskDrawer } from "@/components/task/TaskDrawer";
 import { useTaskStore } from "@/lib/taskStore";
@@ -10,7 +10,6 @@ import { useProjects } from "@/lib/useProjects";
 import { UserAvatar, StatusChip, PriorityChip } from "@/components/task/TaskBits";
 import { formatTaskDate } from "@/lib/taskTypes";
 import type { Task } from "@/lib/taskTypes";
-import { useTaskRights } from "@/lib/taskPermissions";
 
 /**
  * Completion approvals — tasks a manager must sign off before they're marked Completed. A person who
@@ -35,7 +34,6 @@ function ApprovalsList() {
 
   const { users } = useUsers();
   const { projects } = useProjects();
-  const { rightsFor } = useTaskRights();
 
   const [busyId, setBusyId] = useState<string | null>(null);
   const [rejectingId, setRejectingId] = useState<string | null>(null);
@@ -55,8 +53,6 @@ function ApprovalsList() {
   const projectName = (id: string | null) => (id ? projects.find((p) => p.id === id)?.name ?? "—" : "—");
 
   async function doApprove(id: string) {
-    const task = approvals.find((t) => t.id === id);
-    if (task && !rightsFor(task).canApprove) return;
     setBusyId(id);
     setError("");
     try {
@@ -69,8 +65,6 @@ function ApprovalsList() {
   }
 
   async function doReject(id: string) {
-    const task = approvals.find((t) => t.id === id);
-    if (task && !rightsFor(task).canApprove) return;
     setBusyId(id);
     setError("");
     try {
@@ -110,9 +104,10 @@ function ApprovalsList() {
           {approvals.map((t) => {
             const rejecting = rejectingId === t.id;
             const busy = busyId === t.id;
-            // Completing a task is a change to its record, so sign-off stays with the creator
-            // (and Super Admin) even though the queue itself follows the reporting line.
-            const canApprove = rightsFor(t).canApprove;
+            // Everything in this queue is the viewer's to decide: the server builds it from the
+            // reporting chain (the role above whoever completed the task) and refuses anyone else.
+            // A separate "creator signs off" rule here used to lock the approver out — a task someone
+            // created for themselves then sat waiting forever.
             return (
               <div
                 key={t.id}
@@ -139,8 +134,7 @@ function ApprovalsList() {
                     </div>
                   </div>
 
-                  {!rejecting &&
-                    (canApprove ? (
+                  {!rejecting && (
                       <div className="flex shrink-0 items-center gap-2" onClick={(e) => e.stopPropagation()}>
                         <button
                           onClick={() => doApprove(t.id)}
@@ -157,14 +151,7 @@ function ApprovalsList() {
                           <X size={14} /> Reject
                         </button>
                       </div>
-                    ) : (
-                      <span
-                        className="flex shrink-0 items-center gap-1.5 rounded-lg bg-gray-50 px-3 py-2 text-xs font-medium text-gray-500"
-                        title={`Only ${userName(t.createdBy)} (who raised this task) can sign it off.`}
-                      >
-                        <Lock size={12} /> {userName(t.createdBy)} signs off
-                      </span>
-                    ))}
+                  )}
                 </div>
 
                 {rejecting && (

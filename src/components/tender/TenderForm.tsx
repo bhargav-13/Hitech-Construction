@@ -86,6 +86,35 @@ const ADDITIONAL_SECURITY_OPTIONS = [
   "Retention",
 ];
 
+/**
+ * GST is a yes/no question on the client's sheet. Older rows imported from the workbook carry
+ * "Exclusive" / "Inclusive" — those stay selectable on that tender so editing it doesn't wipe them.
+ */
+function gstOptions(current: string | null | undefined) {
+  const base = [
+    { value: "", label: "—" },
+    { value: "Yes", label: "Yes" },
+    { value: "No", label: "No" },
+  ];
+  return current && !base.some((o) => o.value === current) ? [...base, { value: current, label: current }] : base;
+}
+
+/** The reference number means something different per instrument — say which one is wanted. */
+function instrumentNoLabel(mode: EmdMode | null | undefined): string {
+  if (mode === "FDR") return "FDR No.";
+  if (mode === "BG") return "BG No.";
+  if (mode === "DD") return "DD No.";
+  if (mode === "ONLINE") return "Transaction / UTR No.";
+  return "Instrument No.";
+}
+function instrumentNoPlaceholder(mode: EmdMode | null | undefined): string {
+  if (mode === "FDR") return "FDR number";
+  if (mode === "BG") return "Bank guarantee number";
+  if (mode === "DD") return "Demand draft number";
+  if (mode === "ONLINE") return "UTR / payment reference";
+  return "FDR / BG / DD reference";
+}
+
 /** Default applied-stage status for a stage, so a directly-created WON/LOST/APPLIED tender is consistent. */
 function defaultStatus(stage: TenderStage): TenderStatus | null {
   if (stage === "APPLIED") return "SUBMITTED";
@@ -297,7 +326,7 @@ export function TenderForm({
             <input type="number" className="input" value={f.fee ?? ""} onChange={(e) => set({ fee: num(e.target.value) })} />
           </DrawerField>
           <DrawerField label="GST">
-            <input className="input" value={f.gst ?? ""} onChange={(e) => set({ gst: e.target.value })} />
+            <Select value={f.gst ?? ""} onChange={(v) => set({ gst: v || null })} options={gstOptions(f.gst)} />
           </DrawerField>
         </Section>
 
@@ -312,9 +341,16 @@ export function TenderForm({
           <DrawerField label="State">
             <Select value={f.emdState ?? "PENDING"} onChange={(v) => set({ emdState: v as EmdState })} options={EMD_STATE_OPTIONS} />
           </DrawerField>
-          <DrawerField label="Instrument No.">
-            <input className="input" value={f.emdInstrumentNo ?? ""} onChange={(e) => set({ emdInstrumentNo: e.target.value })} placeholder="FDR / BG reference" />
-          </DrawerField>
+          {f.emdMode !== "EXEMPT" && (
+            <DrawerField label={instrumentNoLabel(f.emdMode)}>
+              <input
+                className="input"
+                value={f.emdInstrumentNo ?? ""}
+                onChange={(e) => set({ emdInstrumentNo: e.target.value })}
+                placeholder={instrumentNoPlaceholder(f.emdMode)}
+              />
+            </DrawerField>
+          )}
           <DrawerField label="Paid On">
             <DatePicker value={f.emdPaidOn ?? ""} onChange={(v) => set({ emdPaidOn: v })} />
           </DrawerField>

@@ -13,8 +13,13 @@ import { BillShipDialog, type BillShip } from "@/components/BillShipDialog";
 // Aliased: `calc` below uses a local `qty` accumulator, and shadowing the formatter would be a trap.
 import { inr, qty as formatQty } from "@/lib/format";
 import { usePaymentTypeOptions, useBankAccountResolver } from "@/lib/bankScope";
-import { GST_RATE_OPTIONS, ITC_ELIGIBILITY, ITC_DEFAULT, gstCodeForPercent, gstPercent } from "@/lib/gstRates";
-import { downloadInvoicePdf } from "@/lib/vyaparExport";
+import { GST_RATE_OPTIONS, ITC_ELIGIBILITY, ITC_DEFAULT, gstCodeForPercent, gstPercent, gstRate } from "@/lib/gstRates";
+import { downloadInvoicePdf, getCachedFirmProfile } from "@/lib/vyaparExport";
+import { readBillText } from "@/lib/billOcr";
+import { parseBill, stateOfGstin, type ParsedBill } from "@/lib/billParse";
+import { BillPreviewPane, type ScanNote } from "@/components/vyapar/BillPreviewPane";
+import { ApprovalPanel } from "@/components/approval/ApprovalBadge";
+import type { ApprovalState } from "@/lib/api";
 import { shareInvoice } from "@/components/vyapar/TxnRowActions";
 import { useVyaparSettings } from "@/lib/useVyaparSettings";
 import { useItemMasters, type ManagedUnit } from "@/lib/useItemMasters";
@@ -28,11 +33,13 @@ import {
   ChevronDown,
   Download,
   FileText,
+  Eye,
   GripVertical,
   ImageIcon,
   Link2,
   Plus,
   Printer,
+  ScanLine,
   Share2,
   Trash2,
   X,
@@ -148,6 +155,9 @@ export function InvoiceBuilder({
   projectId: projectOverride,
   initialAttachment,
   prefill,
+  approvalType,
+  approval,
+  onApprovalChanged,
 }: {
   docType: DocType;
   existing?: Invoice;
@@ -171,6 +181,10 @@ export function InvoiceBuilder({
    * Only meaningful on a new document: an `existing` one already has its own values, and they win.
    */
   prefill?: PoDraft;
+  /** Approval chain this document type runs on, and where this document stands on it. */
+  approvalType?: string | null;
+  approval?: ApprovalState;
+  onApprovalChanged?: () => void;
 }) {
   const projectId = useVyaparProjectId(projectOverride);
   const { projects } = useProjects();
@@ -274,6 +288,43 @@ export function InvoiceBuilder({
   const [dueDate, setDueDate] = useState(existing?.dueDate ?? prefill?.deliveryDate ?? "");
   const [stateOfSupply, setStateOfSupply] = useState(existing?.stateOfSupply ?? "");
   /**
+   * The firm's own state, from its profile/GSTIN. A supply to (or from) another state is IGST; within
+   * the state it is CGST + SGST. Vyapar switches the line codes when the place of supply changes —
+   * we didn't, so a Gujarat firm billing Madhya Pradesh printed CGST/SGST on an inter-state bill.
+   */
+  const [ownState, setOwnState] = useState<string | null>(null);
+  useEffect(() => {
+    let off = false;
+    getCachedFirmProfile()
+      .then((f) => {
+        if (off) return;
+        // Profiles store the state however it was typed ("GUJARAT"); prefer the GSTIN's own code.
+        const raw = stateOfGstin(f?.gstin) || f?.state || null;
+        setOwnState(raw ? (STATES_OF_SUPPLY.find((x) => x.toLowerCase() === raw.trim().toLowerCase()) ?? raw.trim()) : null);
+      })
+      .catch(() => {});
+    return () => {
+      off = true;
+    };
+  }, []);
+  const sameState = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
+  const interState = !!ownState && !!stateOfSupply && !sameState(stateOfSupply, ownState);
+
+  /** GST@x ↔ IGST@x for the given supply; NONE / EXEMPTED are left alone. */
+  function codeForSupply(code: string, inter: boolean): string {
+    if (inter && code.startsWith("GST@") && gstRate(`I${code}`)) return `I${code}`;
+    if (!inter && code.startsWith("IGST@") && gstRate(code.slice(1))) return code.slice(1);
+    return code;
+  }
+
+  /** Change the place of supply and re-key every line's tax to match it. */
+  function changeSupplyState(next: string) {
+    setStateOfSupply(next);
+    if (!ownState || !next) return;
+    const inter = !sameState(next, ownState);
+    setLines((prev) => prev.map((l) => ({ ...l, taxCode: codeForSupply(l.taxCode, inter) })));
+  }
+  /**
    * Bill To / Ship To — shown on a purchase order, where they are two different places: the bill
    * comes to the office, the material goes to a site. Every other document type has one party and
    * one address, so the panel stays out of their way.
@@ -299,7 +350,9 @@ export function InvoiceBuilder({
   const [discountAmount, setDiscountAmount] = useState(existing?.discount ?? prefill?.discountAmount ?? 0);
   const [roundOffOn, setRoundOffOn] = useState(true);
   // Vyapar's Price/Unit column can be entered tax-inclusive or exclusive; the toggle applies to every row.
-  const [priceHasTax, setPriceHasTax] = useState(false);
+  // Reopens the way the prices were typed. Saving used to forget this, so a bill keyed "With Tax"
+  // came back showing its pre-tax base rates under "Without Tax".
+  const [priceHasTax, setPriceHasTax] = useState(existing?.priceIncludesTax ?? false);
   // Received amount, so a sale can be saved fully/partly paid — mirrors Vyapar's Received / Balance.
   const [received, setReceived] = useState(existing?.paidAmount ?? 0);
   const [receivedTouched, setReceivedTouched] = useState(existing != null);
@@ -327,7 +380,10 @@ export function InvoiceBuilder({
           hsn: l.hsn ?? "",
           unit: l.unit ?? "NONE",
           quantity: l.quantity,
-          rate: l.rate,
+          // Stored rates are pre-tax; a "With Tax" document shows them tax-inclusive again.
+          rate: existing.priceIncludesTax
+            ? Math.round(l.rate * (1 + gstPercent(l.taxCode ?? gstCodeForPercent(l.taxPercent)) / 100) * 100) / 100
+            : l.rate,
           discountPercent: l.discountPercent,
           // Rows saved before the Tax column became a code carry only a percent; read it as
           // intra-state GST, which is what the old picker meant.
@@ -365,6 +421,176 @@ export function InvoiceBuilder({
   );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+
+  /**
+   * Scan bill (OCR) and the bill-beside-the-form view.
+   *
+   * The client keys supplier bills with the PDF open in one window and this form in another. The
+   * bill now sits in the form's left half, and "Scan bill" reads it — bill number, date, party, and
+   * every item line — so the job becomes checking rather than typing. A bill arriving from Upload
+   * Bill opens with the preview already showing.
+   */
+  const [previewOpen, setPreviewOpen] = useState(!existing && !!initialAttachment);
+  const [scanning, setScanning] = useState(false);
+  const [scanStatus, setScanStatus] = useState("");
+  const [scanNote, setScanNote] = useState<ScanNote | null>(null);
+  /** Preview for a file too large to attach — still worth reading and showing. */
+  const [scanOnlyPreview, setScanOnlyPreview] = useState<{ name: string; dataUrl: string } | null>(null);
+  const scanInputRef = useRef<HTMLInputElement>(null);
+  /** Lines the last scan added, so reading the bill again replaces them instead of doubling up. */
+  const lastScanLines = useRef<LineDraft[]>([]);
+  const preview =
+    scanOnlyPreview ??
+    (documentDataUrl
+      ? { name: documentName || "Bill.pdf", dataUrl: documentDataUrl }
+      : imageDataUrl
+        ? { name: "Bill image", dataUrl: imageDataUrl }
+        : null);
+  const showPreview = previewOpen && preview != null;
+
+  async function scanFile(file: File, attach = true) {
+    const isPdf = file.type === "application/pdf" || /\.pdf$/i.test(file.name);
+    if (!isPdf && !file.type.startsWith("image/")) {
+      setScanNote({ tone: "bad", text: "Pick a PDF or a photo of the bill." });
+      setPreviewOpen(true);
+      return;
+    }
+    setScanNote(null);
+    setScanning(true);
+    setScanStatus("Reading the bill…");
+    setPreviewOpen(true);
+    try {
+      if (attach) {
+        setScanOnlyPreview(null);
+        if (isPdf && file.size > MAX_DOC_BYTES) {
+          // Still read and show it; it just can't ride along with the document.
+          setScanOnlyPreview({ name: file.name, dataUrl: await readFileAsDataUrl(file) });
+        } else if (isPdf) {
+          setDocumentName(file.name);
+          setDocumentDataUrl(await readFileAsDataUrl(file));
+        } else {
+          setImageDataUrl(await readImageAsDataUrl(file, 1400));
+        }
+      }
+      const [text, firm] = await Promise.all([
+        readBillText(file, setScanStatus),
+        getCachedFirmProfile().catch(() => null),
+      ]);
+      const parsed = parseBill(text.rows, { ownGstin: firm?.gstin });
+      const firmState = ownState ?? (stateOfGstin(firm?.gstin) || firm?.state || null);
+      let note = applyScan(parsed, text.source, firm?.businessName ?? null, firmState);
+      if (attach && isPdf && file.size > MAX_DOC_BYTES) {
+        note = { ...note, text: `${note.text} The PDF is over 4 MB, so it wasn't attached to the document.` };
+      }
+      setScanNote(note);
+    } catch (err) {
+      setScanNote({ tone: "bad", text: err instanceof Error ? err.message : "Couldn't read that bill." });
+    } finally {
+      setScanning(false);
+    }
+  }
+
+  /** Re-read the bill already attached (from Upload Bill, or an earlier scan). */
+  async function scanAttached() {
+    if (!preview) return;
+    const blob = await (await fetch(preview.dataUrl)).blob();
+    await scanFile(new File([blob], preview.name, { type: blob.type }), false);
+  }
+
+  /** Put what was read onto the form. Returns the note shown above the bill. */
+  function applyScan(
+    parsed: ParsedBill,
+    source: "pdf-text" | "ocr",
+    ownName: string | null,
+    ownState: string | null,
+  ): ScanNote {
+    const squash = (s: string | null | undefined) => (s ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
+    const filled: string[] = [];
+    let partyHint = "";
+
+    if (parsed.invoiceNo && !invoiceNo.trim()) {
+      setInvoiceNo(parsed.invoiceNo);
+      filled.push(isPurchase ? "bill no." : "number");
+    }
+    if (parsed.invoiceDate) {
+      setInvoiceDate(parsed.invoiceDate);
+      filled.push("date");
+    }
+
+    const partyState = stateOfGstin(parsed.partyGstin);
+    if (!partyId) {
+      const guess = parsed.partyName && squash(parsed.partyName) !== squash(ownName) ? parsed.partyName : null;
+      const match =
+        (parsed.partyGstin && parties.find((p) => (p.gstin ?? "").toUpperCase() === parsed.partyGstin)) ||
+        (guess && parties.find((p) => squash(p.name) === squash(guess))) ||
+        null;
+      if (match) {
+        pickParty(match);
+        filled.push("party");
+      } else if (guess) {
+        setPartyText(guess);
+        partyHint = ` “${guess}” isn't a saved party yet — use Add Party in the party box to create it${
+          parsed.partyGstin ? ` (GSTIN ${parsed.partyGstin})` : ""
+        }.`;
+      }
+      if (showStateOfSupply && partyState && STATES_OF_SUPPLY.includes(partyState) && !match?.state) {
+        setStateOfSupply(partyState);
+      }
+    }
+
+    // A supplier in another state bills IGST; the same slab within the state is CGST + SGST.
+    const interState = !!partyState && !!ownState && partyState.toLowerCase() !== ownState.trim().toLowerCase();
+    const newLines: LineDraft[] = parsed.lines.map((l) => {
+      const item = items.find((i) => squash(i.name) === squash(l.name));
+      let code = gstCodeForPercent(l.taxPercent ?? item?.taxPercent ?? 0);
+      if (interState && code.startsWith("GST@")) code = `I${code}`;
+      return {
+        itemId: item?.id ?? null,
+        itemName: item?.name ?? l.name,
+        description: "",
+        hsn: l.hsn ?? item?.hsn ?? "",
+        unit: l.unit ?? (item?.unit || "NONE"),
+        quantity: l.quantity,
+        rate: l.rate,
+        discountPercent: 0,
+        taxCode: code,
+        itcEligibility: isPurchase ? ITC_DEFAULT : "",
+      };
+    });
+    if (newLines.length > 0) {
+      // Replace the blank starter rows and any earlier scan; keep anything the user typed or edited.
+      const previous = lastScanLines.current;
+      setLines((prev) => [...prev.filter((l) => l.itemName.trim() && !previous.includes(l)), ...newLines]);
+      lastScanLines.current = newLines;
+      setPriceHasTax(false);
+    }
+
+    if (newLines.length === 0 && filled.length === 0) {
+      return {
+        tone: "warn",
+        text:
+          source === "ocr"
+            ? "Couldn't pick out the bill's details from this image. A sharp, straight-on photo in good light reads best — or key it in with the bill beside you."
+            : "Couldn't find the bill's details in this PDF. Key it in with the bill beside you." + partyHint,
+      };
+    }
+
+    const parts = [...(newLines.length ? [`${newLines.length} item${newLines.length === 1 ? "" : "s"}`] : []), ...filled];
+    let text = `Filled ${parts.join(", ")} from the ${source === "ocr" ? "scan" : "PDF"}.`;
+    let tone: ScanNote["tone"] = source === "ocr" ? "warn" : "good";
+    if (parsed.total && newLines.length) {
+      const sum = newLines.reduce((s, l) => s + l.quantity * l.rate * (1 + gstPercent(l.taxCode) / 100), 0);
+      if (Math.abs(sum - parsed.total) > Math.max(2, parsed.total * 0.01)) {
+        tone = "warn";
+        text += ` The bill says ${inr(parsed.total)} but the lines read add up to ${inr(sum)} — look for a missed or misread row.`;
+      } else {
+        text += ` Lines add up to the bill total of ${inr(parsed.total)}.`;
+      }
+    }
+    text += " Check each line against the bill before saving." + partyHint;
+    return { tone, text };
+  }
+
   /**
    * The error banner sits at the top of the form, but Save sits at the bottom of a tall one. A
    * rejected save — a duplicate document number, most often — would otherwise look like nothing
@@ -403,6 +629,10 @@ export function InvoiceBuilder({
     let discTotal = 0;
     let taxTotal = 0;
     let net = 0;
+    // The classification the tax return (and the printed bill) needs, not just the total.
+    let cgst = 0;
+    let sgst = 0;
+    let igst = 0;
     const rows = lines.map((l) => {
       const taxPct = gstPercent(l.taxCode);
       const rawRate = Number(l.rate) || 0;
@@ -416,6 +646,12 @@ export function InvoiceBuilder({
       discTotal += disc;
       taxTotal += tax;
       net += taxable;
+      const kind = gstRate(l.taxCode)?.kind;
+      if (kind === "IGST") igst += tax;
+      else if (kind === "GST") {
+        cgst += tax / 2;
+        sgst += tax / 2;
+      }
       return { disc, tax, amount: taxable + tax, baseRate };
     });
     const headerDisc = discountPercent > 0 ? (net * discountPercent) / 100 : Number(discountAmount) || 0;
@@ -431,7 +667,7 @@ export function InvoiceBuilder({
           : Math.round(beforeRound / step) * step;
     // A hand-typed round-off wins over the computed one, until the checkbox is cleared.
     const roundOff = !roundOffOn ? 0 : (roundOffOverride ?? rounded - beforeRound);
-    return { rows, qty, discTotal, taxTotal, net, headerDisc, roundOff, total: beforeRound + roundOff };
+    return { rows, qty, discTotal, taxTotal, cgst, sgst, igst, net, headerDisc, roundOff, total: beforeRound + roundOff };
   }, [
     lines, discountPercent, discountAmount, roundOffOn, priceHasTax, roundOffOverride,
     settings.roundOffMode, settings.roundOffTo,
@@ -449,20 +685,21 @@ export function InvoiceBuilder({
    */
   const unitOptions = useMemo(() => {
     const seen = new Set(["NONE"]);
-    const opts = [{ value: "NONE", label: "NONE" }];
+    const opts: { value: string; label: string; short?: string }[] = [{ value: "NONE", label: "Select Unit", short: "NONE" }];
     for (const u of masters.units) {
       const short = u.short.trim();
       if (!short || seen.has(short)) continue;
       seen.add(short);
-      // Short code only: the picker sits in a narrow grid cell, and the closed control renders the
-      // option's label, so "RMT — Running Metre" would overflow it. Full names live on Items ▸ Units.
-      opts.push({ value: short, label: short });
+      // The list reads "Bags (BAG)", as on the item form; the closed control shows just "BAG" so the
+      // narrow grid cell doesn't overflow.
+      const name = u.name.trim();
+      opts.push({ value: short, label: name && name.toUpperCase() !== short.toUpperCase() ? `${name} (${short})` : short, short });
     }
     for (const l of lines) {
       const short = (l.unit ?? "").trim();
       if (!short || seen.has(short)) continue;
       seen.add(short);
-      opts.push({ value: short, label: short });
+      opts.push({ value: short, label: short, short });
     }
     return [...opts, { value: ADD_UNIT, label: "⊕ Add New Unit" }];
   }, [masters.units, lines]);
@@ -487,7 +724,7 @@ export function InvoiceBuilder({
     setPartyId(String(p.id));
     setPartyText(p.name);
     setPhone(p.phone ?? "");
-    if (p.state && STATES_OF_SUPPLY.includes(p.state)) setStateOfSupply(p.state);
+    if (p.state && STATES_OF_SUPPLY.includes(p.state)) changeSupplyState(p.state);
   }
 
   /** Choosing a catalogue item fills in its rate, unit and tax — the usual billing shortcut. */
@@ -502,7 +739,7 @@ export function InvoiceBuilder({
       rate: isPurchase ? item.purchasePrice : item.salePrice,
       // The catalogue stores a bare rate, so read it as intra-state GST — the picker can be
       // switched to the IGST twin on the line if this supply crosses a state border.
-      taxCode: gstCodeForPercent(item.taxPercent),
+      taxCode: codeForSupply(gstCodeForPercent(item.taxPercent), interState),
     });
   }
 
@@ -533,6 +770,7 @@ export function InvoiceBuilder({
     try {
       const body: vyapar.InvoiceInput = {
         docType,
+        priceIncludesTax: priceHasTax,
         projectId: selectedProjectId ? Number(selectedProjectId) : null,
         invoiceNo: invoiceNo || undefined,
         invoicePrefix: invoicePrefix || null,
@@ -577,7 +815,8 @@ export function InvoiceBuilder({
           const taxPct = gstPercent(l.taxCode);
           const rawRate = Number(l.rate) || 0;
           // Persist the tax-exclusive base rate; the server re-applies tax on top.
-          const rate = priceHasTax ? Number((rawRate / (1 + taxPct / 100)).toFixed(2)) : rawRate;
+          // Four decimals: at two, ₹100 @ 18% became 84.75 and came back as ₹100.01.
+          const rate = priceHasTax ? Number((rawRate / (1 + taxPct / 100)).toFixed(4)) : rawRate;
           return {
             itemId: l.itemId,
             itemName: l.itemName.trim(),
@@ -650,6 +889,10 @@ export function InvoiceBuilder({
         setImageDataUrl(null);
         setDocumentName(null);
         setDocumentDataUrl(null);
+        setScanOnlyPreview(null);
+        setScanNote(null);
+        setPreviewOpen(false);
+        lastScanLines.current = [];
         setReceived(0);
         setReceivedTouched(false);
         setNotes("");
@@ -716,7 +959,7 @@ export function InvoiceBuilder({
       onSaveAndNew={existing ? undefined : () => save(true)}
       saveLabel={saving ? "Saving…" : "Save"}
       dirty={dirty}
-      width="max-w-6xl"
+      width={showPreview ? "max-w-[98vw]" : "max-w-6xl"}
       footer={
         <>
           {/* Vyapar keeps LINK PAYMENT permanently in the bottom-left of a document form: the
@@ -749,7 +992,28 @@ export function InvoiceBuilder({
         </>
       }
     >
-      <div className="space-y-5">
+      <div className={showPreview ? "grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]" : ""}>
+      {showPreview && preview && (
+        <BillPreviewPane
+          name={preview.name}
+          dataUrl={preview.dataUrl}
+          scanning={scanning}
+          status={scanStatus}
+          note={scanNote}
+          onRead={() => void scanAttached()}
+          onClose={() => setPreviewOpen(false)}
+        />
+      )}
+      <div className="min-w-0 space-y-5">
+        {existing && approval && approvalType && approval.status !== "CANCELLED" && (
+          <ApprovalPanel
+            entityType={approvalType}
+            entityId={existing.id}
+            state={approval}
+            onChanged={() => onApprovalChanged?.()}
+            rejectHint="Rejecting cancels this document — it keeps its number, stops counting in balances and stock, and can be reopened once fixed."
+          />
+        )}
         {error && (
           <div ref={errorRef} className="rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-600">
             {error}
@@ -774,6 +1038,37 @@ export function InvoiceBuilder({
               <span className={`text-sm ${isCash ? "font-medium text-brand-accent" : "text-gray-400"}`}>Cash</span>
             </div>
           )}
+          <div className="ml-auto flex items-center gap-2">
+            {preview && !showPreview && (
+              <button
+                type="button"
+                onClick={() => setPreviewOpen(true)}
+                className="flex items-center gap-1.5 rounded-lg border border-gray-200 px-3 py-1.5 text-sm text-gray-600 transition-all duration-150 hover:border-brand-accent hover:text-brand-accent active:scale-95"
+              >
+                <Eye size={14} /> Show bill
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => scanInputRef.current?.click()}
+              disabled={scanning}
+              title="Pick the supplier's PDF or a photo of the bill — its details are read into this form"
+              className="flex items-center gap-1.5 rounded-lg border border-brand-accent px-3 py-1.5 text-sm font-medium text-brand-accent transition-all duration-150 hover:bg-cyan-50 active:scale-95 disabled:opacity-50"
+            >
+              <ScanLine size={14} /> {scanning ? "Reading…" : "Scan bill (OCR)"}
+            </button>
+            <input
+              ref={scanInputRef}
+              type="file"
+              accept="application/pdf,image/*"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                e.target.value = "";
+                if (file) void scanFile(file);
+              }}
+            />
+          </div>
         </div>
 
         {/* Party on the left, document meta on the right */}
@@ -882,7 +1177,7 @@ export function InvoiceBuilder({
               <Field label="State of supply">
                 <Select
                   value={stateOfSupply}
-                  onChange={setStateOfSupply}
+                  onChange={changeSupplyState}
                   placeholder="Select"
                   options={[{ value: "", label: "Select" }, ...STATES_OF_SUPPLY.map((s) => ({ value: s, label: s }))]}
                 />
@@ -1290,6 +1585,23 @@ export function InvoiceBuilder({
           <div className="space-y-2 rounded-xl border border-gray-200 bg-gray-50/60 p-4 text-sm">
             <Row label="Sub Total" value={inr(calc.net)} />
             <Row label="Tax" value={inr(calc.taxTotal)} />
+            {(calc.cgst > 0 || calc.igst > 0) && (
+              <div className="space-y-1 border-l-2 border-gray-200 pl-3 text-xs">
+                {calc.cgst > 0 && (
+                  <>
+                    <Row label={`CGST${taxRateSuffix(lines, "GST", 2)}`} value={inr(calc.cgst)} />
+                    <Row label={`SGST${taxRateSuffix(lines, "GST", 2)}`} value={inr(calc.sgst)} />
+                  </>
+                )}
+                {calc.igst > 0 && <Row label={`IGST${taxRateSuffix(lines, "IGST", 1)}`} value={inr(calc.igst)} />}
+              </div>
+            )}
+            {showStateOfSupply && interState && calc.cgst > 0 && (
+              <p className="text-[11px] text-amber-700">
+                Place of supply is outside {ownState} — this should normally be IGST. Re-pick the state of supply to switch
+                the lines.
+              </p>
+            )}
             <div className="flex items-center justify-between gap-2">
               <span className="text-gray-500">Discount</span>
               <div className="flex items-center gap-1">
@@ -1389,6 +1701,7 @@ export function InvoiceBuilder({
             {paymentLinks.length > 1 ? "s" : ""}.
           </p>
         )}
+      </div>
       </div>
 
       {linkingPayment && partyId && (
@@ -1626,6 +1939,12 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
       {children}
     </label>
   );
+}
+
+/** " @ 9%" when every line of that kind shares one rate; blank when rates are mixed. */
+function taxRateSuffix(lines: LineDraft[], kind: "GST" | "IGST", divisor: number): string {
+  const rates = new Set(lines.filter((l) => gstRate(l.taxCode)?.kind === kind).map((l) => gstPercent(l.taxCode) / divisor));
+  return rates.size === 1 ? ` @ ${[...rates][0]}%` : "";
 }
 
 function Row({ label, value }: { label: string; value: string }) {

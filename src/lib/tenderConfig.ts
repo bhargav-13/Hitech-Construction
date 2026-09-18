@@ -16,12 +16,16 @@ export interface TenderNavNode {
    * Live counter shown on the right of the item:
    *   "due:SORTING" — tenders in that stage due within a week
    *   "emd"         — EMD sitting against decided tenders with no refund recorded
+   *   "approvals"   — stage moves waiting on the signed-in user
    */
-  badge?: "due:SORTING" | "due:RESEARCH" | "due:APPLIED" | "emd";
+  badge?: "due:SORTING" | "due:RESEARCH" | "due:APPLIED" | "emd" | "approvals";
 }
 
 export const TENDER_NAV: TenderNavNode[] = [
   { label: "Dashboard", href: "/tender", icon: "home" },
+  // Stage moves parked on the approval ladder. They used to be visible only inside each tender
+  // drawer, so an approver had no way to find what was waiting on them.
+  { label: "Approvals", href: "/tender/approvals", feature: "TENDER_TENDERS", icon: "approval", badge: "approvals" },
 
   // The pipeline, in flow order: Sorting → Research → Applied. A won tender then leaves this module
   // entirely — it becomes a record in the existing Project module, reached from the tender itself.

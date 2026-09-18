@@ -8,6 +8,8 @@ import { notifyFormTouched } from "@/lib/formDirty";
 export interface SelectOption {
   value: string;
   label: string;
+  /** Shown in the closed control instead of `label` — "BAG" for an option listed as "Bags (BAG)". */
+  short?: string;
   disabled?: boolean;
   /**
    * Renders as a small group heading rather than a choice — for lists that read better in sections
@@ -196,7 +198,7 @@ export function Select({
       >
         <span className="flex min-w-0 items-center gap-1.5">
           {icon}
-          <span className={`truncate ${selected ? "" : "text-gray-400"}`}>{selected?.label ?? placeholder}</span>
+          <span className={`truncate ${selected ? "" : "text-gray-400"}`}>{selected ? (selected.short ?? selected.label) : placeholder}</span>
         </span>
         <ChevronDown
           size={size === "sm" ? 13 : 15}
@@ -208,6 +210,9 @@ export function Select({
         <div
           ref={listRef}
           role="listbox"
+          // Marks a floating layer that belongs to whatever opened it — popovers that close on an
+          // outside click (column filters) treat clicks in here as inside. See ColumnFilter.
+          data-floating-panel=""
           style={{ top: pos.top, left: pos.left, minWidth: pos.width }}
           className={`animate-fade-in-scale fixed z-[60] max-h-72 overflow-auto rounded-lg border border-gray-200 bg-white py-1 shadow-lg ${
             pos.openUp ? "origin-bottom-left" : "origin-top-left"

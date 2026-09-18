@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import {
   Banknote,
   Building2,
@@ -13,6 +14,7 @@ import {
   Phone,
   Receipt,
   ShieldCheck,
+  Trophy,
   Wallet,
 } from "lucide-react";
 import { Spinner } from "@/components/Spinner";
@@ -23,6 +25,11 @@ import { decodeComponents } from "@/lib/salaryComponents";
 import * as api from "@/lib/api";
 import type { PayrollProfileResponse } from "@/lib/api";
 import { PARTY_TYPE_STYLE, type LibraryParty } from "@/lib/libraryTypes";
+import { useTenderStore } from "@/lib/tenderStore";
+import { bucketOf } from "@/lib/tenderMetrics";
+import { BUCKET_META, type Tender } from "@/lib/tenderTypes";
+import { tmoney, tval } from "@/lib/tenderHelpers";
+import { useCan } from "@/lib/permissions";
 
 /** One uploaded identity document, exactly as the payroll wizard stores it. */
 type DocRow = { type: string; fileName: string; dataUrl: string };
@@ -89,6 +96,16 @@ export function PartyProfile({
       .finally(() => { if (!cancelled) setProfileLoading(false); });
     return () => { cancelled = true; };
   }, [user]);
+
+  const can = useCan();
+  const allTenders = useTenderStore((st) => st.tenders);
+  // A client is usually the tendering department; a vendor can show up as the L1 bidder who beat us.
+  const tenderHistory = useMemo(() => {
+    if (!vp || !can("TENDER_TENDERS")) return [];
+    const key = squash(party.name);
+    if (key.length < 3) return [];
+    return allTenders.filter((t) => squash(t.department) === key || squash(t.l1Bidder) === key);
+  }, [vp, can, party.name, allTenders]);
 
   const documents = parseDocuments(profile?.documents);
   const components = decodeComponents(profile?.components);
@@ -240,6 +257,12 @@ export function PartyProfile({
             )}
           </Section>
 
+          {tenderHistory.length > 0 && (
+            <Section title={`Tender history · ${tenderHistory.length}`} icon={Trophy}>
+              <TenderHistory tenders={tenderHistory} partyName={party.name} />
+            </Section>
+          )}
+
           <Section title="Money" icon={Banknote}>
             <FieldGrid>
               <Field
@@ -253,6 +276,44 @@ export function PartyProfile({
         </>
       )}
     </div>
+  );
+}
+
+/** Lower-case, punctuation-free form used to match a party name against tender text. */
+function squash(v: string | null | undefined): string {
+  return (v ?? "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
+function TenderHistory({ tenders, partyName }: { tenders: Tender[]; partyName: string }) {
+  const key = squash(partyName);
+  return (
+    <ul className="divide-y divide-gray-100">
+      {tenders.slice(0, 12).map((t) => {
+        const b = bucketOf(t);
+        const asCompetitor = squash(t.l1Bidder) === key && squash(t.department) !== key;
+        return (
+          <li key={t.id} className="flex items-center gap-3 py-2">
+            <div className="min-w-0 flex-1">
+              <Link
+                href={`/tender/${t.stage === "SORTING" ? "sorting" : t.stage === "RESEARCH" ? "research" : "applied"}?open=${encodeURIComponent(t.id)}`}
+                className="block truncate text-sm font-medium text-gray-800 hover:text-brand-accent"
+                title={t.nameOfWork ?? ""}
+              >
+                {tval(t.nameOfWork)}
+              </Link>
+              <div className="text-xs text-gray-400">
+                {tval(t.tenderId)}
+                {asCompetitor ? " · beat us as L1" : ""}
+              </div>
+            </div>
+            <span className="text-sm whitespace-nowrap text-gray-600">{tmoney(t.contractValue ?? t.estimatedCost)}</span>
+            <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium whitespace-nowrap ring-1 ring-inset ${BUCKET_META[b].chip}`}>
+              {BUCKET_META[b].label}
+            </span>
+          </li>
+        );
+      })}
+    </ul>
   );
 }
 

@@ -6,6 +6,8 @@ import { Select } from "@/components/Select";
 import { MaterialCategoryLibrary } from "@/components/library/MaterialCategoryLibrary";
 import { MaterialLibrary } from "@/components/library/MaterialLibrary";
 import { PartyLibrary } from "@/components/library/PartyLibrary";
+import { TenderLibrary } from "@/components/library/TenderLibrary";
+import { useCan } from "@/lib/permissions";
 
 /**
  * Library — the hub for shared master data, with the sub-library picked from the dropdown at the top.
@@ -20,24 +22,30 @@ import { PartyLibrary } from "@/components/library/PartyLibrary";
  * parties from Members and Vyapar, materials from the Vyapar item catalogue, and the material
  * categories the Vyapar item form itself offers.
  */
-type LibKey = "party" | "material" | "material-category";
+type LibKey = "party" | "tender" | "material" | "material-category";
 
-const OPTIONS: { value: LibKey; label: string }[] = [
+const OPTIONS: { value: LibKey; label: string; need?: string }[] = [
   { value: "party", label: "Party Library" },
+  // Past tenders read the Tender module's own records, so they follow its access rule.
+  { value: "tender", label: "Tender Library", need: "TENDER_TENDERS" },
   { value: "material", label: "Material Library" },
   { value: "material-category", label: "Material Category Library" },
 ];
 
 export default function LibraryPage() {
   const [lib, setLib] = useState<LibKey>("party");
+  const can = useCan();
+  const options = OPTIONS.filter((o) => can(o.need)).map(({ value, label }) => ({ value, label }));
 
   return (
     <AppShell title="Library">
       <div className="space-y-4">
-        <Select value={lib} onChange={(v) => setLib(v as LibKey)} className="w-full sm:w-72" options={OPTIONS} />
+        <Select value={lib} onChange={(v) => setLib(v as LibKey)} className="w-full sm:w-72" options={options} />
 
         {lib === "party" ? (
           <PartyLibrary />
+        ) : lib === "tender" ? (
+          <TenderLibrary />
         ) : lib === "material" ? (
           <MaterialLibrary />
         ) : (

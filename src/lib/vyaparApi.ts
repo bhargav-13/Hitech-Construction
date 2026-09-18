@@ -217,6 +217,8 @@ export interface Invoice {
   /** The construction project this document belongs to (null = unassigned / All Projects). */
   projectId: number | null;
   lines: InvoiceLine[];
+  /** Prices were entered "With Tax" — the form reopens in that mode. Absent on older backends. */
+  priceIncludesTax?: boolean;
 }
 
 export interface Payment {
@@ -315,6 +317,7 @@ export const getItemUnits = () => apiRequest<ItemUnit[]>(`${BASE}/item-units`);
 // ---- Invoices ----
 export interface InvoiceInput {
   docType: DocType;
+  priceIncludesTax?: boolean;
   invoiceNo?: string;
   partyId: number | null;
   invoiceDate?: string;

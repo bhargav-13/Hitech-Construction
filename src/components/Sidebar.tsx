@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
@@ -27,12 +28,14 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   LogOut,
+  BadgeCheck,
 } from "lucide-react";
 import { NAV_ITEMS, NAV_BREAK_AFTER, NAV_MODULE } from "@/lib/nav";
 import { useAppStore } from "@/lib/store";
 import { useAuthStore } from "@/lib/authStore";
 import { useUiStore } from "@/lib/uiStore";
 import { useTaskNotifications } from "@/lib/taskNotifications";
+import { useApprovalInboxCount } from "@/lib/approvals";
 import { projectAvatarColor, projectInitials } from "@/lib/projectHelpers";
 import { CompanySwitcher } from "@/components/CompanySwitcher";
 import { useCompanies, companyAccent } from "@/lib/companyScope";
@@ -56,6 +59,7 @@ const ICONS: Record<string, React.ComponentType<{ size?: number; className?: str
   Taskopad: ListChecks,
   Audit: ScrollText,
   Vyapar: Receipt,
+  Approvals: BadgeCheck,
 };
 
 export function Sidebar() {
@@ -86,6 +90,15 @@ export function Sidebar() {
     : NAV_ITEMS;
   // Unread task-notification count, surfaced as a live badge on the Taskopad nav item.
   const { unread: taskUnread } = useTaskNotifications();
+  // Requests waiting on this user, across every approval chain.
+  const approvalCount = useApprovalInboxCount((s) => s.count);
+  const refreshApprovals = useApprovalInboxCount((s) => s.refresh);
+  useEffect(() => {
+    if (!authUser) return;
+    void refreshApprovals();
+    const t = window.setInterval(() => void refreshApprovals(), 60_000);
+    return () => window.clearInterval(t);
+  }, [authUser, refreshApprovals]);
   // The firm currently being worked in. Its accent paints the strip down the sidebar's outer edge:
   // with two companies behind one login, "which books am I in?" has to be answerable at a glance.
   const { active: activeCompany } = useCompanies();
@@ -130,7 +143,7 @@ export function Sidebar() {
             const active =
               item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);
             // Live unread count on Taskopad (task reminders / assignments / activity).
-            const count = item.href === "/taskopad" ? taskUnread : 0;
+            const count = item.href === "/taskopad" ? taskUnread : item.href === "/approvals" ? approvalCount : 0;
             const link = (
               <li key={item.href}>
                 <Link

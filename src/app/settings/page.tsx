@@ -26,7 +26,7 @@ import {
   X,
 } from "lucide-react";
 import { RowMenu, RowMenuDivider, RowMenuItem } from "@/components/RowMenu";
-import { useDepartments } from "@/lib/useDepartments";
+import { DepartmentSelect } from "@/components/DepartmentSelect";
 
 // Unimplemented sections used to be listed here as "Coming soon" placeholders — that's been removed.
 const SECTIONS = ["Roles & Access", "Multi Level Approval", "Companies"] as const;
@@ -795,7 +795,6 @@ function UserDrawer({
   const [roleId, setRoleId] = useState<number | "">(
     existing?.role.id ?? defaultRoleId ?? roles[0]?.id ?? ""
   );
-  const { departments } = useDepartments();
   const [departmentId, setDepartmentId] = useState<number | "">(existing?.departmentId ?? "");
   const [staffType, setStaffType] = useState<"OFFICE" | "SITE" | "">(existing?.staffType ?? "");
   const [onPayroll, setOnPayroll] = useState(existing?.onPayroll ?? false);
@@ -948,15 +947,7 @@ function UserDrawer({
 
         {/* Department is the org team (Civil, Electrical…) — separate from Role, which is permissions. */}
         <DrawerField label="Department">
-          <Select
-            value={departmentId === "" ? "" : String(departmentId)}
-            onChange={(v) => setDepartmentId(v === "" ? "" : Number(v))}
-            placeholder="No department"
-            options={[
-              { value: "", label: "No department" },
-              ...departments.map((d) => ({ value: String(d.id), label: d.name })),
-            ]}
-          />
+          <DepartmentSelect value={departmentId} onChange={setDepartmentId} />
         </DrawerField>
 
         <DrawerField label="Role" required>

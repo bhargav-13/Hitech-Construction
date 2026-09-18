@@ -9,6 +9,9 @@ import { Spinner } from "@/components/Spinner";
 import { DatePicker } from "@/components/DatePicker";
 import { InvoiceHistoryDialog, TxnRowActions } from "@/components/vyapar/TxnRowActions";
 import { SortTh } from "@/components/vyapar/SortTh";
+import { TransactionDetailDrawer } from "@/components/vyapar/TransactionDetailDrawer";
+import { ApprovalBadge, ApprovalPanel } from "@/components/approval/ApprovalBadge";
+import { DOC_APPROVAL_TYPE, useApprovalStates } from "@/lib/approvals";
 import { useTableSort } from "@/lib/useTableSort";
 import { TAX_RATES } from "@/lib/useItemSettings";
 import { inr } from "@/lib/format";
@@ -42,6 +45,11 @@ export function ExpenseWorkspace() {
   const [selectedCat, setSelectedCat] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<Invoice | null>(null);
+  // Clicking a row shows the expense as a receipt first; Edit from there opens the form.
+  const [viewing, setViewing] = useState<Invoice | null>(null);
+  const { projects } = useProjects();
+  const expenseIds = useMemo(() => expenses.map((e) => e.id), [expenses]);
+  const { states: approvals, reload: reloadApprovals } = useApprovalStates(DOC_APPROVAL_TYPE.EXPENSE, expenseIds);
   const [exporting, setExporting] = useState(false);
   const [importing, setImporting] = useState(false);
   /** The expense whose edit history is on screen — the same dialog the document lists use. */
@@ -360,14 +368,19 @@ export function ExpenseWorkspace() {
                     <tr
                       key={e.id}
                       ref={highlighted ? highlightRef : undefined}
-                      onClick={() => setEditing(e)}
+                      onClick={() => setViewing(e)}
                       className={`cursor-pointer border-b border-gray-50 transition-colors duration-150 last:border-b-0 even:bg-gray-50/40 hover:bg-cyan-50/40 ${
                         highlighted ? "bg-amber-50 ring-2 ring-inset ring-amber-300" : ""
                       }`}
                     >
 
                       <td className="px-4 py-2.5 whitespace-nowrap text-gray-600">{formatDate(e.invoiceDate)}</td>
-                      <td className="px-4 py-2.5 text-gray-600">{e.invoiceNo || "—"}</td>
+                      <td className="px-4 py-2.5 text-gray-600">
+                        <span className="flex items-center gap-2">
+                          {e.invoiceNo || "—"}
+                          <ApprovalBadge state={approvals[e.id]} />
+                        </span>
+                      </td>
                       <td className="px-4 py-2.5 text-gray-700">{e.partyName ?? "—"}</td>
                       <td className="px-4 py-2.5 text-gray-600">{e.paymentType}</td>
                       <td className="px-4 py-2.5 text-right font-medium text-gray-800">{inr(e.total)}</td>
@@ -387,7 +400,7 @@ export function ExpenseWorkspace() {
                           handlers={{
                             onEdit: () => setEditing(e),
                             onDelete: () => remove(e),
-                            onPreview: () => setEditing(e),
+                            onPreview: () => setViewing(e),
                             onPrint: () => printOne(e),
                             onShare: () => downloadInvoicePdf(e, parties.find((p) => p.id === e.partyId), items),
                             onHistory: () => setHistory(e),
@@ -410,6 +423,79 @@ export function ExpenseWorkspace() {
             </div>
           </div>
         </div>
+      )}
+
+      {viewing && (
+        <TransactionDetailDrawer
+          title="Expense"
+          subtitle={viewing.createdByName ? `entry by ${viewing.createdByName}` : formatDate(viewing.invoiceDate)}
+          tone="out"
+          number={viewing.invoiceNo || null}
+          amountLabel="Amount paid"
+          amount={viewing.total}
+          status={
+            viewing.cancelled
+              ? { label: "Cancelled", tone: "muted" }
+              : viewing.status === "Paid"
+                ? { label: "Paid", tone: "good" }
+                : viewing.status === "Partial"
+                  ? { label: `Partly paid · ${inr(viewing.balance)} due`, tone: "warn" }
+                  : { label: `Unpaid · ${inr(viewing.balance)} due`, tone: "bad" }
+          }
+          from={{ caption: "Paid by", name: viewing.paymentType || "—", kind: "account" }}
+          to={{ caption: "Paid to", name: viewing.partyName || catOf(viewing), kind: viewing.partyName ? "party" : "account" }}
+          rows={[
+            { label: "Date", value: formatDate(viewing.invoiceDate) },
+            { label: "Project", value: projects.find((x) => x.id === String(viewing.projectId))?.name ?? "—" },
+            { label: "Recorded by", value: viewing.createdByName ?? "—" },
+            {
+              label: "Category",
+              value: (
+                <span className="rounded-md bg-violet-50 px-2 py-0.5 text-xs font-medium text-violet-700">{catOf(viewing)}</span>
+              ),
+            },
+            { label: "Payment type", value: viewing.paymentType || "—" },
+            { label: "Reference no.", value: viewing.paymentReference || "—" },
+            ...(viewing.taxAmount > 0 ? [{ label: "Tax", value: inr(viewing.taxAmount) }] : []),
+            { label: "Notes", value: viewing.description || "—" },
+          ]}
+          linked={viewing.lines.map((l, i) => ({
+            key: `${i}`,
+            label: l.itemName || catOf(viewing),
+            sub: [l.description, `${l.quantity} × ${inr(l.rate)}`].filter(Boolean).join(" · "),
+            amount: l.amount,
+          }))}
+          linkedTitle="Items"
+          attachment={
+            viewing.documentDataUrl
+              ? { name: viewing.documentName || "Bill", href: viewing.documentDataUrl }
+              : viewing.imageDataUrl
+                ? { name: "Bill image", href: viewing.imageDataUrl }
+                : null
+          }
+          approval={
+            approvals[viewing.id] && approvals[viewing.id].status !== "CANCELLED" ? (
+              <ApprovalPanel
+                entityType={DOC_APPROVAL_TYPE.EXPENSE}
+                entityId={viewing.id}
+                state={approvals[viewing.id]}
+                onChanged={() => {
+                  void reloadApprovals();
+                  load();
+                }}
+                rejectHint="Rejecting cancels this expense — it stops counting in balances and can be reopened once fixed."
+              />
+            ) : undefined
+          }
+          onClose={() => setViewing(null)}
+          onEdit={() => { setEditing(viewing); setViewing(null); }}
+          onDownload={() => downloadInvoicePdf(viewing, parties.find((p) => p.id === viewing.partyId), items)}
+          onDelete={async () => {
+            const target = viewing;
+            setViewing(null);
+            await remove(target);
+          }}
+        />
       )}
 
       {(creating || editing) && (

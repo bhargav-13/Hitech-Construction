@@ -7,7 +7,7 @@ import { Select } from "@/components/Select";
 import * as api from "@/lib/api";
 import * as vyapar from "@/lib/vyaparApi";
 import { GST_TYPES } from "@/lib/vyaparApi";
-import { useDepartments } from "@/lib/useDepartments";
+import { DepartmentSelect } from "@/components/DepartmentSelect";
 import {
   PARTY_TYPE_GROUPS,
   fieldsForType,
@@ -39,7 +39,6 @@ export function PartyDrawer({
   onClose: () => void;
   onSaved: () => void;
 }) {
-  const { departments } = useDepartments();
   // Opening an existing party shows everything we hold about them first; the form is a tab away.
   // Creating one goes straight to the form — there is nothing to profile yet.
   const [tab, setTab] = useState<"profile" | "edit">(existing ? "profile" : "edit");
@@ -249,15 +248,7 @@ export function PartyDrawer({
 
         {has("department") && (
           <DrawerField label="Department">
-            <Select
-              value={departmentId === "" ? "" : String(departmentId)}
-              onChange={(v) => setDepartmentId(v === "" ? "" : Number(v))}
-              placeholder="No department"
-              options={[
-                { value: "", label: "No department" },
-                ...departments.map((d) => ({ value: String(d.id), label: d.name })),
-              ]}
-            />
+            <DepartmentSelect value={departmentId} onChange={setDepartmentId} />
           </DrawerField>
         )}
 

@@ -13,6 +13,8 @@ export const NAV_ITEMS: NavItem[] = [
   { label: "Payroll", href: "/payroll" },
   { label: "Warehouse", href: "/warehouse" },
   { label: "Audit", href: "/audit" },
+  // Everyone has an inbox — it only ever shows requests waiting on (or raised by) you.
+  { label: "Approvals", href: "/approvals" },
   { label: "Library", href: "/library" },
   { label: "Setting", href: "/settings" },
   // --- Not implemented yet ---

@@ -930,6 +930,45 @@ export function saveApprovalChain(
   return request<ApprovalChain>(`/api/v1/approval-chains/${entityType}`, { method: "PUT", body });
 }
 
+// ---- Running approvals across every feature (/api/v1/approvals) ----
+
+/** One row of the approvals inbox. `link` is the route that opens the record. */
+export interface ApprovalInboxItem {
+  entityType: string;
+  entityLabel: string;
+  entityId: number;
+  title: string;
+  subtitle: string | null;
+  amount: number | null;
+  link: string | null;
+  requestedByName: string | null;
+  requestedAt: string | null;
+  state: ApprovalState;
+}
+
+export function getApprovalInbox(scope: "mine" | "raised" | "all" = "mine") {
+  return request<ApprovalInboxItem[]>(`/api/v1/approvals/inbox?scope=${scope}`);
+}
+
+/** Ladder state for a list's rows, keyed by record id. Records with no request are absent. */
+export function getApprovalStates(entityType: string, ids: number[]) {
+  if (ids.length === 0) return Promise.resolve({} as Record<number, ApprovalState>);
+  return request<Record<number, ApprovalState>>(
+    `/api/v1/approvals/states?type=${entityType}&ids=${ids.join(",")}`
+  );
+}
+
+export function decideApproval(entityType: string, entityId: number, action: "APPROVE" | "REJECT", note?: string) {
+  return request<ApprovalState | null>(`/api/v1/approvals/${entityType}/${entityId}/decide`, {
+    method: "POST",
+    body: { action, note: note ?? null },
+  });
+}
+
+export function withdrawApproval(entityType: string, entityId: number) {
+  return request<ApprovalState | null>(`/api/v1/approvals/${entityType}/${entityId}/cancel`, { method: "POST" });
+}
+
 export interface LeaveBalanceApi {
   leaveTypeName: string;
   annualCount: number;

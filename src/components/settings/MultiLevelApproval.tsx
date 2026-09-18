@@ -153,6 +153,13 @@ export function MultiLevelApproval() {
             </div>
 
             <div className="space-y-4 p-4">
+              {APPLIES_WHEN[current.entityType] && (
+                <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600">
+                  <span className="font-semibold">When it applies: </span>
+                  {APPLIES_WHEN[current.entityType]} Requests show under <span className="font-medium">Approvals</span> in the
+                  sidebar.
+                </p>
+              )}
               <div>
                 <div className="mb-1.5 text-xs font-medium text-slate-500">How approvers are chosen</div>
                 <div className="flex flex-wrap gap-2">
@@ -335,3 +342,18 @@ function LevelRow({
     </div>
   );
 }
+
+/** What raises a request for each chain, and what approving / rejecting does. Mirrors the backend hooks. */
+const APPLIES_WHEN: Record<string, string> = {
+  LEAVE_APPLICATION: "A member applies for leave. Attendance is marked PL once the last level approves.",
+  TASK_COMPLETION: "A task is marked complete.",
+  PAYROLL_RUN: "HR locks a month's payroll run. It can only be marked paid after approval; a rejection sends it back to draft.",
+  PURCHASE_ORDER: "A purchase order is saved in Vyapar (including POs raised from an RFQ award). Rejecting cancels the PO.",
+  SALES_INVOICE: "A sale invoice is saved. Rejecting cancels the invoice.",
+  SALE_RETURN: "A credit note / sale return is saved. Rejecting cancels it.",
+  PAYMENT_ENTRY: "A Payment In or Payment Out is recorded. Rejecting marks it rejected (money already moved isn't reversed).",
+  SITE_EXPENSE: "An expense is saved. Rejecting cancels the expense.",
+  MATERIAL_PURCHASE: "A purchase bill is saved. Rejecting cancels the bill.",
+  PURCHASE_RETURN: "A debit note / purchase return is saved. Rejecting cancels it.",
+  TENDER_SUBMISSION: "A tender is moved to the next stage. The tender stays where it is until approved.",
+};

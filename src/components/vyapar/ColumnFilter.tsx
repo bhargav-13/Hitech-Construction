@@ -267,7 +267,12 @@ function FilterPopover({
   // Close on outside click or Escape.
   useEffect(() => {
     const onDown = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node) && !anchorRef.current?.contains(e.target as Node)) onClose();
+      const target = e.target as Node;
+      // The operator / value pickers render their option list in a portal of their own. Picking
+      // "Equals" or a payment type is a click *outside* this popover's DOM, and used to close the
+      // filter before the choice registered — which is why the column filters seemed dead.
+      if (target instanceof Element && target.closest("[data-floating-panel]")) return;
+      if (ref.current && !ref.current.contains(target) && !anchorRef.current?.contains(target)) onClose();
     };
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();

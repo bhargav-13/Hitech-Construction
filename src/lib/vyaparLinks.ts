@@ -57,3 +57,24 @@ export function txnHref(type: string, id: number): string | null {
   const slug = LABEL_TO_SLUG[type];
   return slug ? `/vyapar/${slug}?open=${id}` : null;
 }
+
+/** Backend `docType` enum → the /vyapar route segment that lists that document type. */
+const DOCTYPE_TO_SLUG: Record<string, string> = {
+  SALE: "sale",
+  SALE_RETURN: "sale-return",
+  SALE_ORDER: "sale-order",
+  ESTIMATE: "estimate",
+  PROFORMA: "proforma",
+  DELIVERY_CHALLAN: "delivery-challan",
+  PURCHASE: "purchase",
+  PURCHASE_RETURN: "purchase-return",
+  PURCHASE_ORDER: "purchase-order",
+  EXPENSE: "expenses",
+  PARTY_TRANSFER: "party-transfer",
+};
+
+/** The route that opens a document given its `docType` — for payment links, which carry the enum. */
+export function docTypeHref(docType: string | null | undefined, id: number): string | null {
+  const slug = docType ? DOCTYPE_TO_SLUG[docType] : undefined;
+  return slug ? `/vyapar/${slug}?open=${id}` : null;
+}
