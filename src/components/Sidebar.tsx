@@ -19,12 +19,10 @@ import {
   BookOpen,
   Settings,
   Layers,
-  CheckSquare,
   ListChecks,
   ScrollText,
   Receipt,
   MapPin,
-  MessageCircle,
   PanelLeftClose,
   PanelLeftOpen,
   LogOut,
@@ -187,17 +185,13 @@ export function Sidebar() {
         </ul>
       </nav>
 
-      {/* Self-service quick actions — Punch especially must reach every signed-in staff member,
-          not just admins, since staff are the ones who punch in/out. */}
+      {/* Punch is the one self-service action that must reach every signed-in staff member, not
+          just admins — they are the ones who punch in and out. "To Do" and "Chat" used to sit
+          beside it and were dropped: To Do duplicated Taskopad, and Chat was never wired to
+          anything. */}
       {(authUser || currentUser) && (
-        <div
-          className={`grid gap-2 border-t border-sidebar-border px-3 py-3 ${
-            collapsed ? "grid-cols-1" : "grid-cols-2"
-          }`}
-        >
-          <QuickAction icon={CheckSquare} label="To Do" href="/todo" collapsed={collapsed} />
+        <div className="grid grid-cols-1 gap-2 border-t border-sidebar-border px-3 py-3">
           <QuickAction icon={MapPin} label="Punch" href="/punch" collapsed={collapsed} />
-          <QuickAction icon={MessageCircle} label="Chat" collapsed={collapsed} />
         </div>
       )}
 
