@@ -25,23 +25,25 @@ import { useVyaparSettings } from "@/lib/useVyaparSettings";
 import { useItemMasters, type ManagedUnit } from "@/lib/useItemMasters";
 import type { PoDraft } from "@/lib/poHandoff";
 import { useVyaparProjectId } from "@/lib/projectScope";
+import {
+  ModuleAttachments,
+  PendingAttachmentList,
+  usePendingAttachments,
+} from "@/components/files/ModuleAttachments";
 import { useProjects } from "@/lib/useProjects";
 import * as vyapar from "@/lib/vyaparApi";
 import { STATES_OF_SUPPLY } from "@/lib/vyaparApi";
 import type { DocType, Invoice, Item, Party } from "@/lib/vyaparApi";
 import {
   ChevronDown,
-  Download,
   FileText,
   Eye,
   GripVertical,
-  ImageIcon,
   Link2,
   Plus,
   Printer,
   ScanLine,
   Share2,
-  Trash2,
   X,
 } from "lucide-react";
 
@@ -679,6 +681,21 @@ export function InvoiceBuilder({
   const selectedParty = parties.find((p) => String(p.id) === partyId) ?? null;
 
   /**
+   * Attachments now live in the shared file registry rather than in this document's own
+   * `imageDataUrl` / `documentDataUrl` columns, so a bill's scan turns up in the project's Files
+   * tab without being stored a second time.
+   *
+   * A new document has no id to attach to yet, so the chosen files wait here and are uploaded the
+   * moment it saves. The old columns are still sent on save — an existing bill must not lose the
+   * attachment it already had — but nothing new is ever written into them.
+   */
+  const pendingFiles = usePendingAttachments("VYAPAR", {
+    type: docType,
+    label: `${docType.replace(/_/g, " ")} ${invoicePrefix}${invoiceNo}`.trim(),
+    party: selectedParty?.name,
+  });
+
+  /**
    * The unit dropdown's options: NONE, the managed master, and anything already sitting on a line.
    * That last part matters on an old document — a unit deleted from the master since it was billed
    * would otherwise vanish from its own invoice the moment someone opened it to look.
@@ -879,6 +896,19 @@ export function InvoiceBuilder({
           links: [{ invoiceId: saved.id, amount: p.amount }],
         });
       }
+      // The document now has an id, so anything picked before it was saved can be attached. This
+      // runs after the payments above deliberately: a failed upload must not cost the user the
+      // document and its receipts, so it is reported without unwinding the save.
+      try {
+        await pendingFiles.flush(saved.id, selectedProjectId ? Number(selectedProjectId) : null);
+      } catch (err) {
+        setError(
+          err instanceof Error
+            ? `Saved, but a file didn't attach: ${err.message}`
+            : "Saved, but a file didn't attach."
+        );
+      }
+
       if (again) {
         // Vyapar's "Save & New": keep the form open with a clean slate and the party retained, so
         // a run of documents for the same customer can be entered without reopening the form.
@@ -891,6 +921,7 @@ export function InvoiceBuilder({
         setDocumentDataUrl(null);
         setScanOnlyPreview(null);
         setScanNote(null);
+        pendingFiles.clear();
         setPreviewOpen(false);
         lastScanLines.current = [];
         setReceived(0);
@@ -1511,73 +1542,33 @@ export function InvoiceBuilder({
                 <AttachButton icon={FileText} label="Add Description" onClick={() => setShowDescription(true)} />
               )}
 
-              {imageDataUrl ? (
-                <div className="flex items-center gap-2 rounded-lg border border-gray-200 p-2">
-                  {/* Data-URL preview — a plain img is correct (next/image can't optimize these). */}
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={imageDataUrl} alt="Attached" className="h-12 w-12 rounded object-cover" />
-                  <span className="flex-1 truncate text-xs text-gray-500">Image attached</span>
-                  <button
-                    type="button"
-                    onClick={() => setImageDataUrl(null)}
-                    className="rounded p-1 text-gray-400 transition-colors duration-150 hover:bg-rose-50 hover:text-rose-600"
-                    aria-label="Remove image"
-                  >
-                    <Trash2 size={14} />
-                  </button>
-                </div>
-              ) : (
-                <AttachButton icon={ImageIcon} label="Add Image" accept="image/*" onFile={async (file) => {
-                  try {
-                    setImageDataUrl(await readImageAsDataUrl(file));
-                  } catch (err) {
-                    setError(err instanceof Error ? err.message : "Couldn't attach that image.");
-                  }
-                }} />
-              )}
+              {/*
+                Attachments go to the shared file registry, not into this document's own columns.
+                One row, one stored object — and the same file shows up in the project's Files tab
+                under "Bills & Vouchers" with no copy and nothing to keep in step.
 
-              {documentDataUrl ? (
-                <div className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50/60 p-2">
-                  <FileText size={16} className="shrink-0 text-emerald-600" />
-                  <span className="flex-1 truncate text-xs text-emerald-700">{documentName ?? "Document"} added</span>
-                  <a
-                    href={documentDataUrl}
-                    download={documentName ?? "document"}
-                    className="rounded p-1 text-emerald-600 transition-colors duration-150 hover:bg-emerald-100"
-                    aria-label="Download attached document"
-                  >
-                    <Download size={14} />
-                  </a>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setDocumentDataUrl(null);
-                      setDocumentName(null);
-                    }}
-                    className="rounded p-1 text-gray-400 transition-colors duration-150 hover:bg-rose-50 hover:text-rose-600"
-                    aria-label="Remove document"
-                  >
-                    <Trash2 size={14} />
-                  </button>
-                </div>
-              ) : (
-                <AttachButton
-                  icon={FileText}
-                  label="Add Document"
-                  accept=".pdf,.doc,.docx,.xls,.xlsx,image/*"
-                  onFile={async (file) => {
-                    if (file.size > MAX_DOC_BYTES) {
-                      setError(`"${file.name}" is larger than 4 MB. Attach a smaller file.`);
-                      return;
-                    }
-                    try {
-                      setDocumentDataUrl(await readFileAsDataUrl(file));
-                      setDocumentName(file.name);
-                    } catch (err) {
-                      setError(err instanceof Error ? err.message : "Couldn't attach that file.");
-                    }
-                  }}
+                The old `imageDataUrl` / `documentDataUrl` are shown read-only for documents saved
+                before the change, and are still sent on save so editing one doesn't wipe it.
+                Nothing new is ever written into them.
+              */}
+              {existing?.id ? (
+                <ModuleAttachments
+                  module="VYAPAR"
+                  type={docType}
+                  sourceId={existing.id}
+                  projectId={selectedProjectId ? Number(selectedProjectId) : null}
+                  label={`${docType.replace(/_/g, " ")} ${invoicePrefix}${invoiceNo}`.trim()}
+                  party={selectedParty?.name}
+                  legacy={[
+                    ...(imageDataUrl ? [{ name: "Bill image", dataUrl: imageDataUrl }] : []),
+                    ...(documentDataUrl
+                      ? [{ name: documentName ?? "Document", dataUrl: documentDataUrl }]
+                      : []),
+                  ]}
+                  compact
                 />
+              ) : (
+                <PendingAttachmentList pending={pendingFiles} />
               )}
             </div>
           </div>

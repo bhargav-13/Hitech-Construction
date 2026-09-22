@@ -30,6 +30,7 @@ import { ProjectTargets } from "@/components/project/ProjectTargets";
 import { useProjectTargets, useTargetTotals } from "@/lib/useProjectTargets";
 import { ProjectTender } from "@/components/project/ProjectTender";
 import { ProjectActivity } from "@/components/project/ProjectActivity";
+import { ProjectFiles } from "@/components/project/files/ProjectFiles";
 import * as api from "@/lib/api";
 import type { ProjectResponse, ProjectSummary } from "@/lib/api";
 import { projectInitials } from "@/lib/projectHelpers";
@@ -48,9 +49,9 @@ import { inr } from "@/lib/format";
  * doesn't store transactions, staff or materials, it's a lens onto the modules that do. Tabs fetch
  * on activation rather than on mount, so opening a project is one request, not fourteen.
  *
- * <p>Tabs that had nothing behind them ("Subcon", "Equipment", "Files", "MOM", "Inspection") have
- * been removed rather than left as "coming soon" panels: seven placeholders were the main reason
- * the module read as unfinished. They come back when they have data.
+ * <p>Tabs that had nothing behind them ("Subcon", "Equipment", "MOM", "Inspection") have been
+ * removed rather than left as "coming soon" panels: seven placeholders were the main reason the
+ * module read as unfinished. They come back when they have data — as "Files" now has.
  */
 const TABS = [
   "Dashboard",
@@ -63,6 +64,7 @@ const TABS = [
   "Staff",
   "Attendance",
   "Members",
+  "Files",
   "Tender",
   "Activity",
 ] as const;
@@ -78,6 +80,7 @@ const TAB_NEEDS: Partial<Record<Tab, Need>> = {
   Material: "VYAPAR:VIEW",
   Attendance: "PAYROLL_ATTENDANCE",
   Members: "PROJECT_MEMBERS",
+  Files: "PROJECT_FILES:VIEW",
   Tender: "TENDER:VIEW",
 };
 
@@ -222,6 +225,7 @@ export default function ProjectDetailPage() {
       {tab === "Staff" && <ProjectStaff projectId={projectId} />}
       {tab === "Attendance" && <ProjectAttendance projectId={params.id} />}
       {tab === "Members" && <ProjectMembers projectId={params.id} />}
+      {tab === "Files" && <ProjectFiles projectId={projectId} />}
       {tab === "Tender" && <ProjectTender projectId={projectId} />}
       {tab === "Activity" && <ProjectActivity projectId={projectId} />}
 

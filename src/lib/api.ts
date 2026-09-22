@@ -1,6 +1,6 @@
 // Thin client for the real Spring Boot backend (hitech-backend, user-management-service).
 // Base URL points at the local backend by default — override with NEXT_PUBLIC_API_BASE_URL.
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8080";
+export const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8080";
 
 const ACCESS_TOKEN_KEY = "hitech_access_token";
 const REFRESH_TOKEN_KEY = "hitech_refresh_token";

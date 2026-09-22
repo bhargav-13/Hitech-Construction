@@ -8,6 +8,7 @@ import { ImportDialog } from "@/components/vyapar/ImportDialog";
 import { documentImportConfig } from "@/lib/tenderImportConfigs";
 import { exportRowsToCsv } from "@/lib/vyaparExport";
 import { useTenderStore } from "@/lib/tenderStore";
+import { ModuleAttachments } from "@/components/files/ModuleAttachments";
 import { raLabel } from "@/lib/tenderTypes";
 import type { DocPair, TenderDocuments, TrackerStep } from "@/lib/tenderTypes";
 import { tval } from "@/lib/tenderHelpers";
@@ -15,6 +16,9 @@ import { Check, Download, FileText, FolderOpen, Pencil, Plus, Search, SlidersHor
 
 export default function TenderDocumentsPage() {
   const documents = useTenderStore((s) => s.documents);
+  // Tender documents carry no project of their own; the handoff created when a tender is won is
+  // what links them to one.
+  const handoffs = useTenderStore((s) => s.handoffs);
   const steps = useTenderStore((s) => s.documentSteps);
   const toggleDocument = useTenderStore((s) => s.toggleDocument);
   const addRaBill = useTenderStore((s) => s.addRaBill);
@@ -134,6 +138,9 @@ export default function TenderDocumentsPage() {
                     steps={steps}
                     onToggle={toggleDocument}
                     onAddRaBill={() => addRaBill(selected.id)}
+                    projectId={
+                      handoffs.find((h) => h.tenderId === selected.tenderId)?.projectId ?? null
+                    }
                     onAddType={addType}
                     onEdit={() => {
                       setEditingRecord(selected);
@@ -210,6 +217,7 @@ function DocumentDetail({
   steps,
   onToggle,
   onAddRaBill,
+  projectId,
   onAddType,
   onEdit,
   onDelete,
@@ -218,6 +226,8 @@ function DocumentDetail({
   steps: TrackerStep[];
   onToggle: (id: string, key: string, copy: keyof DocPair, raIndex?: number) => void;
   onAddRaBill: () => void;
+  /** The project this tender became, once it was won. Null while it is still only a tender. */
+  projectId: number | null;
   onAddType: () => void;
   onEdit: () => void;
   onDelete: () => void;
@@ -306,6 +316,30 @@ function DocumentDetail({
           <FolderOpen size={12} /> {doc.viewDocuments}
         </p>
       )}
+
+      {/*
+        The grid above tracks whether a copy exists; this holds the copy itself.
+
+        `projectId` comes from the tender→project handoff, and is null until the tender is won.
+        That is deliberate rather than a gap to paper over: a file with no project cannot appear in
+        any project's Files tab, so uploading is offered only once there is a project to file it
+        under. Everything attached here then shows up there under "Tender Documents".
+      */}
+      <div className="mt-3">
+        {Number.isFinite(Number(doc.id)) && projectId != null ? (
+          <ModuleAttachments
+            module="TENDER"
+            sourceId={Number(doc.id)}
+            projectId={projectId}
+            label={`Tender: ${doc.nameOfWork ?? doc.tenderId}`}
+          />
+        ) : (
+          <p className="rounded-md border border-dashed border-gray-200 px-3 py-2 text-[11px] text-gray-400">
+            Files can be attached once this tender is won and converted to a project — that is what
+            gives them somewhere to be filed.
+          </p>
+        )}
+      </div>
     </div>
   );
 }

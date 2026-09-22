@@ -27,6 +27,7 @@ import type { SubTask, Task, TaskAttachment, TaskComment, TaskPriority, TaskStat
 import { UserAvatar, PeopleSelect, PeopleMultiSelect, ClientSelect } from "./TaskBits";
 import type { Person } from "./TaskBits";
 import { AttachmentPreview, canPreview } from "./AttachmentPreview";
+import { ModuleAttachments } from "@/components/files/ModuleAttachments";
 import { Select } from "@/components/Select";
 import { DatePicker } from "@/components/DatePicker";
 import type { RecurrenceRule } from "@/components/DatePicker";
@@ -892,12 +893,27 @@ export function TaskDrawer({
                 />
               ) : panel === "Attachment" ? (
                 <div className="space-y-3">
-                  <button
-                    onClick={() => fileRef.current?.click()}
-                    className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-gray-300 py-3 text-sm text-gray-500 transition-colors duration-150 hover:border-brand-accent hover:text-brand-accent"
-                  >
-                    <Paperclip size={14} /> Upload a file
-                  </button>
+                  {/*
+                    New attachments go to the shared file registry, so a photo added to a task on
+                    site also appears in that project's Files tab under "Task Attachments" — one
+                    row, read twice, never copied. The base64 list below it is what this task
+                    already held; it stays until the backfill moves those across.
+                  */}
+                  {existing ? (
+                    <ModuleAttachments
+                      module="TASK"
+                      sourceId={Number(existing.id)}
+                      projectId={projectId ? Number(projectId) : null}
+                      label={`Task: ${title || existing.title}`}
+                    />
+                  ) : (
+                    <button
+                      onClick={() => fileRef.current?.click()}
+                      className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-gray-300 py-3 text-sm text-gray-500 transition-colors duration-150 hover:border-brand-accent hover:text-brand-accent"
+                    >
+                      <Paperclip size={14} /> Upload a file
+                    </button>
+                  )}
                   {panelAttachments.length === 0 ? (
                     <p className="py-6 text-center text-xs text-gray-400">No attachments yet.</p>
                   ) : (

@@ -2,13 +2,14 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { ExternalLink, Paperclip } from "lucide-react";
+import { ExternalLink } from "lucide-react";
 import { Drawer } from "@/components/Drawer";
 import { Spinner } from "@/components/Spinner";
 import { getPurchaseDocument } from "@/lib/purchaseApi";
 import { inr } from "@/lib/format";
 import type { Invoice } from "@/lib/vyaparApi";
 import { DOC_STATUS_CLS } from "@/components/procurement/PurchaseDocumentList";
+import { ModuleAttachments } from "@/components/files/ModuleAttachments";
 
 /**
  * One purchase order or bill in full, opened by clicking its row.
@@ -147,16 +148,25 @@ export function PurchaseDocumentDrawer({
           </div>
         )}
 
-        {doc.documentDataUrl && (
-          <a
-            href={doc.documentDataUrl}
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 px-3 py-2 text-sm text-brand-accent transition-colors hover:bg-cyan-50/50"
-          >
-            <Paperclip size={14} /> {doc.documentName || "Attached document"}
-          </a>
-        )}
+        {/*
+          These are rows in the shared file registry, so a document attached to a purchase order
+          here also appears in its project's Files tab under "Purchase Orders & RFQs" — the same
+          row, read twice, not copied. `legacy` covers documents saved as a base64 data URL before
+          the registry existed.
+        */}
+        <ModuleAttachments
+          module="PROCUREMENT"
+          type={doc.docType}
+          sourceId={doc.id}
+          projectId={doc.projectId ?? null}
+          label={`${doc.docType.replace(/_/g, " ")} ${doc.invoiceNo}`.trim()}
+          party={doc.partyName ?? undefined}
+          legacy={
+            doc.documentDataUrl
+              ? [{ name: doc.documentName || "Attached document", dataUrl: doc.documentDataUrl }]
+              : []
+          }
+        />
       </div>
     </Drawer>
   );
