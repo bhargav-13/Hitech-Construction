@@ -1,10 +1,12 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
-import { AlertTriangle, ArrowRight, Check, Crown, FileDown, Scale, Unlock, UserCheck, Zap } from "lucide-react";
+import { Suspense, useMemo, useState } from "react";
+import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
+import { AlertTriangle, ArrowLeft, ArrowRight, Check, Crown, FileDown, Pencil, Scale, Unlock, UserCheck, Zap } from "lucide-react";
 import { ProcurementShell, ProcurementEmpty, ProcurementHeader } from "@/components/procurement/ProcurementShell";
 import { Spinner } from "@/components/Spinner";
+import { RfqAiAnalysis } from "@/components/procurement/RfqAiAnalysis";
 import { Select } from "@/components/Select";
 import { useRfqs } from "@/lib/useRfqs";
 import { useAuthStore } from "@/lib/authStore";
@@ -106,11 +108,45 @@ function toneFor(deltaPercent: number): ToneKey {
 }
 
 export default function ComparePage() {
+  // useSearchParams needs a Suspense boundary above it.
+  return (
+    <Suspense fallback={null}>
+      <Compare />
+    </Suspense>
+  );
+}
+
+/** Back to the list and into the enquiry itself — the comparison is opened from an RFQ card now. */
+function RfqLinks({ rfqId }: { rfqId?: number }) {
+  return (
+    <>
+      <Link
+        href="/procurement/rfq"
+        className="flex items-center gap-1.5 rounded-lg border border-gray-200 px-3 py-2 text-sm font-medium text-gray-600 transition-colors duration-150 hover:border-brand-accent hover:text-brand-accent"
+      >
+        <ArrowLeft size={14} /> RFQs
+      </Link>
+      {rfqId != null && (
+        <Link
+          href={`/procurement/rfq/build?id=${rfqId}`}
+          className="flex items-center gap-1.5 rounded-lg border border-gray-200 px-3 py-2 text-sm font-medium text-gray-600 transition-colors duration-150 hover:border-brand-accent hover:text-brand-accent"
+        >
+          <Pencil size={14} /> Edit RFQ
+        </Link>
+      )}
+    </>
+  );
+}
+
+function Compare() {
   const { rfqs, loading, error, award, unlock } = useRfqs();
+  const params = useSearchParams();
+  const asked = Number(params?.get("rfq")) || null;
 
   const comparable = useMemo(() => rfqs.filter((r) => r.quotes.length > 0), [rfqs]);
-  const [selectedId, setSelectedId] = useState<number | null>(null);
-  const rfq = comparable.find((r) => r.id === selectedId) ?? comparable[0];
+  const [selectedId, setSelectedId] = useState<number | null>(asked);
+  const requested = rfqs.find((r) => r.id === selectedId);
+  const rfq = comparable.find((r) => r.id === selectedId) ?? (requested ? undefined : comparable[0]);
 
   if (loading) {
     return (
@@ -124,11 +160,29 @@ export default function ComparePage() {
   }
 
   if (!rfq) {
+    // Opened from an RFQ card that has no quotes yet — say so for that enquiry rather than
+    // silently showing a different one.
     return (
       <ProcurementShell>
-        <ProcurementHeader title="Comparison" subtitle="Compare what each supplier quoted, line by line." />
+        <ProcurementHeader
+          title={requested ? `Comparison · ${requested.rfqNo}` : "Comparison"}
+          subtitle={requested ? requested.title : "Compare what each supplier quoted, line by line."}
+          right={
+            <div className="flex items-center gap-2">
+              <RfqLinks rfqId={requested?.id} />
+            </div>
+          }
+        />
         {error && <div className="mb-3 rounded-lg bg-rose-50 px-4 py-2 text-sm text-rose-600">{error}</div>}
-        <ProcurementEmpty icon={Scale} title="Nothing to compare yet" hint="Quotes received against an RFQ show here." />
+        <ProcurementEmpty
+          icon={Scale}
+          title={requested ? "No quotes on this enquiry yet" : "Nothing to compare yet"}
+          hint={
+            requested
+              ? "Enter a quote from the RFQ list, or send the enquiry to suppliers — replies show here side by side."
+              : "Quotes received against an RFQ show here."
+          }
+        />
       </ProcurementShell>
     );
   }
@@ -140,6 +194,7 @@ export default function ComparePage() {
         subtitle="What each supplier quoted, line by line. Award each line to whoever should get it."
         right={
           <div className="flex items-center gap-2">
+            <RfqLinks rfqId={rfq.id} />
             <Select
               value={String(rfq.id)}
               onChange={(v) => setSelectedId(Number(v))}
@@ -149,6 +204,7 @@ export default function ComparePage() {
           </div>
         }
       />
+      <RfqAiAnalysis key={`ai-${rfq.id}`} rfq={rfq} onAward={award} />
       <Matrix key={rfq.id} rfq={rfq} onAward={award} onUnlock={unlock} />
     </ProcurementShell>
   );

@@ -371,6 +371,40 @@ export async function fileToAttachment(
   return { imageDataUrl: canvas.toDataURL("image/jpeg", 0.82), documentName: null, documentDataUrl: null };
 }
 
+/**
+ * The text of a PDF, page by page — for documents that are read rather than scanned into a form
+ * (a supplier's quotation for the RFQ analysis). Most suppliers' PDFs come out of billing or
+ * proposal software and carry a text layer; for a scanned one this returns next to nothing, and the
+ * caller falls back to page images.
+ */
+export async function pdfText(file: Blob, maxPages = 40): Promise<{ text: string; pages: number }> {
+  const lib = await pdfjs();
+  const doc = await lib.getDocument({ data: new Uint8Array(await file.arrayBuffer()) }).promise;
+  const count = Math.min(doc.numPages, maxPages);
+  const out: string[] = [];
+  for (let n = 1; n <= count; n++) {
+    const page = (await doc.getPage(n)) as unknown as {
+      getTextContent(): Promise<{ items: { str: string; transform: number[] }[] }>;
+    };
+    const { items } = await page.getTextContent();
+    // Group runs into printed lines by their baseline, top to bottom.
+    const rows = new Map<number, { x: number; s: string }[]>();
+    for (const it of items) {
+      if (!it.str?.trim()) continue;
+      const y = Math.round(it.transform[5] / 3);
+      const row = rows.get(y) ?? [];
+      row.push({ x: it.transform[4], s: it.str });
+      rows.set(y, row);
+    }
+    const lines = [...rows.entries()]
+      .sort((a, b) => b[0] - a[0])
+      .map(([, row]) => row.sort((a, b) => a.x - b.x).map((r) => r.s).join(" ").replace(/\s+/g, " ").trim())
+      .filter(Boolean);
+    out.push(`--- page ${n} ---\n${lines.join("\n")}`);
+  }
+  return { text: out.join("\n\n"), pages: doc.numPages };
+}
+
 // ---- helpers the forms share -------------------------------------------------------------------
 
 /** Lower-case letters and digits only — "M/s. Shree Cement Ltd." and "SHREE CEMENT LTD" compare equal. */

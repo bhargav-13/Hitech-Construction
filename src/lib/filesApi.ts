@@ -178,9 +178,13 @@ export async function thumbUrl(fileId: number): Promise<string | null> {
   }
 }
 
-/** Attachments on one record — for a bill drawer, a task, a work order. */
-export function attachmentsFor(module: SourceModule, sourceId: number) {
-  return apiRequest<FileNode[]>(`${BASE}/attachments?module=${module}&sourceId=${sourceId}`);
+/**
+ * Attachments on one record — for a bill drawer, a task, a work order. Pass `type` where a module's
+ * ids aren't unique across its kinds of record (procurement QUOTE 12 vs PURCHASE_ORDER 12).
+ */
+export function attachmentsFor(module: SourceModule, sourceId: number, type?: string) {
+  const t = type ? `&type=${encodeURIComponent(type)}` : "";
+  return apiRequest<FileNode[]>(`${BASE}/attachments?module=${module}&sourceId=${sourceId}${t}`);
 }
 
 /**

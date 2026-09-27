@@ -43,6 +43,7 @@ export function ModuleAttachments({
   legacy,
   canEdit = true,
   compact = false,
+  matchType = false,
 }: {
   module: SourceModule;
   /** The record's kind within that module — PURCHASE, PAYMENT_OUT, WORK_ORDER… */
@@ -62,6 +63,8 @@ export function ModuleAttachments({
   legacy?: { name: string; dataUrl: string }[];
   canEdit?: boolean;
   compact?: boolean;
+  /** List only this `type`'s files — for a module whose record ids repeat across kinds. */
+  matchType?: boolean;
 }) {
   const [items, setItems] = useState<FileNode[]>([]);
   const [loading, setLoading] = useState(false);
@@ -73,11 +76,11 @@ export function ModuleAttachments({
   const reload = useCallback(() => {
     if (sourceId == null) return;
     setLoading(true);
-    attachmentsFor(module, sourceId)
+    attachmentsFor(module, sourceId, matchType ? type : undefined)
       .then(setItems)
       .catch(() => setItems([]))
       .finally(() => setLoading(false));
-  }, [module, sourceId]);
+  }, [module, sourceId, matchType, type]);
 
   useEffect(() => reload(), [reload]);
 

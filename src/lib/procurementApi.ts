@@ -260,3 +260,111 @@ export const getPublicRfq = (token: string) => apiRequest<PublicRfq>(`${PUBLIC}/
 
 export const submitPublicQuote = (token: string, body: PublicQuoteInput) =>
   apiRequest<PublicRfq>(`${PUBLIC}/${token}/quote`, { method: "POST", body, auth: false });
+
+// ---- AI analysis of an enquiry's quotes ----
+
+export type Rag = "GREEN" | "YELLOW" | "RED";
+
+/** One supplier's quotation document, as the browser read it: text layer, or page images when scanned. */
+export interface QuoteDocumentInput {
+  quoteId: number;
+  fileName: string;
+  text: string;
+  pages: string[];
+}
+
+export interface VendorResearch {
+  unavailable?: boolean;
+  fromCache?: boolean;
+  researchedAt?: string;
+  identityMatch?: "CONFIRMED" | "LIKELY" | "UNCERTAIN" | "NOT_FOUND";
+  legalName?: string | null;
+  businessType?: string | null;
+  established?: string | null;
+  location?: string | null;
+  website?: string | null;
+  gstStatus?: string | null;
+  scale?: string | null;
+  productsAndServices?: string[];
+  reputation?: string | null;
+  notableClients?: string[];
+  positives?: string[];
+  redFlags?: string[];
+  summary?: string | null;
+  sources?: { title: string | null; url: string | null; finding: string | null }[];
+}
+
+export interface QuoteTerms {
+  unreadable?: boolean;
+  reason?: string;
+  offerSummary?: string | null;
+  technicalSpecs?: { item: string | null; spec: string | null }[];
+  brandsAndMakes?: string[];
+  warranty?: string | null;
+  paymentTerms?: string | null;
+  deliveryTerms?: string | null;
+  validity?: string | null;
+  priceBasis?: string | null;
+  totalAsPerDocument?: number | null;
+  inclusions?: string[];
+  exclusions?: string[];
+  notableConditions?: string[];
+  internalContradictions?: string[];
+}
+
+export interface AnalysisVendor {
+  partyId: number;
+  name: string;
+  quoteId: number;
+  gstin: string | null;
+  city: string | null;
+  deliveryDays: number | null;
+  totals: { subtotal: number; discount: number; charges: number; taxPercent: number; total: number; linesQuoted: number; linesAsked: number };
+  history: { purchaseBills?: number; purchaseOrders?: number; purchaseReturns?: number; totalBilled?: number; lastDealing?: string | null };
+  document: string | null;
+  terms: QuoteTerms | null;
+  research: VendorResearch | null;
+}
+
+export interface AnalysisVerdict {
+  summary: string | null;
+  recommendation: {
+    vendor: string | null;
+    reason: string | null;
+    financialPick: string | null;
+    technicalPick: string | null;
+    confidence: "HIGH" | "MEDIUM" | "LOW";
+  } | null;
+  criteria: { name: string | null; cells: { vendor: string | null; rating: Rag; note: string | null }[] }[];
+  vendors: { vendor: string | null; overall: Rag; score: number | null; pros: string[]; cons: string[] }[];
+  differences: { topic: string | null; detail: string | null }[];
+  contradictions: { topic: string | null; detail: string | null; vendors: string[] }[];
+  lineHints: { lineId: number | null; item: string | null; vendor: string | null; reason: string | null }[];
+  questionsToAsk: string[];
+  caveats: string[];
+}
+
+export interface RfqAnalysis {
+  id: number | null;
+  rfqId: number;
+  status: "NONE" | "RUNNING" | "DONE" | "FAILED";
+  progress: string | null;
+  error: string | null;
+  result: {
+    generatedAt: string;
+    model: string;
+    researchAvailable: boolean;
+    vendors: AnalysisVendor[];
+    analysis: AnalysisVerdict;
+  } | null;
+  requestedByName: string | null;
+  createdAt: string | null;
+  finishedAt: string | null;
+  aiAvailable: boolean;
+  researchAvailable: boolean;
+}
+
+export const getRfqAnalysis = (rfqId: number) => apiRequest<RfqAnalysis>(`${BASE}/${rfqId}/analysis`);
+
+export const startRfqAnalysis = (rfqId: number, documents: QuoteDocumentInput[]) =>
+  apiRequest<RfqAnalysis>(`${BASE}/${rfqId}/analysis`, { method: "POST", body: { documents } });

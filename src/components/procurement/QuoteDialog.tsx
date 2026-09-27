@@ -6,6 +6,7 @@ import { Select } from "@/components/Select";
 import { PartyDialog } from "@/components/vyapar/PartyDialog";
 import { DatePicker } from "@/components/DatePicker";
 import { ScanButton } from "@/components/ScanButton";
+import { ModuleAttachments, PendingAttachmentList, usePendingAttachments } from "@/components/files/ModuleAttachments";
 import { filledNote, isoDate, matchByNameOrGstin, pairLines, type ScannedBill } from "@/lib/docScan";
 import { inr } from "@/lib/format";
 import * as procurement from "@/lib/procurementApi";
@@ -62,6 +63,13 @@ export function QuoteDialog({
   // A supplier created from inside this drawer, held here so it can be selected before the page
   // behind has refetched its party list.
   const [freshVendor, setFreshVendor] = useState<Party | null>(null);
+  /**
+   * The supplier's own quotation PDF. The AI analysis on the comparison reads it for what the rate
+   * boxes can't hold — makes, specs, warranty, payment and delivery terms, exclusions. Held here
+   * until Save, because a new quote has no id to attach it to yet.
+   */
+  const vendorName = (vendorId && (vendors.find((v) => String(v.id) === vendorId) ?? freshVendor)?.name) || undefined;
+  const pendingDocs = usePendingAttachments("PROCUREMENT", { type: "QUOTE", label: `Quotation · ${rfq.rfqNo}`, party: vendorName });
 
   /** What this quote comes to, priced the way the comparison will price it. */
   const total = useMemo(() => {
@@ -96,6 +104,17 @@ export function QuoteDialog({
           rate: rates[l.id] === "" || rates[l.id] == null ? null : Number(rates[l.id]),
         })),
       });
+      // Attach the quotation document(s) to the quote just saved — found by its supplier.
+      const quoteId = saved.quotes.find((q) => q.vendorPartyId === Number(vendorId))?.id;
+      if (quoteId != null) {
+        try {
+          await pendingDocs.flush(quoteId, rfq.projectId ?? null);
+        } catch (err) {
+          setError(`The quote was saved, but its document didn't upload: ${err instanceof Error ? err.message : "try again"}`);
+          setSaving(false);
+          return;
+        }
+      }
       onSaved(saved);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Couldn't save this quote.");
@@ -223,6 +242,8 @@ export function QuoteDialog({
           hint="The supplier's quotation PDF or photo"
           hints={{ "This document": "A supplier's quotation / rate offer in reply to our enquiry " + rfq.rfqNo }}
           onResult={applyQuote}
+          // The scanned quotation is the supplier's document — keep it with the quote.
+          onFile={(file) => pendingDocs.add([file])}
         />
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -323,6 +344,29 @@ export function QuoteDialog({
             className="input"
           />
         </DrawerField>
+
+        {/* The supplier's quotation — what the AI analysis reads for specs, warranty and terms. */}
+        <div className="space-y-2 rounded-xl border border-gray-200 p-3">
+          <div className="text-[11px] font-semibold tracking-wide text-gray-500 uppercase">Quotation document</div>
+          <p className="text-xs text-gray-400">
+            Attach the supplier&apos;s PDF (or a photo). The AI analysis on the comparison reads it for makes, specs,
+            warranty, payment and delivery terms.
+          </p>
+          {existing && (
+            <ModuleAttachments
+              module="PROCUREMENT"
+              type="QUOTE"
+              matchType
+              sourceId={existing.id}
+              projectId={rfq.projectId ?? null}
+              label={`Quotation · ${rfq.rfqNo}`}
+              party={existing.vendorName}
+              compact
+            />
+          )}
+          {!existing && <PendingAttachmentList pending={pendingDocs} />}
+          {existing && pendingDocs.files.length > 0 && <PendingAttachmentList pending={pendingDocs} />}
+        </div>
 
         <div className="flex items-center justify-between rounded-xl border border-gray-200 bg-gray-50/60 px-4 py-3">
           <span className="text-sm text-gray-500">

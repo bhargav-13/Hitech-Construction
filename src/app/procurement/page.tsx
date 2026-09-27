@@ -68,8 +68,8 @@ export default function ProcurementDashboard() {
         <div className="rounded-xl border border-gray-200 bg-white">
           <div className="flex items-center justify-between border-b border-gray-100 px-4 py-3">
             <h2 className="text-sm font-semibold text-gray-800">Waiting on a decision</h2>
-            <Link href="/procurement/compare" className="text-xs font-medium text-brand-accent hover:underline">
-              Open comparison
+            <Link href="/procurement/rfq" className="text-xs font-medium text-brand-accent hover:underline">
+              All RFQs
             </Link>
           </div>
           {m.toDecide.length === 0 ? (
@@ -81,7 +81,7 @@ export default function ProcurementDashboard() {
                 return (
                   <Link
                     key={r.id}
-                    href="/procurement/compare"
+                    href={`/procurement/compare?rfq=${r.id}`}
                     className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 transition-colors duration-150 hover:bg-cyan-50/40"
                   >
                     <div className="min-w-0">

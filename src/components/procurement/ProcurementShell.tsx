@@ -93,7 +93,7 @@ export function ProcurementShell({ children }: { children: React.ReactNode }) {
                 {node.section && railCollapsed && <div className="my-2 border-t border-gray-100" />}
                 <NavItem
                   node={node}
-                  active={isActive(node.href)}
+                  active={isActive(node.href) || (node.activeAlso ?? []).some((h) => isActive(h))}
                   collapsed={railCollapsed}
                   count={node.badge ? badges[node.badge] : 0}
                 />

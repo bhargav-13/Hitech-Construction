@@ -27,6 +27,8 @@ export interface ProcNavNode {
    *   "rfq" — RFQs sent, still awaiting quotes
    */
   badge?: "rfq";
+  /** Other routes that belong to this item, so it stays highlighted there too. */
+  activeAlso?: string[];
   /** Leaves the module — rendered with an arrow so it's clear you're being handed off. */
   external?: boolean;
   /** Shown under the label on links that hand off to another module. */
@@ -36,8 +38,9 @@ export interface ProcNavNode {
 export const PROCUREMENT_NAV: ProcNavNode[] = [
   { label: "Dashboard", href: "/procurement", icon: "home" },
 
-  { label: "RFQ", href: "/procurement/rfq", feature: "PROCUREMENT_RFQ", icon: "send", section: "Sourcing", badge: "rfq" },
-  { label: "Comparison", href: "/procurement/compare", feature: "PROCUREMENT_RFQ", icon: "scale" },
+  // The comparison is reached from its RFQ (click the card), not from the rail: a comparison only
+  // means something for one enquiry, and a separate entry opened whichever came first.
+  { label: "RFQ", href: "/procurement/rfq", feature: "PROCUREMENT_RFQ", icon: "send", section: "Sourcing", badge: "rfq", activeAlso: ["/procurement/compare"] },
 
   // Subcontracts. The labour half of buying: same spine as an award, but billed in instalments
   // over months and carrying the material we issue the contractor against his order.

@@ -114,16 +114,17 @@ export default function RfqPage() {
               { low: 0, high: 0 },
             );
 
+            const compareHref = `/procurement/compare?rfq=${r.id}`;
             return (
-              // Clicking anywhere on the card opens the enquiry, matching every other list in the
-              // app; the action buttons stop the click so they still do their own thing.
+              // Clicking the card opens its comparison — what the buyer comes back to an enquiry
+              // for. Editing is its own button; the action buttons stop the click.
               <div
                 key={r.id}
-                onClick={() => router.push(`/procurement/rfq/build?id=${r.id}`)}
+                onClick={() => router.push(compareHref)}
                 role="button"
                 tabIndex={0}
-                onKeyDown={(e) => { if (e.key === "Enter") router.push(`/procurement/rfq/build?id=${r.id}`); }}
-                title={`Open ${r.rfqNo}`}
+                onKeyDown={(e) => { if (e.key === "Enter") router.push(compareHref); }}
+                title={`Compare quotes for ${r.rfqNo}`}
                 className={`cursor-pointer rounded-xl border border-gray-200 bg-white p-4 transition-all duration-150 hover:border-brand-accent hover:shadow-sm ${busy === r.rfqNo ? "opacity-50" : ""}`}
               >
                 <div className="flex flex-wrap items-start justify-between gap-3">
@@ -148,22 +149,21 @@ export default function RfqPage() {
                     >
                       <Plus size={13} /> Enter quote
                     </button>
-                    {r.quotes.length > 0 && (
-                      <Link
-                        href="/procurement/compare"
-                        className="flex items-center gap-1.5 rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-medium text-brand-accent transition-colors duration-150 hover:bg-brand-accent/5"
-                      >
-                        <Scale size={14} /> Compare
-                      </Link>
-                    )}
+                    <Link
+                      href={`/procurement/rfq/build?id=${r.id}`}
+                      className="flex items-center gap-1.5 rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-600 transition-colors duration-150 hover:border-brand-accent hover:text-brand-accent"
+                    >
+                      <Pencil size={13} /> Edit RFQ
+                    </Link>
+                    <Link
+                      href={compareHref}
+                      className="flex items-center gap-1.5 rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-medium text-brand-accent transition-colors duration-150 hover:bg-brand-accent/5"
+                    >
+                      <Scale size={14} /> Compare
+                    </Link>
                     <RowMenu align="right" buttonLabel="Enquiry actions">
                       {(close) => (
                         <>
-                          <RowMenuItem
-                            icon={Pencil}
-                            label="Edit"
-                            onClick={() => { close(); router.push(`/procurement/rfq/build?id=${r.id}`); }}
-                          />
                           <RowMenuItem
                             icon={Link2}
                             label={r.suppliers.some((x) => x.shareToken) ? "Quote links" : "Send to suppliers"}
