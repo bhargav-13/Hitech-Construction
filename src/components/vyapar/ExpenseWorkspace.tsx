@@ -7,6 +7,17 @@ import { Drawer, DrawerField } from "@/components/Drawer";
 import { Select } from "@/components/Select";
 import { Spinner } from "@/components/Spinner";
 import { DatePicker } from "@/components/DatePicker";
+import { ScanButton } from "@/components/ScanButton";
+import {
+  fileToAttachment,
+  filledNote,
+  isoDate,
+  matchByNameOrGstin,
+  matchOption,
+  stateOfGstin,
+  validGstin,
+  type ScannedReceipt,
+} from "@/lib/docScan";
 import { InvoiceHistoryDialog, TxnRowActions } from "@/components/vyapar/TxnRowActions";
 import { SortTh } from "@/components/vyapar/SortTh";
 import { TransactionDetailDrawer } from "@/components/vyapar/TransactionDetailDrawer";
@@ -592,12 +603,88 @@ function ExpenseForm({
   const [paid, setPaid] = useState(existing?.paidAmount ?? 0);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  // The receipt travels with the expense. Kept from the existing record too — the update replaces
+  // attachments wholesale, so leaving them out of the body used to wipe an imported receipt.
+  const [attachment, setAttachment] = useState({
+    imageDataUrl: existing?.imageDataUrl ?? null,
+    documentName: existing?.documentName ?? null,
+    documentDataUrl: existing?.documentDataUrl ?? null,
+  });
   const projectId = useVyaparProjectId();
   const { projects } = useProjects();
   const [selectedProjectId, setSelectedProjectId] = useState(
     existing?.projectId != null ? String(existing.projectId) : projectId != null ? String(projectId) : ""
   );
   const paymentTypeOptions = usePaymentTypeOptions();
+
+  /** Fill the form from a scanned receipt. Values only — the user checks and presses Save. */
+  function applyReceipt(r: ScannedReceipt) {
+    const filled: string[] = [];
+    const extra: string[] = [];
+    if (r.category && !category.trim()) {
+      setCategory(matchOption(categories, r.category) ?? r.category);
+      filled.push("category");
+    }
+    const d = isoDate(r.date);
+    if (d) {
+      setDate(d);
+      filled.push("date");
+    }
+    if (r.receiptNo && !expenseNo.trim()) {
+      setExpenseNo(r.receiptNo);
+      filled.push("bill no.");
+    }
+    const gstin = validGstin(r.merchantGstin);
+    const taxed = !!gstin || (r.taxTotal ?? 0) > 0 || r.lines.some((l) => (l.taxPercent ?? 0) > 0);
+    if (taxed) {
+      setGst(true);
+      const party = matchByNameOrGstin(parties, r.merchantName, gstin);
+      if (party && !partyId) {
+        setPartyId(String(party.id));
+        filled.push("party");
+      } else if (!party && r.merchantName) {
+        extra.push(`“${r.merchantName}”${gstin ? ` (${gstin})` : ""} isn't a saved party.`);
+      }
+      const st = stateOfGstin(gstin) ?? matchOption(vyapar.STATES_OF_SUPPLY, r.merchantState);
+      if (st && !stateOfSupply) setStateOfSupply(st);
+    }
+    const slab = (t: number | null) =>
+      t == null ? 0 : TAX_RATES.reduce((best, x) => (Math.abs(x - t) < Math.abs(best - t) ? x : best), 0);
+    const read = r.lines
+      .filter((l) => l.name || (l.amount ?? 0) > 0 || (l.rate ?? 0) > 0)
+      .map((l) => {
+        const qty = l.quantity && l.quantity > 0 ? l.quantity : 1;
+        return {
+          itemName: l.name ?? r.category ?? "",
+          description: "",
+          qty,
+          rate: l.rate ?? (l.amount != null ? Math.round((l.amount / qty) * 100) / 100 : 0),
+          taxPercent: taxed ? slab(l.taxPercent) : 0,
+        };
+      });
+    if (read.length === 0 && r.total) {
+      read.push({ itemName: r.merchantName ?? r.category ?? "Expense", description: "", qty: 1, rate: r.total, taxPercent: 0 });
+    }
+    if (read.length) {
+      setLines((prev) => [...prev.filter((l) => l.itemName.trim() || l.rate > 0), ...read]);
+      filled.push(`${read.length} line${read.length === 1 ? "" : "s"}`);
+    }
+    if (r.reference && !reference.trim()) {
+      setReference(r.reference);
+      filled.push("reference");
+    }
+    if (r.paymentMode) {
+      if (/^cash$/i.test(r.paymentMode)) setPaymentMode("Cash");
+      else extra.push(`Paid by ${r.paymentMode} — pick the account it came from.`);
+    }
+    if (r.total) {
+      const sum = read.reduce((s, l) => s + l.qty * l.rate * (1 + (taxed ? l.taxPercent : 0) / 100), 0);
+      if (read.length && Math.abs(sum - r.total) > Math.max(5, r.total * 0.001)) {
+        extra.push(`The receipt says ${inr(r.total)} but the lines add up to ${inr(sum)}.`);
+      }
+    }
+    return filledNote(filled, r.uncertainFields, extra.join(" "));
+  }
   const bankAccountFor = useBankAccountResolver();
 
   const calc = useMemo(() => {
@@ -645,6 +732,9 @@ function ExpenseForm({
         paidAmount: Math.min(paidDisplay, calc.total),
         isCash: paidDisplay >= calc.total,
         paymentType: paymentMode,
+        imageDataUrl: attachment.imageDataUrl,
+        documentName: attachment.documentName,
+        documentDataUrl: attachment.documentDataUrl,
         // Same reason as the invoice builder: the account's balance and statement key off
         // bankAccountId, not off the free-text payment type. See bankScope.
         bankAccountId: bankAccountFor(paymentMode),
@@ -694,7 +784,29 @@ function ExpenseForm({
               <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all duration-200 ${gst ? "left-[22px]" : "left-0.5"}`} />
             </button>
           </div>
+          {(attachment.imageDataUrl || attachment.documentDataUrl) && (
+            <a
+              href={attachment.imageDataUrl ?? attachment.documentDataUrl ?? undefined}
+              target="_blank"
+              rel="noreferrer"
+              download={attachment.documentName ?? undefined}
+              className="ml-auto flex items-center gap-1 text-xs text-gray-500 hover:text-brand-accent"
+            >
+              <FileText size={13} /> {attachment.documentName ?? "Receipt attached"}
+            </a>
+          )}
         </div>
+
+        <ScanButton
+          kind="RECEIPT"
+          hint="Photo or PDF of the receipt"
+          hints={{ "Expense categories to choose from": categories.join(", ") }}
+          onFile={async (file) => {
+            const a = await fileToAttachment(file).catch(() => null);
+            if (a) setAttachment(a);
+          }}
+          onResult={applyReceipt}
+        />
 
         <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
           <div className="space-y-3">

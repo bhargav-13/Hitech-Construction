@@ -5,6 +5,8 @@ import { Drawer, DrawerField } from "@/components/Drawer";
 import { Select } from "@/components/Select";
 import { CreatableSelect } from "@/components/CreatableSelect";
 import { DatePicker } from "@/components/DatePicker";
+import { ScanButton } from "@/components/ScanButton";
+import { filledNote, isoDate, type ScannedTender } from "@/lib/docScan";
 import { useTenderStore } from "@/lib/tenderStore";
 import {
   STAGE_META,
@@ -223,6 +225,66 @@ export function TenderForm({
     onClose();
   }
 
+  /**
+   * Read a notice inviting tender, a portal summary page or a GeM bid document into the form.
+   * Only empty fields are filled, so re-scanning an edited tender never overwrites what was keyed.
+   * Nothing is saved until the user presses Add / Save.
+   */
+  function applyNotice(t: ScannedTender) {
+    const patch: Partial<Tender> = {};
+    const labels: string[] = [];
+    const empty = (v: unknown) => v == null || v === "";
+    const text = (key: keyof Tender, value: string | null, label: string) => {
+      if (value && empty(f[key])) {
+        (patch as Record<string, unknown>)[key] = value;
+        labels.push(label);
+      }
+    };
+    const money = (key: keyof Tender, value: number | null, label: string) => {
+      if (value != null && value > 0 && empty(f[key])) {
+        (patch as Record<string, unknown>)[key] = value;
+        labels.push(label);
+      }
+    };
+    const date = (key: keyof Tender, value: string | null, label: string) => text(key, isoDate(value), label);
+
+    if (!isEdit && t.source && /gem/i.test(t.source)) patch.source = "GEM";
+    text("department", t.department, "department");
+    text("tenderId", t.tenderId, "tender ID");
+    text("nameOfWork", t.nameOfWork, "name of work");
+    text("location", t.location, "location");
+    text("officeAddress", t.officeAddress, "office address");
+    text("classReq", t.classReq, "class");
+    money("estimatedCost", t.estimatedCost, "estimated cost");
+    money("fee", t.fee, "fee");
+    money("emd", t.emd, "EMD");
+    if (t.emdMode && empty(f.emdMode)) {
+      const m = t.emdMode.toUpperCase();
+      const mode: EmdMode | null = /EXEMPT/.test(m) ? "EXEMPT" : /FDR|FIXED/.test(m) ? "FDR" : /BG|GUARANTEE/.test(m) ? "BG" : /DD|DEMAND/.test(m) ? "DD" : /ONLINE|NEFT|RTGS|NET ?BANK|E-?PAY/.test(m) ? "ONLINE" : null;
+      if (mode) {
+        patch.emdMode = mode;
+        labels.push("EMD instrument");
+      }
+    }
+    date("deadline", t.deadline, "deadline");
+    date("hardcopyDue", t.hardcopyDue, "hardcopy due");
+    date("preBidDate", t.preBidDate, "pre-bid date");
+    date("techOpen", t.techOpen, "technical opening");
+    date("priceOpen", t.priceOpen, "price opening");
+    date("openingDate", t.openingDate, "bid opening");
+    text("duration", t.duration, "duration");
+    text("validity", t.validity, "validity");
+    text("dlp", t.dlp, "DLP");
+    text("pqCriteria", t.pqCriteria, "PQ criteria");
+    text("priceEscalation", t.priceEscalation, "price escalation");
+    text("gemCategory", t.gemCategory, "GeM category");
+    text("msmeRelaxation", t.msmeRelaxation, "MSME relaxation");
+    text("experienceTurnover", t.experienceTurnover, "experience / turnover");
+    if (Object.keys(patch).length) set(patch);
+    if (patch.pqCriteria || patch.priceEscalation || patch.experienceTurnover) setShowMore(true);
+    return filledNote(labels, t.uncertainFields);
+  }
+
   const gemFields = useMemo(
     () => (
       <>
@@ -249,6 +311,12 @@ export function TenderForm({
         {saveNote && (
           <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">{saveNote}</div>
         )}
+        <ScanButton
+          kind="TENDER"
+          label="Scan tender notice with AI"
+          hint="NIT, portal summary or GeM bid document (PDF)"
+          onResult={applyNotice}
+        />
         {/* Pipeline */}
         <Section title="Pipeline">
           <DrawerField label="Stage" required>

@@ -4,6 +4,8 @@ import { useState } from "react";
 import { Drawer } from "@/components/Drawer";
 import { Select } from "@/components/Select";
 import { DatePicker } from "@/components/DatePicker";
+import { ScanButton } from "@/components/ScanButton";
+import { contactAddress, filledNote, matchOption, mobile10, stateOfGstin, validGstin, type ScannedContact } from "@/lib/docScan";
 import * as vyapar from "@/lib/vyaparApi";
 import { useVyaparProjectId } from "@/lib/projectScope";
 import { GST_TYPES, STATES_OF_SUPPLY } from "@/lib/vyaparApi";
@@ -109,6 +111,44 @@ export function PartyDialog({
     }
   }
 
+  /** Fill blanks from a visiting card, GST certificate or letterhead — never overwrites typed values. */
+  function applyContact(c: ScannedContact) {
+    const filled: string[] = [];
+    const g = validGstin(c.gstin);
+    if (c.name && !name.trim()) {
+      setName(c.name);
+      filled.push("name");
+    }
+    if (g && !gstin.trim()) {
+      setGstin(g);
+      if (gstType === GST_TYPES[0]) setGstType(GST_TYPES[1]);
+      filled.push("GSTIN");
+    } else if (c.gstin && !g) {
+      filled.push(`GSTIN “${c.gstin}” (doesn't look valid — check it)`);
+      if (!gstin.trim()) setGstin(c.gstin.toUpperCase());
+    }
+    const ph = mobile10(c.phone);
+    if (ph && !phone.trim()) {
+      setPhone(ph);
+      filled.push("phone");
+    }
+    if (c.email && !email.trim()) {
+      setEmail(c.email);
+      filled.push("email");
+    }
+    const addr = contactAddress(c);
+    if (addr && !billingAddress.trim()) {
+      setBillingAddress(addr);
+      filled.push("address");
+    }
+    const st = stateOfGstin(g) ?? matchOption(STATES_OF_SUPPLY, c.state);
+    if (st && !state) {
+      setState(st);
+      filled.push("state");
+    }
+    return filledNote(filled, c.uncertainFields);
+  }
+
   return (
     <Drawer
       title={existing ? "Edit Party" : "Add Party"}
@@ -121,6 +161,8 @@ export function PartyDialog({
     >
       <div className="space-y-5">
         {error && <div className="rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-600">{error}</div>}
+
+        <ScanButton kind="CONTACT" hint="Visiting card, GST certificate or letterhead" onResult={applyContact} />
 
         {/* Always-visible header row */}
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">

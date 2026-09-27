@@ -12,6 +12,8 @@ import { Select } from "@/components/Select";
 import { UnitSelect } from "@/components/procurement/UnitSelect";
 import { TypeaheadPicker } from "@/components/vyapar/TypeaheadPicker";
 import { DatePicker } from "@/components/DatePicker";
+import { ScanButton } from "@/components/ScanButton";
+import { filledNote, matchByNameOrGstin, type ScannedItemList } from "@/lib/docScan";
 import { Spinner } from "@/components/Spinner";
 import { inr, qty as formatQty } from "@/lib/format";
 import { useProjects } from "@/lib/useProjects";
@@ -224,6 +226,35 @@ function Builder() {
     setLibraryOpen(false);
   }
 
+  /**
+   * A site's indent — a handwritten list, a WhatsApp photo, a requisition slip — read into the
+   * material list. Materials on file are linked; the rest stay free text, as typed ones do.
+   */
+  function applyIndent(r: ScannedItemList) {
+    const read: DraftLine[] = r.lines
+      .filter((l) => l.name)
+      .map((l) => {
+        const it = matchByNameOrGstin(items, l.name);
+        return {
+          itemId: it?.id ?? null,
+          itemName: it?.name ?? l.name ?? "",
+          specification: l.remarks ?? it?.description ?? "",
+          hsnCode: it?.hsn ?? "",
+          unit: l.unit || it?.unit || "Nos",
+          quantity: l.quantity && l.quantity > 0 ? l.quantity : 1,
+          deliveryDate: "",
+          budgetRate: l.rate ? String(l.rate) : it?.purchasePrice ? String(it.purchasePrice) : "",
+        };
+      });
+    if (read.length) setLines((prev) => [...prev.filter((l) => l.itemName.trim()), ...read]);
+    const linked = read.filter((l) => l.itemId != null).length;
+    return filledNote(
+      read.length ? [`${read.length} material${read.length === 1 ? "" : "s"}`] : [],
+      r.uncertainFields,
+      read.length && linked < read.length ? `${read.length - linked} aren't in the material library yet.` : "",
+    );
+  }
+
   function addBlankLine() {
     setLines((prev) => [
       ...prev,
@@ -388,7 +419,10 @@ function Builder() {
 
         {/* ---- Material List ---- */}
         <section className="rounded-xl border border-gray-200 bg-white">
-          <h2 className="border-b border-gray-100 px-4 py-3 text-sm font-semibold text-gray-800">Material List</h2>
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-100 px-4 py-3">
+            <h2 className="text-sm font-semibold text-gray-800">Material List</h2>
+            <ScanButton kind="ITEM_LIST" compact label="Scan indent with AI" hint="Site indent, handwritten list or BOQ page" onResult={applyIndent} />
+          </div>
           <div className="overflow-x-auto">
             <table className="w-full min-w-[880px] border-collapse text-sm">
               <thead>

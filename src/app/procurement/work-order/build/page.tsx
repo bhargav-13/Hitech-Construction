@@ -8,6 +8,8 @@ import { Select } from "@/components/Select";
 import { UnitSelect } from "@/components/procurement/UnitSelect";
 import { TypeaheadPicker } from "@/components/vyapar/TypeaheadPicker";
 import { DatePicker } from "@/components/DatePicker";
+import { ScanButton } from "@/components/ScanButton";
+import { filledNote, isoDate, matchByNameOrGstin, type ScannedBill } from "@/lib/docScan";
 import { Spinner } from "@/components/Spinner";
 import { useProjects } from "@/lib/useProjects";
 import { useVyaparProjectId } from "@/lib/projectScope";
@@ -216,6 +218,64 @@ function Builder() {
     setBankNumber(next.number);
     setBankIfsc(next.ifsc);
     setAutofilled(next);
+  }
+
+  /**
+   * A contractor's quotation or rate offer read into the scope of work. Values only — the user
+   * checks the lines and presses Save.
+   */
+  function applyQuotation(q: ScannedBill) {
+    const filled: string[] = [];
+    const extra: string[] = [];
+    if (vendorId == null) {
+      const v = matchByNameOrGstin(parties, q.seller.name, q.seller.gstin);
+      if (v) {
+        pickVendor(v);
+        filled.push("contractor");
+      } else if (q.seller.name) extra.push(`“${q.seller.name}” isn't a saved party.`);
+    }
+    const read: DraftItem[] = q.lines
+      .filter((l) => l.name || (l.rate ?? 0) > 0)
+      .map((l) => {
+        const it = matchByNameOrGstin(catalogue, l.name);
+        const qty = l.quantity && l.quantity > 0 ? l.quantity : 1;
+        const rate = l.rate ?? (l.amount != null ? l.amount / qty : 0);
+        return {
+          ...blankItem(),
+          itemId: it?.id ?? null,
+          itemName: it?.name ?? l.name ?? "",
+          unit: l.unit || it?.unit || blankItem().unit,
+          quantity: String(qty),
+          rate: String(Math.round(rate * 100) / 100),
+        };
+      });
+    if (read.length) {
+      setItems((prev) => [...prev.filter((it) => it.itemName.trim()), ...read]);
+      filled.push(`${read.length} line${read.length === 1 ? "" : "s"}`);
+    }
+    const taxes = q.lines.map((l) => l.taxPercent).filter((t): t is number => t != null);
+    if (taxes.length) {
+      setTaxPercent(String(Math.max(...taxes)));
+      filled.push("tax %");
+    }
+    const chargeSum = q.otherCharges.reduce((sum, c) => sum + (c.amount ?? 0), 0);
+    if (chargeSum) {
+      setCharges(String(chargeSum));
+      filled.push("charges");
+    }
+    if (q.discountTotal) {
+      setDiscount(String(q.discountTotal));
+      filled.push("discount");
+    }
+    if (q.documentNo && !title.trim()) {
+      setTitle(`Against quotation ${q.documentNo}${isoDate(q.documentDate) ? ` dated ${isoDate(q.documentDate)}` : ""}`);
+      filled.push("title");
+    }
+    if (q.paymentTerms && !terms.trim()) {
+      setTerms(q.paymentTerms);
+      filled.push("terms");
+    }
+    return filledNote(filled, q.uncertainFields, extra.join(" "));
   }
 
   function setItem(i: number, patch: Partial<DraftItem>) {
@@ -444,9 +504,18 @@ function Builder() {
         <section className="rounded-xl border border-gray-200 bg-white">
           <div className="flex items-center justify-between border-b border-gray-100 px-4 py-3">
             <h2 className="text-sm font-semibold text-gray-800">Scope of Work</h2>
-            <p className="text-[11px] text-gray-400">
-              Fill N × L × W × H to measure a line, or leave them blank and type the quantity.
-            </p>
+            <div className="flex flex-wrap items-center gap-3">
+              <p className="text-[11px] text-gray-400">
+                Fill N × L × W × H to measure a line, or leave them blank and type the quantity.
+              </p>
+              <ScanButton
+                kind="BILL"
+                compact
+                label="Scan quotation with AI"
+                hints={{ "This document": "A contractor's quotation or rate offer for work (labour / civil / services)" }}
+                onResult={applyQuotation}
+              />
+            </div>
           </div>
           <div className="overflow-x-auto">
             <table className="min-w-full text-sm">

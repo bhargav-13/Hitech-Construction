@@ -5,6 +5,8 @@ import { Drawer, DrawerField } from "@/components/Drawer";
 import { Select } from "@/components/Select";
 import { PartyDialog } from "@/components/vyapar/PartyDialog";
 import { DatePicker } from "@/components/DatePicker";
+import { ScanButton } from "@/components/ScanButton";
+import { filledNote, isoDate, matchByNameOrGstin, pairLines, type ScannedBill } from "@/lib/docScan";
 import { inr } from "@/lib/format";
 import * as procurement from "@/lib/procurementApi";
 import type { Rfq } from "@/lib/procurementApi";
@@ -143,6 +145,66 @@ export function QuoteDialog({
     ];
   }, [vendors, freshVendor, rfq.suppliers, rfq.quotes, rfq.rfqNo]);
 
+  /**
+   * Read the supplier's quotation PDF / photo into the rate boxes. Each enquiry line takes the rate
+   * of the quoted line that names the same material; a line the supplier didn't quote stays empty
+   * ("no quote"), never zero. Values only — the user checks them and presses Save.
+   */
+  function applyQuote(q: ScannedBill) {
+    const filled: string[] = [];
+    const extra: string[] = [];
+    if (!vendorId && !existing) {
+      const v = matchByNameOrGstin([...vendors, ...(freshVendor ? [freshVendor] : [])], q.seller.name, q.seller.gstin);
+      if (v) {
+        setVendorId(String(v.id));
+        filled.push("supplier");
+      } else if (q.seller.name) extra.push(`“${q.seller.name}” isn't a saved supplier — use Add new supplier.`);
+    }
+    const d = isoDate(q.documentDate);
+    if (d) {
+      setReceivedOn(d);
+      filled.push("date");
+    }
+    // The comparison applies one tax % to the whole quote; take the rate most lines carry.
+    const taxes = q.lines.map((l) => l.taxPercent).filter((t): t is number => t != null);
+    const tax = taxes.length ? taxes.sort((a, b) => taxes.filter((x) => x === b).length - taxes.filter((x) => x === a).length)[0] : null;
+    const pairs = pairLines(rfq.lines.map((l) => ({ key: l.id, name: `${l.itemName} ${l.specification ?? ""}` })), q.lines);
+    const next: Record<number, string> = { ...rates };
+    for (const [lineId, idx] of pairs) {
+      const src = q.lines[idx];
+      let rate = src.rate ?? (src.amount != null && src.quantity ? src.amount / src.quantity : null);
+      if (rate == null) continue;
+      if (q.pricesIncludeTax && src.taxPercent) rate = rate / (1 + src.taxPercent / 100);
+      if (src.discountPercent) rate = rate * (1 - src.discountPercent / 100);
+      next[lineId] = String(Math.round(rate * 100) / 100);
+    }
+    if (pairs.size) {
+      setRates(next);
+      filled.push(`${pairs.size} of ${rfq.lines.length} rates`);
+    }
+    const unpaired = q.lines.length - pairs.size;
+    if (unpaired > 0) extra.push(`${unpaired} quoted line${unpaired === 1 ? "" : "s"} didn't match an enquiry line — check the rates by hand.`);
+    if (tax != null) {
+      setTaxPercent(String(tax));
+      filled.push("tax %");
+    }
+    const chargeSum = q.otherCharges.reduce((sum, c) => sum + (c.amount ?? 0), 0);
+    if (chargeSum) {
+      setCharges(String(chargeSum));
+      filled.push("charges");
+    }
+    if (q.discountTotal) {
+      setDiscount(String(q.discountTotal));
+      filled.push("discount");
+    }
+    const terms = [q.paymentTerms, q.notes].filter(Boolean).join("; ");
+    if (terms && !note.trim()) {
+      setNote(terms.slice(0, 250));
+      filled.push("note");
+    }
+    return filledNote(filled, q.uncertainFields, extra.join(" "));
+  }
+
   return (
     <Drawer
       title={existing ? `Revise quote · ${existing.vendorName}` : `Enter quote · ${rfq.rfqNo}`}
@@ -154,6 +216,14 @@ export function QuoteDialog({
     >
       <div className="space-y-5">
         {error && <div className="rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-600">{error}</div>}
+
+        <ScanButton
+          kind="BILL"
+          label="Scan quotation with AI"
+          hint="The supplier's quotation PDF or photo"
+          hints={{ "This document": "A supplier's quotation / rate offer in reply to our enquiry " + rfq.rfqNo }}
+          onResult={applyQuote}
+        />
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <DrawerField label="Supplier" required>

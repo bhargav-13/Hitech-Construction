@@ -6,6 +6,8 @@ import { Drawer } from "@/components/Drawer";
 import { Spinner } from "@/components/Spinner";
 import { Select } from "@/components/Select";
 import { DatePicker } from "@/components/DatePicker";
+import { ScanButton } from "@/components/ScanButton";
+import { filledNote, isoDate, matchOption, type ScannedReceipt } from "@/lib/docScan";
 import { RowMenu, RowMenuDivider, RowMenuItem } from "@/components/RowMenu";
 import { useReimbursements } from "@/lib/usePayrollLive";
 import { getUsers, ApiError } from "@/lib/api";
@@ -313,6 +315,27 @@ function ClaimDialog({
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
 
+  /** Fill type, date and amount from the bill being claimed. The member is still picked by hand. */
+  function applyReceipt(r: ScannedReceipt) {
+    const filled: string[] = [];
+    const type = matchOption(EXPENSE_TYPES, r.category);
+    if (type) {
+      setExpenseType(type);
+      filled.push("expense type");
+    }
+    const d = isoDate(r.date);
+    if (d) {
+      setExpenseDate(d);
+      filled.push("date");
+    }
+    const total = r.total ?? r.lines.reduce((s, l) => s + (l.amount ?? 0), 0);
+    if (total > 0) {
+      setAmount(Math.round(total * 100) / 100);
+      filled.push("amount");
+    }
+    return filledNote(filled, r.uncertainFields, r.merchantName ? `Bill from ${r.merchantName}.` : "");
+  }
+
   async function save() {
     if (!userId) { setError("Select a member."); return; }
     if (!amount) { setError("Enter the claim amount."); return; }
@@ -329,6 +352,12 @@ function ClaimDialog({
     <Drawer title="New Reimbursement Claim" onClose={onClose} onSave={save} saveLabel={saving ? "Submitting…" : "Submit Claim"} width="max-w-md">
       <div className="space-y-4">
         {error && <div className="rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-600">{error}</div>}
+        <ScanButton
+          kind="RECEIPT"
+          hint="Photo of the bill being claimed"
+          hints={{ "Expense categories to choose from": EXPENSE_TYPES.join(", ") }}
+          onResult={applyReceipt}
+        />
         <F label="Member" required>
           <Select value={userId} onChange={setUserId} placeholder="Select member" options={[{ value: "", label: "Select member" }, ...members.map((m) => ({ value: String(m.id), label: m.fullName }))]} />
         </F>

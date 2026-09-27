@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo } from "react";
-import { FileText, Loader2, ScanLine, X } from "lucide-react";
+import { FileText, Loader2, Sparkles, X } from "lucide-react";
 
 /** data:…;base64,… → Blob, so a PDF can be shown through an object URL (browsers block data: PDFs in frames). */
 function dataUrlToBlob(dataUrl: string): Blob | null {
@@ -70,8 +70,8 @@ export function BillPreviewPane({
             disabled={scanning}
             className="flex items-center gap-1 rounded-md border border-gray-200 px-2 py-1 text-xs font-medium text-gray-600 transition-colors hover:border-brand-accent hover:text-brand-accent disabled:opacity-50"
           >
-            {scanning ? <Loader2 size={12} className="animate-spin" /> : <ScanLine size={12} />}
-            {scanning ? "Reading…" : "Read with OCR"}
+            {scanning ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />}
+            {scanning ? "Reading…" : "Read with AI"}
           </button>
         )}
         <button

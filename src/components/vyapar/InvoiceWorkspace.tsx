@@ -92,6 +92,8 @@ export function InvoiceWorkspace({
   const [uploading, setUploading] = useState(false);
   /** The file chosen in Upload Bill, held until the Purchase form opens and takes it. */
   const [uploadedBill, setUploadedBill] = useState<BillAttachment | null>(null);
+  /** Upload Bill's "Scan & fill": the builder reads the uploaded bill with AI as it opens. */
+  const [scanUploaded, setScanUploaded] = useState(false);
   const [history, setHistory] = useState<Invoice | null>(null);
   const [exporting, setExporting] = useState(false);
   const { projects } = useProjects();
@@ -586,6 +588,7 @@ export function InvoiceWorkspace({
           items={items}
           projectId={projectOverride}
           initialAttachment={uploadedBill ?? undefined}
+          autoScan={scanUploaded && !!uploadedBill}
           prefill={prefill ?? undefined}
           approvalType={approvalType}
           approval={editing ? approvals[editing.id] : undefined}
@@ -618,8 +621,9 @@ export function InvoiceWorkspace({
           onClose={() => setUploading(false)}
           // The uploaded file rides into the new bill as its attachment, rather than being
           // previewed and then dropped on the way to a blank form.
-          onContinue={(attachment) => {
+          onContinue={(attachment, scan) => {
             setUploadedBill(attachment);
+            setScanUploaded(scan);
             setUploading(false);
             setCreating(true);
           }}

@@ -4,6 +4,8 @@ import { useEffect, useMemo, useState } from "react";
 import { Drawer, DrawerField } from "@/components/Drawer";
 import { Select } from "@/components/Select";
 import { DatePicker } from "@/components/DatePicker";
+import { ScanButton } from "@/components/ScanButton";
+import { filledNote, isoDate, matchByNameOrGstin, type ScannedItemList } from "@/lib/docScan";
 import { TypeaheadPicker } from "@/components/vyapar/TypeaheadPicker";
 import { UnitSelect } from "@/components/procurement/UnitSelect";
 import { useWarehouseStore, stockOf } from "@/lib/warehouseStore";
@@ -161,6 +163,64 @@ export function MovementDialog({
     }
   }
 
+  /**
+   * Fill a receipt from the delivery challan or goods note that came with the truck. One movement
+   * is one item, so a challan with several lines fills the first and says what is left to record.
+   */
+  function applyChallan(r: ScannedItemList) {
+    const filled: string[] = [];
+    const extra: string[] = [];
+    const lines = r.lines.filter((l) => l.name);
+    const first = lines[0];
+    if (first) {
+      const it = matchByNameOrGstin(items, first.name);
+      if (it) {
+        setItemId(it.id);
+        setItemText(it.name);
+        setUnit(first.unit || it.unit || "Nos");
+        filled.push("item");
+      } else {
+        setItemText(first.name);
+        setItemId(null);
+        extra.push(`“${first.name}” isn't in the catalogue — pick the matching item.`);
+      }
+      if (first.quantity) {
+        setQuantity(String(first.quantity));
+        filled.push("quantity");
+      }
+      if (first.rate) {
+        setRate(String(first.rate));
+        filled.push("rate");
+      }
+    }
+    if (isReceipt && !partyId && r.partyName) {
+      const p = matchByNameOrGstin(parties, r.partyName);
+      if (p) {
+        setPartyId(String(p.id));
+        filled.push("supplier");
+      }
+    }
+    if (r.documentNo && !sourceDocNo.trim()) {
+      setSourceDocNo(r.documentNo);
+      filled.push("challan no.");
+    }
+    const d = isoDate(r.date);
+    if (d) {
+      setMovedOn(d);
+      filled.push("date");
+    }
+    if (r.vehicleNo && !note.trim()) setNote(`Vehicle ${r.vehicleNo}`);
+    if (lines.length > 1) {
+      extra.push(
+        `The challan has ${lines.length} lines; this fills the first. Still to record: ${lines
+          .slice(1)
+          .map((l) => `${l.name}${l.quantity ? ` × ${l.quantity}${l.unit ? ` ${l.unit}` : ""}` : ""}`)
+          .join("; ")}.`,
+      );
+    }
+    return filledNote(filled, r.uncertainFields, extra.join(" "));
+  }
+
   return (
     <Drawer
       title={title}
@@ -171,6 +231,10 @@ export function MovementDialog({
     >
       <div className="space-y-5">
         {error && <div className="rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-600">{error}</div>}
+
+        {(isReceipt || isReturn) && (
+          <ScanButton kind="ITEM_LIST" hint="Delivery challan or goods receipt note" onResult={applyChallan} />
+        )}
 
         <DrawerField
           label="Item"

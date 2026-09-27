@@ -7,6 +7,8 @@ import { Drawer, DrawerField } from "@/components/Drawer";
 import { Select } from "@/components/Select";
 import { Spinner } from "@/components/Spinner";
 import { DatePicker } from "@/components/DatePicker";
+import { ScanButton } from "@/components/ScanButton";
+import { filledNote, isoDate, matchBankAccount, matchByNameOrGstin, type ScannedPayment } from "@/lib/docScan";
 import { SortTh } from "@/components/vyapar/SortTh";
 import { DateRangeFilter, defaultRange, inRange, type DateRange } from "@/components/vyapar/DateRangeFilter";
 import { LinkPaymentDialog } from "@/components/vyapar/LinkPaymentDialog";
@@ -18,7 +20,7 @@ import { PAYMENT_APPROVAL_TYPE, useApprovalStates } from "@/lib/approvals";
 import type { ApprovalState } from "@/lib/api";
 import { useTableSort } from "@/lib/useTableSort";
 import { inr } from "@/lib/format";
-import { usePaymentTypeOptions, useBankAccountResolver } from "@/lib/bankScope";
+import { usePaymentTypeOptions, useBankAccountResolver, useBankAccounts } from "@/lib/bankScope";
 import { useVyaparProjectId } from "@/lib/projectScope";
 import { useProjects } from "@/lib/useProjects";
 import { ExportDialog, type ExportColumn } from "@/components/vyapar/ExportDialog";
@@ -450,6 +452,7 @@ function PaymentForm({
   const [selectedProjectId, setSelectedProjectId] = useState(projectId != null ? String(projectId) : "");
   const paymentTypeOptions = usePaymentTypeOptions();
   const bankAccountFor = useBankAccountResolver();
+  const { accounts } = useBankAccounts();
   // Which bills this receipt settles. Empty = the whole amount sits as an advance ("Unused").
   const [links, setLinks] = useState<{ invoiceId: number; amount: number }[]>([]);
   const [linking, setLinking] = useState(false);
@@ -499,6 +502,49 @@ function PaymentForm({
 
   const isIn = direction === "IN";
 
+  /**
+   * Fill from a UPI screenshot, transfer advice, cheque or cash voucher. Values only — the party,
+   * amount and account are checked by the user before Save.
+   */
+  function applyPayment(r: ScannedPayment) {
+    const filled: string[] = [];
+    const extra: string[] = [];
+    // Money in: the party is who paid us. Money out: who we paid.
+    const partyName = isIn ? r.payerName : r.payeeName;
+    if (!partyId && partyName) {
+      const p = matchByNameOrGstin(parties, partyName);
+      if (p) {
+        setPartyId(String(p.id));
+        filled.push("party");
+      } else extra.push(`“${partyName}” isn't a saved party — pick or add it.`);
+    }
+    if (r.amount && r.amount > 0) {
+      setAmount(r.amount);
+      filled.push("amount");
+    }
+    const d = isoDate(r.date) ?? isoDate(r.chequeDate);
+    if (d) {
+      setPaymentDate(d);
+      filled.push("date");
+    }
+    const ref = r.reference ?? (r.chequeNo ? `Cheque ${r.chequeNo}` : null);
+    if (ref && !reference.trim()) {
+      setReference(ref);
+      filled.push("reference");
+    }
+    if (r.mode && /^cash$/i.test(r.mode)) {
+      setMode("Cash");
+      filled.push("payment type");
+    } else if (r.mode) {
+      const ours = matchBankAccount(accounts, isIn ? r.payeeAccountLast4 : r.payerAccountLast4, r.bankName);
+      if (ours) {
+        setMode(ours.name);
+        filled.push("account");
+      } else extra.push(`Paid by ${r.mode} — pick the account it went through.`);
+    }
+    return filledNote(filled, r.uncertainFields, extra.join(" "));
+  }
+
   return (
     <Drawer
       title={title}
@@ -509,6 +555,8 @@ function PaymentForm({
     >
       <div className="space-y-4">
         {error && <div className="rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-600">{error}</div>}
+
+        <ScanButton kind="PAYMENT" hint="UPI screenshot, bank advice, cheque or receipt" onResult={applyPayment} />
 
         <DrawerField label="Project" required>
           <Select

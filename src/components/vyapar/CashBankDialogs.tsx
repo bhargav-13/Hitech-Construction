@@ -4,6 +4,8 @@ import { useState } from "react";
 import { Drawer } from "@/components/Drawer";
 import { Select } from "@/components/Select";
 import { DatePicker } from "@/components/DatePicker";
+import { ScanButton } from "@/components/ScanButton";
+import { filledNote, isoDate, type ScannedContact, type ScannedPayment } from "@/lib/docScan";
 import { inr } from "@/lib/format";
 import * as vyapar from "@/lib/vyaparApi";
 import type { BankAccount } from "@/lib/vyaparApi";
@@ -62,6 +64,28 @@ export function BankAccountDialog({
     }
   }
 
+  /** A cancelled cheque or passbook front page read into the account details. Blanks only. */
+  function applyCheque(c: ScannedContact) {
+    const filled: string[] = [];
+    const fill = (cur: string, v: string | null, setter: (x: string) => void, label: string) => {
+      if (v && !cur.trim()) {
+        setter(v);
+        filled.push(label);
+      }
+    };
+    fill(accountNumber, c.accountNo?.replace(/\s/g, "") ?? null, setAccountNumber, "account number");
+    fill(ifsc, c.ifsc?.toUpperCase() ?? null, setIfsc, "IFSC");
+    fill(bankName, c.bankName, setBankName, "bank");
+    fill(accountHolder, c.name ?? c.contactPerson, setAccountHolder, "account holder");
+    if (!name.trim() && c.bankName) {
+      const tail = (c.accountNo ?? "").replace(/\D/g, "").slice(-4);
+      setName(tail ? `${c.bankName} ${tail}` : c.bankName);
+      filled.push("display name");
+    }
+    if (filled.length) setMore(true);
+    return filledNote(filled, c.uncertainFields);
+  }
+
   return (
     <Drawer
       title={existing ? "Edit Bank Account" : "Add Bank Account"}
@@ -72,6 +96,7 @@ export function BankAccountDialog({
     >
       <div className="space-y-5">
         {error && <div className="rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-600">{error}</div>}
+        <ScanButton kind="CONTACT" hint="Cancelled cheque or passbook front page" onResult={applyCheque} />
 
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
           <Field label="Account Display Name" required>
@@ -198,10 +223,31 @@ export function CashBankEntryDialog({
 
   const accountOptions = accounts.map((a) => ({ value: String(a.id), label: a.name }));
 
+  /** A deposit / withdrawal slip or transfer advice read into amount, date and description. */
+  function applySlip(r: ScannedPayment) {
+    const filled: string[] = [];
+    if (r.amount && r.amount > 0) {
+      setAmount(r.amount);
+      filled.push("amount");
+    }
+    const d = isoDate(r.date);
+    if (d) {
+      setDate(d);
+      filled.push("date");
+    }
+    const desc = [r.purpose, r.reference ? `Ref ${r.reference}` : null, r.chequeNo ? `Chq ${r.chequeNo}` : null].filter(Boolean).join(" · ");
+    if (desc && !description.trim()) {
+      setDescription(desc);
+      filled.push("description");
+    }
+    return filledNote(filled, r.uncertainFields);
+  }
+
   return (
     <Drawer title={TITLES[kind]} onClose={onClose} onSave={submit} saveLabel={saving ? "Saving…" : "Save"} width="max-w-lg">
       <div className="space-y-4">
         {error && <div className="rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-600">{error}</div>}
+        <ScanButton kind="PAYMENT" hint="Deposit / withdrawal slip or transfer advice" onResult={applySlip} />
 
         {isAdjust && (
           <div className="flex gap-4">

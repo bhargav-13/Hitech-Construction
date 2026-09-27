@@ -15,8 +15,22 @@ import { inr, qty as formatQty } from "@/lib/format";
 import { usePaymentTypeOptions, useBankAccountResolver } from "@/lib/bankScope";
 import { GST_RATE_OPTIONS, ITC_ELIGIBILITY, ITC_DEFAULT, gstCodeForPercent, gstPercent, gstRate } from "@/lib/gstRates";
 import { downloadInvoicePdf, getCachedFirmProfile } from "@/lib/vyaparExport";
-import { readBillText } from "@/lib/billOcr";
-import { parseBill, stateOfGstin, type ParsedBill } from "@/lib/billParse";
+import {
+  filledNote,
+  isScannable,
+  isoDate,
+  listJoin,
+  matchByNameOrGstin,
+  matchOption,
+  SCAN_ACCEPT,
+  SCAN_NOT_READY,
+  scanAvailable,
+  scanDocument,
+  squash,
+  stateOfGstin,
+  validGstin,
+  type ScannedBill,
+} from "@/lib/docScan";
 import { BillPreviewPane, type ScanNote } from "@/components/vyapar/BillPreviewPane";
 import { ApprovalPanel } from "@/components/approval/ApprovalBadge";
 import type { ApprovalState } from "@/lib/api";
@@ -42,8 +56,8 @@ import {
   Link2,
   Plus,
   Printer,
-  ScanLine,
   Share2,
+  Sparkles,
   X,
 } from "lucide-react";
 
@@ -156,6 +170,7 @@ export function InvoiceBuilder({
   onPartyCreated,
   projectId: projectOverride,
   initialAttachment,
+  autoScan = false,
   prefill,
   approvalType,
   approval,
@@ -178,6 +193,8 @@ export function InvoiceBuilder({
    * document — an existing one already carries whatever was filed against it.
    */
   initialAttachment?: { imageDataUrl: string | null; documentName: string | null; documentDataUrl: string | null };
+  /** Read `initialAttachment` with AI as soon as the form opens (Upload Bill's "Scan and fill"). */
+  autoScan?: boolean;
   /**
    * A document started elsewhere — today, a purchase order carried over from an awarded RFQ.
    * Only meaningful on a new document: an `existing` one already has its own values, and they win.
@@ -450,13 +467,23 @@ export function InvoiceBuilder({
         : null);
   const showPreview = previewOpen && preview != null;
 
+  // Hidden on a server with no scanning key, like every other "Scan with AI" button.
+  const [scanReady, setScanReady] = useState(false);
+  useEffect(() => {
+    let live = true;
+    scanAvailable().then((ok) => live && setScanReady(ok));
+    return () => {
+      live = false;
+    };
+  }, []);
+
   async function scanFile(file: File, attach = true) {
-    const isPdf = file.type === "application/pdf" || /\.pdf$/i.test(file.name);
-    if (!isPdf && !file.type.startsWith("image/")) {
-      setScanNote({ tone: "bad", text: "Pick a PDF or a photo of the bill." });
+    if (!isScannable(file)) {
+      setScanNote({ tone: "bad", text: "Pick a PDF, or a JPEG / PNG photo of the bill." });
       setPreviewOpen(true);
       return;
     }
+    const isPdf = file.type === "application/pdf" || /\.pdf$/i.test(file.name);
     setScanNote(null);
     setScanning(true);
     setScanStatus("Reading the bill…");
@@ -474,13 +501,16 @@ export function InvoiceBuilder({
           setImageDataUrl(await readImageAsDataUrl(file, 1400));
         }
       }
-      const [text, firm] = await Promise.all([
-        readBillText(file, setScanStatus),
-        getCachedFirmProfile().catch(() => null),
-      ]);
-      const parsed = parseBill(text.rows, { ownGstin: firm?.gstin });
+      const firm = await getCachedFirmProfile().catch(() => null);
+      const scanned = await scanDocument("BILL", file, {
+        onProgress: setScanStatus,
+        hints: {
+          "Our firm (not the counterparty)": [firm?.businessName, firm?.gstin].filter(Boolean).join(", "),
+          "This form": `${docHeading} — the counterparty is the ${isSupplierSide ? "supplier (usually the seller)" : "customer (usually the buyer)"}`,
+        },
+      });
       const firmState = ownState ?? (stateOfGstin(firm?.gstin) || firm?.state || null);
-      let note = applyScan(parsed, text.source, firm?.businessName ?? null, firmState);
+      let note: ScanNote = applyScan(scanned, firm?.businessName ?? null, firm?.gstin ?? null, firmState);
       if (attach && isPdf && file.size > MAX_DOC_BYTES) {
         note = { ...note, text: `${note.text} The PDF is over 4 MB, so it wasn't attached to the document.` };
       }
@@ -499,99 +529,134 @@ export function InvoiceBuilder({
     await scanFile(new File([blob], preview.name, { type: blob.type }), false);
   }
 
-  /** Put what was read onto the form. Returns the note shown above the bill. */
-  function applyScan(
-    parsed: ParsedBill,
-    source: "pdf-text" | "ocr",
-    ownName: string | null,
-    ownState: string | null,
-  ): ScanNote {
-    const squash = (s: string | null | undefined) => (s ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  /**
+   * Put what was read onto the form. Returns the note shown above the bill.
+   *
+   * Values only — nothing is saved. The user checks the form against the bill beside it and
+   * presses Save themselves.
+   */
+  function applyScan(bill: ScannedBill, ownName: string | null, ownGstin: string | null, ownState: string | null): ScanNote {
     const filled: string[] = [];
+    const warnings: string[] = [];
     let partyHint = "";
 
-    if (parsed.invoiceNo && !invoiceNo.trim()) {
-      setInvoiceNo(parsed.invoiceNo);
+    // Which side of the bill is the other party: whichever isn't us; failing that, the side this
+    // kind of document deals with.
+    const isUs = (p: ScannedBill["seller"]) =>
+      (!!ownGstin && !!p.gstin && p.gstin.toUpperCase() === ownGstin.toUpperCase()) ||
+      (!!ownName && !!p.name && squash(p.name) === squash(ownName));
+    const other = isUs(bill.seller) ? bill.buyer : isUs(bill.buyer) ? bill.seller : isSupplierSide ? bill.seller : bill.buyer;
+    const otherGstin = validGstin(other.gstin);
+
+    if (bill.documentNo && !invoiceNo.trim()) {
+      setInvoiceNo(bill.documentNo);
       filled.push(isPurchase ? "bill no." : "number");
     }
-    if (parsed.invoiceDate) {
-      setInvoiceDate(parsed.invoiceDate);
+    const docDate = isoDate(bill.documentDate);
+    if (docDate) {
+      setInvoiceDate(docDate);
       filled.push("date");
     }
+    const due = isoDate(bill.dueDate);
+    if (due && !dueDate) {
+      setDueDate(due);
+      filled.push("due date");
+    }
 
-    const partyState = stateOfGstin(parsed.partyGstin);
+    const partyState =
+      stateOfGstin(otherGstin) ?? matchOption(STATES_OF_SUPPLY, other.state) ?? matchOption(STATES_OF_SUPPLY, bill.placeOfSupply);
+    let match: Party | null = null;
     if (!partyId) {
-      const guess = parsed.partyName && squash(parsed.partyName) !== squash(ownName) ? parsed.partyName : null;
-      const match =
-        (parsed.partyGstin && parties.find((p) => (p.gstin ?? "").toUpperCase() === parsed.partyGstin)) ||
-        (guess && parties.find((p) => squash(p.name) === squash(guess))) ||
-        null;
+      match = matchByNameOrGstin(parties, other.name, otherGstin);
       if (match) {
         pickParty(match);
         filled.push("party");
-      } else if (guess) {
-        setPartyText(guess);
-        partyHint = ` “${guess}” isn't a saved party yet — use Add Party in the party box to create it${
-          parsed.partyGstin ? ` (GSTIN ${parsed.partyGstin})` : ""
+      } else if (other.name) {
+        setPartyText(other.name);
+        partyHint = ` “${other.name}” isn't a saved party yet — use Add Party in the party box to create it${
+          otherGstin ? ` (GSTIN ${otherGstin})` : ""
         }.`;
       }
-      if (showStateOfSupply && partyState && STATES_OF_SUPPLY.includes(partyState) && !match?.state) {
-        setStateOfSupply(partyState);
-      }
+    }
+    const supply = matchOption(STATES_OF_SUPPLY, bill.placeOfSupply) ?? partyState;
+    if (showStateOfSupply && supply && !stateOfSupply && !match?.state) {
+      setStateOfSupply(supply);
+      filled.push("state of supply");
     }
 
     // A supplier in another state bills IGST; the same slab within the state is CGST + SGST.
-    const interState = !!partyState && !!ownState && partyState.toLowerCase() !== ownState.trim().toLowerCase();
-    const newLines: LineDraft[] = parsed.lines.map((l) => {
-      const item = items.find((i) => squash(i.name) === squash(l.name));
-      let code = gstCodeForPercent(l.taxPercent ?? item?.taxPercent ?? 0);
-      if (interState && code.startsWith("GST@")) code = `I${code}`;
-      return {
-        itemId: item?.id ?? null,
-        itemName: item?.name ?? l.name,
-        description: "",
-        hsn: l.hsn ?? item?.hsn ?? "",
-        unit: l.unit ?? (item?.unit || "NONE"),
-        quantity: l.quantity,
-        rate: l.rate,
-        discountPercent: 0,
-        taxCode: code,
-        itcEligibility: isPurchase ? ITC_DEFAULT : "",
-      };
-    });
+    const inter = !!supply && !!ownState ? !sameState(supply, ownState) : (bill.igst ?? 0) > 0;
+    const unitFor = (u: string | null) => {
+      if (!u) return null;
+      const n = squash(u);
+      return masters.units.find((x) => squash(x.short) === n || squash(x.name) === n)?.short ?? u.toUpperCase();
+    };
+    const newLines: LineDraft[] = bill.lines
+      .filter((l) => (l.name ?? "").trim() || (l.rate ?? 0) > 0 || (l.amount ?? 0) > 0)
+      .map((l) => {
+        const item = matchByNameOrGstin(items, l.name);
+        const quantity = l.quantity && l.quantity > 0 ? l.quantity : 1;
+        // No rate printed but an amount is: the rate is what makes the amount.
+        const rate = l.rate ?? (l.amount != null ? Math.round((l.amount / quantity) * 10000) / 10000 : 0);
+        const code = codeForSupply(gstCodeForPercent(l.taxPercent ?? item?.taxPercent ?? 0), inter);
+        return {
+          itemId: item?.id ?? null,
+          itemName: item?.name ?? l.name ?? "",
+          description: "",
+          hsn: l.hsn ?? item?.hsn ?? "",
+          unit: unitFor(l.unit) ?? (item?.unit || "NONE"),
+          quantity,
+          rate,
+          discountPercent: l.discountPercent ?? 0,
+          taxCode: code,
+          itcEligibility: isPurchase ? ITC_DEFAULT : "",
+        };
+      });
     if (newLines.length > 0) {
       // Replace the blank starter rows and any earlier scan; keep anything the user typed or edited.
       const previous = lastScanLines.current;
       setLines((prev) => [...prev.filter((l) => l.itemName.trim() && !previous.includes(l)), ...newLines]);
       lastScanLines.current = newLines;
-      setPriceHasTax(false);
+      setPriceHasTax(!!bill.pricesIncludeTax);
+      filled.unshift(`${newLines.length} item${newLines.length === 1 ? "" : "s"}`);
+      const unmatched = newLines.filter((l) => l.itemId == null).length;
+      if (unmatched) warnings.push(`${unmatched} line${unmatched === 1 ? " isn't" : "s aren't"} a saved item yet.`);
     }
 
-    if (newLines.length === 0 && filled.length === 0) {
-      return {
-        tone: "warn",
-        text:
-          source === "ocr"
-            ? "Couldn't pick out the bill's details from this image. A sharp, straight-on photo in good light reads best — or key it in with the bill beside you."
-            : "Couldn't find the bill's details in this PDF. Key it in with the bill beside you." + partyHint,
-      };
+    const charges = bill.otherCharges.filter((c) => (c.amount ?? 0) !== 0);
+    if (charges.length) {
+      warnings.push(
+        `The bill also charges ${listJoin(charges.map((c) => `${c.label ?? "other"} ${inr(c.amount ?? 0)}`))} — add ${
+          charges.length === 1 ? "it" : "them"
+        } as a line if it should count.`,
+      );
     }
 
-    const parts = [...(newLines.length ? [`${newLines.length} item${newLines.length === 1 ? "" : "s"}`] : []), ...filled];
-    let text = `Filled ${parts.join(", ")} from the ${source === "ocr" ? "scan" : "PDF"}.`;
-    let tone: ScanNote["tone"] = source === "ocr" ? "warn" : "good";
-    if (parsed.total && newLines.length) {
-      const sum = newLines.reduce((s, l) => s + l.quantity * l.rate * (1 + gstPercent(l.taxCode) / 100), 0);
-      if (Math.abs(sum - parsed.total) > Math.max(2, parsed.total * 0.01)) {
-        tone = "warn";
-        text += ` The bill says ${inr(parsed.total)} but the lines read add up to ${inr(sum)} — look for a missed or misread row.`;
+    // Does what was read add up to what the bill says? A mismatch almost always means a missed row.
+    if (bill.grandTotal && newLines.length) {
+      const sum =
+        newLines.reduce((s, l) => {
+          const base = l.quantity * l.rate * (1 - l.discountPercent / 100);
+          return s + (bill.pricesIncludeTax ? base : base * (1 + gstPercent(l.taxCode) / 100));
+        }, 0) + charges.reduce((s, c) => s + (c.amount ?? 0), 0);
+      if (Math.abs(sum - bill.grandTotal) > Math.max(5, bill.grandTotal * 0.001)) {
+        warnings.push(`The bill says ${inr(bill.grandTotal)} but the lines add up to ${inr(sum)} — look for a missed or misread row.`);
       } else {
-        text += ` Lines add up to the bill total of ${inr(parsed.total)}.`;
+        filled.push(`total ${inr(bill.grandTotal)} matches`);
       }
     }
-    text += " Check each line against the bill before saving." + partyHint;
-    return { tone, text };
+
+    return filledNote(filled, bill.uncertainFields, (warnings.join(" ") + partyHint).trim());
   }
+
+  /** A bill handed over from Upload Bill with "Scan and fill" is read as soon as the form opens. */
+  const autoScanned = useRef(false);
+  useEffect(() => {
+    if (!autoScan || autoScanned.current || !scanReady || !preview) return;
+    autoScanned.current = true;
+    void scanAttached();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoScan, scanReady, preview]);
 
   /**
    * The error banner sits at the top of the form, but Save sits at the bottom of a tall one. A
@@ -1031,7 +1096,7 @@ export function InvoiceBuilder({
           scanning={scanning}
           status={scanStatus}
           note={scanNote}
-          onRead={() => void scanAttached()}
+          onRead={scanReady ? () => void scanAttached() : undefined}
           onClose={() => setPreviewOpen(false)}
         />
       )}
@@ -1082,16 +1147,20 @@ export function InvoiceBuilder({
             <button
               type="button"
               onClick={() => scanInputRef.current?.click()}
-              disabled={scanning}
-              title="Pick the supplier's PDF or a photo of the bill — its details are read into this form"
-              className="flex items-center gap-1.5 rounded-lg border border-brand-accent px-3 py-1.5 text-sm font-medium text-brand-accent transition-all duration-150 hover:bg-cyan-50 active:scale-95 disabled:opacity-50"
+              disabled={scanning || !scanReady}
+              title={
+                scanReady
+                  ? "Pick the PDF or a photo of the document — AI reads its details into this form for you to check"
+                  : SCAN_NOT_READY
+              }
+              className="flex items-center gap-1.5 rounded-lg border border-violet-200 bg-violet-50 px-3 py-1.5 text-sm font-medium text-violet-700 transition-all duration-150 hover:border-violet-400 hover:bg-violet-100 active:scale-95 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              <ScanLine size={14} /> {scanning ? "Reading…" : "Scan bill (OCR)"}
+              <Sparkles size={14} /> {scanning ? "Reading…" : "Scan with AI"}
             </button>
             <input
               ref={scanInputRef}
               type="file"
-              accept="application/pdf,image/*"
+              accept={SCAN_ACCEPT}
               className="hidden"
               onChange={(e) => {
                 const file = e.target.files?.[0];

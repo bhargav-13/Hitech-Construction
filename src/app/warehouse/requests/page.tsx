@@ -6,6 +6,8 @@ import { MovementDialog } from "@/components/warehouse/MovementDialog";
 import { Drawer, DrawerField } from "@/components/Drawer";
 import { Select } from "@/components/Select";
 import { DatePicker } from "@/components/DatePicker";
+import { ScanButton } from "@/components/ScanButton";
+import { filledNote, matchByNameOrGstin, type ScannedItemList } from "@/lib/docScan";
 import { TypeaheadPicker } from "@/components/vyapar/TypeaheadPicker";
 import { RowMenu, RowMenuDivider, RowMenuItem } from "@/components/RowMenu";
 import { useWarehouseStore, stockOf, emptyRequest, warehouseUid, reportRefusal } from "@/lib/warehouseStore";
@@ -316,6 +318,35 @@ function RequestDialog({
   const setLine = (id: string, patch: Partial<(typeof lines)[number]>) =>
     setLines((prev) => prev.map((l) => (l.id === id ? { ...l, ...patch } : l)));
 
+  /**
+   * The site's handwritten indent read into request lines. A request can only carry catalogue
+   * items, so a material that isn't on file becomes a line with its name typed in and no item
+   * picked — the user picks the match (or it is dropped at Save, as an unpicked line always is).
+   */
+  function applyIndent(r: ScannedItemList) {
+    const read = r.lines.filter((l) => l.name);
+    const fresh = read.map((l) => {
+      const it = matchByNameOrGstin(items, l.name);
+      return { line: { id: warehouseUid("rl"), itemId: it?.id ?? 0, quantity: l.quantity && l.quantity > 0 ? l.quantity : 1, issuedQuantity: 0 }, text: it?.name ?? l.name ?? "" };
+    });
+    if (fresh.length) {
+      setLines((prev) => [...prev.filter((l) => l.itemId > 0), ...fresh.map((f) => f.line)]);
+      setTexts((t) => ({ ...t, ...Object.fromEntries(fresh.map((f) => [f.line.id, f.text])) }));
+    }
+    const site = r.site ?? r.partyName;
+    if (!projectId && site) {
+      const p = projects.find((x) => matchByNameOrGstin([{ name: x.name }], site));
+      if (p) setProjectId(p.id);
+    }
+    if (r.notes && !note.trim()) setNote(r.notes);
+    const unpicked = fresh.filter((f) => f.line.itemId === 0).length;
+    return filledNote(
+      fresh.length ? [`${fresh.length} item${fresh.length === 1 ? "" : "s"}`] : [],
+      r.uncertainFields,
+      unpicked ? `${unpicked} ${unpicked === 1 ? "isn't" : "aren't"} in the catalogue — pick the matching item or they won't be saved.` : "",
+    );
+  }
+
   function save() {
     const clean = lines.filter((l) => l.itemId > 0 && l.quantity > 0);
     if (!projectId) return setError("Which site is asking?");
@@ -333,6 +364,8 @@ function RequestDialog({
     >
       <div className="space-y-5">
         {error && <div className="rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-600">{error}</div>}
+
+        <ScanButton kind="ITEM_LIST" label="Scan indent with AI" hint="Handwritten indent or requisition slip" onResult={applyIndent} />
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <DrawerField label="Site" required>

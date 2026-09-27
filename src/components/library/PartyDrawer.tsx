@@ -8,6 +8,8 @@ import * as api from "@/lib/api";
 import * as vyapar from "@/lib/vyaparApi";
 import { GST_TYPES } from "@/lib/vyaparApi";
 import { DepartmentSelect } from "@/components/DepartmentSelect";
+import { ScanButton } from "@/components/ScanButton";
+import { filledNote, matchOption, mobile10, stateOfGstin, validGstin, type ScannedContact } from "@/lib/docScan";
 import {
   PARTY_TYPE_GROUPS,
   fieldsForType,
@@ -67,6 +69,27 @@ export function PartyDrawer({
 
   const fields = useMemo(() => new Set(fieldsForType(type)), [type]);
   const has = (key: PartyFieldKey) => fields.has(key);
+
+  /** Visiting card / GST certificate / letterhead → the blanks of this form. */
+  function applyContact(c: ScannedContact) {
+    const filled: string[] = [];
+    const fill = (cur: string, v: string | null | undefined, setter: (x: string) => void, label: string) => {
+      if (v && !cur.trim()) {
+        setter(v);
+        filled.push(label);
+      }
+    };
+    const g = validGstin(c.gstin);
+    fill(name, c.name ?? c.contactPerson, setName, "name");
+    fill(phone, mobile10(c.phone), setPhone, "phone");
+    fill(email, c.email, setEmail, "email");
+    if (has("gstin")) fill(gstin, g, setGstin, "GSTIN");
+    if (has("gstType") && g && !gstType) setGstType(GST_TYPES[1]);
+    if (has("state")) fill(state, stateOfGstin(g) ?? matchOption(vyapar.STATES_OF_SUPPLY, c.state), setState, "state");
+    if (has("city")) fill(city, c.city, setCity, "city");
+    if (has("billingAddress")) fill(billingAddress, c.address, setBillingAddress, "address");
+    return filledNote(filled, c.uncertainFields);
+  }
   // An existing party can't change which system it lives in, so its type is locked to that group.
   const lockedSource = existing?.source;
 
@@ -182,6 +205,7 @@ export function PartyDrawer({
         />
       ) : (
       <div className="space-y-4">
+        <ScanButton kind="CONTACT" hint="Visiting card, GST certificate or letterhead" onResult={applyContact} />
         <DrawerField label="Party Type" required>
           <Select
             value={type}

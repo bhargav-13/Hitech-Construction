@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Modal } from "@/components/Modal";
-import { FileText, Upload, X } from "lucide-react";
+import { FileText, Sparkles, Upload, X } from "lucide-react";
+import { SCAN_NOT_READY, scanAvailable } from "@/lib/docScan";
 
 /** Attachments ride inside the invoice JSON, so keep them postable. */
 const MAX_BILL_BYTES = 10 * 1024 * 1024;
@@ -56,19 +57,30 @@ export interface BillAttachment {
  * Previously the file was previewed and then silently dropped on the way to a blank form, which is
  * why "upload bill" appeared to do nothing.
  *
- * Automatic field extraction (OCR) still needs the bill-scan service; this is attach-and-key.
+ * "Scan & fill with AI" does the same hand-off and then has the form read the bill, so the user
+ * lands on a filled form with the bill beside it — to check, correct and Save. Nothing is saved
+ * by the scan itself.
  */
 export function UploadBillDialog({
   onClose,
   onContinue,
 }: {
   onClose: () => void;
-  onContinue: (attachment: BillAttachment) => void;
+  /** `scan` asks the form to read the bill with AI as it opens. */
+  onContinue: (attachment: BillAttachment, scan: boolean) => void;
 }) {
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [canScan, setCanScan] = useState(false);
+  useEffect(() => {
+    let live = true;
+    scanAvailable().then((ok) => live && setCanScan(ok));
+    return () => {
+      live = false;
+    };
+  }, []);
 
   function pick(f: File | null) {
     setFile(f);
@@ -77,7 +89,7 @@ export function UploadBillDialog({
   }
 
   /** Read the file into a data URL, downscaling a photo so a phone snap doesn't bloat the bill. */
-  async function handOff() {
+  async function handOff(scan: boolean) {
     if (!file) return;
     if (file.size > MAX_BILL_BYTES) {
       setError(`"${file.name}" is larger than 10 MB. Attach a smaller file.`);
@@ -86,9 +98,10 @@ export function UploadBillDialog({
     setBusy(true);
     try {
       if (file.type.startsWith("image/")) {
-        onContinue({ imageDataUrl: await downscaleImage(file), documentName: null, documentDataUrl: null });
+        // Small print needs more pixels to read than to look at.
+        onContinue({ imageDataUrl: await downscaleImage(file, scan ? 2000 : 1400), documentName: null, documentDataUrl: null }, scan);
       } else {
-        onContinue({ imageDataUrl: null, documentName: file.name, documentDataUrl: await readAsDataUrl(file) });
+        onContinue({ imageDataUrl: null, documentName: file.name, documentDataUrl: await readAsDataUrl(file) }, scan);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Couldn't read that file.");
@@ -107,7 +120,7 @@ export function UploadBillDialog({
             <label className="flex cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-gray-300 bg-gray-50/60 px-6 py-10 text-center transition-colors duration-150 hover:border-brand-accent hover:bg-cyan-50/40">
               <input
                 type="file"
-                accept="image/*,application/pdf"
+                accept="image/jpeg,image/png,image/webp,application/pdf"
                 hidden
                 onChange={(e) => pick(e.target.files?.[0] ?? null)}
               />
@@ -143,7 +156,9 @@ export function UploadBillDialog({
 
         <p className="mt-3 text-[11px] text-gray-400">
           The file is attached to the bill you enter next, so the supplier&apos;s own document stays with it.
-          Automatic data extraction (OCR) arrives with the bill-scan service.
+          {canScan
+            ? " Scan & fill reads the bill number, date, party and every item for you to check before saving."
+            : " Scan & fill with AI isn't set up on the server yet."}
         </p>
 
         <div className="mt-6 flex justify-end gap-2">
@@ -154,11 +169,19 @@ export function UploadBillDialog({
             Cancel
           </button>
           <button
-            onClick={handOff}
+            onClick={() => handOff(false)}
             disabled={!file || busy}
-            className="rounded-lg bg-rose-600 px-4 py-2 text-sm font-medium text-white transition-all duration-150 hover:bg-rose-700 active:scale-95 disabled:opacity-50"
+            className="rounded-lg border border-gray-200 px-4 py-2 text-sm font-medium text-gray-700 transition-all duration-150 hover:bg-gray-50 active:scale-95 disabled:opacity-50"
           >
             {busy ? "Attaching…" : "Enter Bill Details"}
+          </button>
+          <button
+            onClick={() => handOff(true)}
+            disabled={!file || busy || !canScan}
+            title={canScan ? undefined : SCAN_NOT_READY}
+            className="flex items-center gap-1.5 rounded-lg bg-violet-600 px-4 py-2 text-sm font-medium text-white transition-all duration-150 hover:bg-violet-700 active:scale-95 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <Sparkles size={14} /> Scan &amp; fill with AI
           </button>
         </div>
       </div>
