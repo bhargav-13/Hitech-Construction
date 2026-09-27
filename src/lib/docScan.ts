@@ -169,7 +169,7 @@ export const MAX_SCAN_PAGES = 5;
 const PAGE_PX = 2000;
 
 /** Shown on a disabled scan button when the server has no key. */
-export const SCAN_NOT_READY = "AI scanning isn't set up on the server yet — the administrator needs to add an AI key (XAI_API_KEY or ANTHROPIC_API_KEY).";
+export const SCAN_NOT_READY = "AI scanning isn't set up on the server yet — the administrator needs to add an AI key (GROQ_API_KEY or OPENROUTER_API_KEY — both free).";
 
 export const SCAN_ACCEPT = "application/pdf,image/jpeg,image/png,image/webp";
 
