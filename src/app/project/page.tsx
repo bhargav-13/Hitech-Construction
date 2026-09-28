@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useDiscardGuard } from "@/lib/formDirty";
 import { useRouter } from "next/navigation";
 import { AppShell } from "@/components/AppShell";
+import { useCan } from "@/lib/permissions";
 import * as api from "@/lib/api";
 import type { ProjectResponse, ProjectStatus } from "@/lib/api";
 import { projectInitials } from "@/lib/projectHelpers";
@@ -50,6 +51,7 @@ const FILTERS: { key: "ALL" | ProjectStatus; label: string }[] = [
 
 export default function ProjectsPage() {
   const router = useRouter();
+  const can = useCan();
   const [projects, setProjects] = useState<ProjectResponse[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -104,6 +106,18 @@ export default function ProjectsPage() {
     });
   }, [projects, query, filter]);
 
+  // Reached by URL without project access: say so, instead of the empty portfolio, a New Project
+  // button and "Access is denied" underneath.
+  if (!can("PROJECT")) {
+    return (
+      <AppShell title="Projects">
+        <div className="rounded-xl border border-dashed border-gray-300 bg-white p-10 text-center text-sm text-gray-500">
+          Your role doesn&apos;t include Projects. Ask an admin to switch it on under Settings › Roles &amp; Access.
+        </div>
+      </AppShell>
+    );
+  }
+
   return (
     <AppShell title="Projects">
       {/* header */}
@@ -121,12 +135,14 @@ export default function ProjectsPage() {
           >
             <RefreshCw size={15} className={loading ? "animate-spin" : ""} /> Refresh
           </button>
-          <button
-            onClick={() => setShowNew(true)}
-            className="flex items-center gap-1.5 rounded-lg bg-brand-accent px-3.5 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-brand-accent-strong"
-          >
-            <Plus size={16} /> New Project
-          </button>
+          {can("PROJECT_PROJECTS:CREATE") && (
+            <button
+              onClick={() => setShowNew(true)}
+              className="flex items-center gap-1.5 rounded-lg bg-brand-accent px-3.5 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-brand-accent-strong"
+            >
+              <Plus size={16} /> New Project
+            </button>
+          )}
         </div>
       </div>
 

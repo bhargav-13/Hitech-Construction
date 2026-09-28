@@ -839,7 +839,13 @@ function ExpenseForm({
                   value={partyId}
                   onChange={setPartyId}
                   placeholder="Search by name / phone"
-                  options={[{ value: "", label: "Select party" }, ...parties.map((p) => ({ value: String(p.id), label: p.name }))]}
+                  options={[
+                    { value: "", label: "Select party" },
+                    // Deactivated parties are hidden unless this entry already uses one.
+                    ...parties
+                      .filter((p) => p.isActive !== false || String(p.id) === partyId)
+                      .map((p) => ({ value: String(p.id), label: p.name })),
+                  ]}
                 />
               </DrawerField>
             )}

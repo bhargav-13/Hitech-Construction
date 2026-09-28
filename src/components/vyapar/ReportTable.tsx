@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { Download, FileSpreadsheet, FileText, Printer, Search, Settings2, X } from "lucide-react";
 import { VyaparEmpty } from "@/components/vyapar/VyaparShell";
 import { Modal } from "@/components/Modal";
@@ -42,6 +43,8 @@ export function ReportTable<T>({
   /** A block printed under each row in the PDF — the item lines on a sale report. */
   detail,
   minWidth = 720,
+  /** Where clicking a row goes — the document behind it. Rows without one stay inert. */
+  rowHref,
 }: {
   title: string;
   subtitle?: string;
@@ -50,7 +53,9 @@ export function ReportTable<T>({
   filename: string;
   detail?: ReportDetail<T>;
   minWidth?: number;
+  rowHref?: (row: T) => string | null;
 }) {
+  const router = useRouter();
   const [q, setQ] = useState("");
   const [picking, setPicking] = useState(false);
   const [previewing, setPreviewing] = useState(false);
@@ -160,8 +165,17 @@ export function ReportTable<T>({
               </tr>
             </thead>
             <tbody>
-              {sorted.map((r, ri) => (
-                <tr key={ri} className="border-b border-gray-50 last:border-b-0 even:bg-gray-50/40">
+              {sorted.map((r, ri) => {
+                const href = rowHref?.(r) ?? null;
+                return (
+                <tr
+                  key={ri}
+                  onClick={href ? () => router.push(href) : undefined}
+                  title={href ? "Open this entry" : undefined}
+                  className={`border-b border-gray-50 last:border-b-0 even:bg-gray-50/40 ${
+                    href ? "cursor-pointer transition-colors hover:bg-cyan-50/60" : ""
+                  }`}
+                >
                   {columns.map((c) => (
                     <td
                       key={c.key}
@@ -173,7 +187,8 @@ export function ReportTable<T>({
                     </td>
                   ))}
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         </div>

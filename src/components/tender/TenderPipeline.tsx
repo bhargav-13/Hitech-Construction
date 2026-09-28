@@ -17,6 +17,8 @@ import {
   STATUS_META,
   SOURCE_META,
   PRIORITY_META,
+  EMD_MODE_META,
+  EMD_STATE_META,
   type Tender,
   type TenderStage,
   type TenderStatus,
@@ -150,54 +152,80 @@ function FollowUpCell({ t }: { t: Tender }) {
   );
 }
 
-const COLS: Record<PipelineVariant, Col[]> = {
-  research: [
-    { key: "department", label: "Department", sort: (t) => t.department, cell: (t) => tval(t.department) },
-    { key: "tenderId", label: "Tender ID", sort: (t) => t.tenderId, cell: (t) => tval(t.tenderId) },
-    { key: "nameOfWork", label: "Name of Work", sort: (t) => t.nameOfWork, cell: nameCell },
-    healthCol,
-    { key: "estimatedCost", label: "Est. Cost", align: "right", sort: (t) => t.estimatedCost, cell: (t) => tmoney(t.estimatedCost) },
-    { key: "deadline", label: "Deadline", sort: (t) => t.deadline, cell: (t) => dateCell(t.deadline) },
-    { key: "nextFollowUp", label: "Next Follow Up", sort: (t) => t.nextFollowUp, cell: (t) => <FollowUpCell t={t} /> },
-    { key: "hardcopyDue", label: "Hardcopy Due", sort: (t) => t.hardcopyDue, cell: (t) => dateCell(t.hardcopyDue) },
-    { key: "fee", label: "Fee", align: "right", sort: (t) => t.fee, cell: (t) => tmoney(t.fee) },
-    { key: "emd", label: "EMD", align: "right", sort: (t) => t.emd, cell: (t) => tmoney(t.emd) },
-    { key: "classReq", label: "Class", sort: (t) => t.classReq, cell: (t) => tval(t.classReq) },
-  ],
-  sorting: [
-    { key: "department", label: "Department", sort: (t) => t.department, cell: (t) => tval(t.department) },
-    { key: "tenderId", label: "Tender ID", sort: (t) => t.tenderId, cell: (t) => tval(t.tenderId) },
-    { key: "nameOfWork", label: "Name of Work", sort: (t) => t.nameOfWork, cell: nameCell },
-    healthCol,
-    { key: "estimatedCost", label: "Est. Cost", align: "right", sort: (t) => t.estimatedCost, cell: (t) => tmoney(t.estimatedCost) },
-    { key: "deadline", label: "Deadline", sort: (t) => t.deadline, cell: (t) => dateCell(t.deadline) },
-    { key: "nextFollowUp", label: "Next Follow Up", sort: (t) => t.nextFollowUp, cell: (t) => <FollowUpCell t={t} /> },
-    { key: "emd", label: "EMD", align: "right", sort: (t) => t.emd, cell: (t) => tmoney(t.emd) },
-    {
-      key: "priority",
-      label: "Priority",
-      sort: (t) => t.priority,
-      cell: (t) =>
-        t.priority ? (
-          <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ring-1 ring-inset ${PRIORITY_META[t.priority].chip}`}>
-            {PRIORITY_META[t.priority].label}
-          </span>
-        ) : (
-          "—"
-        ),
-    },
-    {
-      key: "pqCriteria",
-      label: "PQ Criteria",
-      sort: (t) => t.pqCriteria,
-      cell: (t) => (
-        <span className="block max-w-[200px] truncate" title={t.pqCriteria ?? ""}>
-          {tval(t.pqCriteria)}
+/** A long free-text cell — one line, the whole text on hover. */
+const textCell = (value: string | number | null | undefined, width = 200) => (
+  <span className="block truncate" style={{ maxWidth: width }} title={value == null ? "" : String(value)}>
+    {tval(value)}
+  </span>
+);
+
+/** EMD TYPE as the client's sheet has it: the instrument, plus whether it is paid/released. */
+const emdTypeCell = (t: Tender) =>
+  t.emdMode ? (
+    <span className="whitespace-nowrap">
+      {EMD_MODE_META[t.emdMode].label}
+      {t.emdState && t.emdState !== "PENDING" && (
+        <span className="ml-1 text-[10px] text-gray-400">· {EMD_STATE_META[t.emdState].label}</span>
+      )}
+    </span>
+  ) : (
+    tval(t.emdType)
+  );
+
+/**
+ * Sorting and Research, column for column in the order of the client's own tender sheet:
+ * S.No. (a fixed column, rendered first in the table), Department, Tender ID, Name of Work, Estimated Cost, Deadline, Duration, Pre-bid Info,
+ * Validity, Fee, EMD, EMD Type, Office Address, Hardcopy Due, Tech Open, Price Open, PQ Criteria,
+ * Class, GST, Lab Test, Price Escalation, Deposit Details, DLP, Stage Documents, View Documents,
+ * Remarks. The app's own additions (Health, Priority, Next Follow Up) follow, and any column can be
+ * hidden from the Columns menu.
+ */
+const SHEET_ORDER_COLS: Col[] = [
+  { key: "department", label: "Department", sort: (t) => t.department, cell: (t) => textCell(t.department, 180) },
+  { key: "tenderId", label: "Tender ID", sort: (t) => t.tenderId, cell: (t) => tval(t.tenderId) },
+  { key: "nameOfWork", label: "Name of Work", sort: (t) => t.nameOfWork, cell: nameCell },
+  { key: "estimatedCost", label: "Estimated Cost", align: "right", sort: (t) => t.estimatedCost, cell: (t) => tmoney(t.estimatedCost) },
+  { key: "deadline", label: "Deadline", sort: (t) => t.deadline, cell: (t) => dateCell(t.deadline) },
+  { key: "duration", label: "Duration", sort: (t) => t.durationMonths ?? t.duration, cell: (t) => textCell(t.duration, 110) },
+  { key: "preBidInfo", label: "Pre-bid Info", sort: (t) => t.preBidDate ?? t.preBidInfo, cell: (t) => textCell(t.preBidInfo ?? (t.preBidDate ? tdate(t.preBidDate) : null), 160) },
+  { key: "validity", label: "Validity", sort: (t) => t.validityDays ?? (t.validity == null ? null : String(t.validity)), cell: (t) => textCell(t.validity, 110) },
+  { key: "fee", label: "Fee", align: "right", sort: (t) => t.fee, cell: (t) => tmoney(t.fee) },
+  { key: "emd", label: "EMD", align: "right", sort: (t) => t.emd, cell: (t) => tmoney(t.emd) },
+  { key: "emdType", label: "EMD Type", sort: (t) => t.emdMode ?? t.emdType, cell: emdTypeCell },
+  { key: "officeAddress", label: "Office Address", sort: (t) => t.officeAddress, cell: (t) => textCell(t.officeAddress, 200) },
+  { key: "hardcopyDue", label: "Hardcopy Due", sort: (t) => t.hardcopyDue, cell: (t) => dateCell(t.hardcopyDue) },
+  { key: "techOpen", label: "Tech Open", sort: (t) => t.techOpen, cell: (t) => dateCell(t.techOpen) },
+  { key: "priceOpen", label: "Price Open", sort: (t) => t.priceOpen, cell: (t) => dateCell(t.priceOpen) },
+  { key: "pqCriteria", label: "PQ Criteria", sort: (t) => t.pqCriteria, cell: (t) => textCell(t.pqCriteria) },
+  { key: "classReq", label: "Class", sort: (t) => t.classReq, cell: (t) => textCell(t.classReq, 140) },
+  { key: "gst", label: "GST", sort: (t) => t.gst, cell: (t) => tval(t.gst) },
+  { key: "labTest", label: "Lab Test", sort: (t) => t.labTest, cell: (t) => textCell(t.labTest, 160) },
+  { key: "priceEscalation", label: "Price Escalation", sort: (t) => t.priceEscalation, cell: (t) => textCell(t.priceEscalation, 160) },
+  { key: "depositDetails", label: "Deposit Details", sort: (t) => t.depositDetails, cell: (t) => textCell(t.depositDetails, 180) },
+  { key: "dlp", label: "DLP", sort: (t) => t.dlp, cell: (t) => textCell(t.dlp, 110) },
+  { key: "stageDocuments", label: "Stage Documents", sort: (t) => t.stageDocuments, cell: (t) => textCell(t.stageDocuments, 180) },
+  { key: "viewDocuments", label: "View Documents", sort: (t) => t.viewDocuments, cell: (t) => textCell(t.viewDocuments, 180) },
+  { key: "remarks", label: "Remarks", sort: (t) => t.remarks, cell: (t) => textCell(t.remarks, 220) },
+  healthCol,
+  {
+    key: "priority",
+    label: "Priority",
+    sort: (t) => t.priority,
+    cell: (t) =>
+      t.priority ? (
+        <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ring-1 ring-inset ${PRIORITY_META[t.priority].chip}`}>
+          {PRIORITY_META[t.priority].label}
         </span>
+      ) : (
+        "—"
       ),
-    },
-    { key: "classReq", label: "Class", sort: (t) => t.classReq, cell: (t) => tval(t.classReq) },
-  ],
+  },
+  { key: "nextFollowUp", label: "Next Follow Up", sort: (t) => t.nextFollowUp, cell: (t) => <FollowUpCell t={t} /> },
+];
+
+const COLS: Record<PipelineVariant, Col[]> = {
+  research: SHEET_ORDER_COLS,
+  sorting: SHEET_ORDER_COLS,
   applied: [
     { key: "department", label: "Department", sort: (t) => t.department, cell: (t) => tval(t.department) },
     { key: "tenderId", label: "Tender ID", sort: (t) => t.tenderId, cell: (t) => tval(t.tenderId) },
@@ -814,6 +842,7 @@ export function TenderPipeline({ variant }: { variant: PipelineVariant }) {
                   <th className={`w-9 ${pad.head}`}>
                     <Checkbox checked={allChecked} onChange={toggleAll} label="Select all rows" />
                   </th>
+                  <th className={`w-10 ${pad.head} font-medium text-gray-400`}>S.No.</th>
                   <th className={`w-12 ${pad.head} font-medium text-gray-400`}>Src</th>
                   {showFlags && <th className={`w-8 ${pad.head}`} />}
                   {visibleCols.map((c) => (
@@ -844,6 +873,8 @@ export function TenderPipeline({ variant }: { variant: PipelineVariant }) {
                           onChange={(shift) => toggleChecked(t.id, i, shift)}
                         />
                       </td>
+                      {/* Position in the list as filtered and sorted — the client's sheet leads with it. */}
+                      <td className={`${pad.cell} text-gray-400 tabular-nums`}>{i + 1}</td>
                       <td className={pad.cell}>
                         <span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ring-1 ring-inset ${SOURCE_META[t.source].chip}`}>
                           {SOURCE_META[t.source].label}

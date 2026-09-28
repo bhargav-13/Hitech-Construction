@@ -8,6 +8,10 @@ import * as api from "@/lib/api";
 import * as vyapar from "@/lib/vyaparApi";
 import { GST_TYPES } from "@/lib/vyaparApi";
 import { DepartmentSelect } from "@/components/DepartmentSelect";
+import { PasswordField } from "@/components/PasswordField";
+import { StoredPassword } from "@/components/StoredPassword";
+import { useAuthStore } from "@/lib/authStore";
+import { isSuperAdminRole } from "@/lib/taskPermissions";
 import { ScanButton } from "@/components/ScanButton";
 import { filledNote, matchOption, mobile10, stateOfGstin, validGstin, type ScannedContact } from "@/lib/docScan";
 import {
@@ -53,6 +57,10 @@ export function PartyDrawer({
   const [phone, setPhone] = useState(existing?.phone ?? "");
   const [email, setEmail] = useState(existing?.email ?? "");
   const [password, setPassword] = useState("");
+  // Super Admin can set (and see, while typing) a member's password — the stored one is a one-way
+  // hash, so setting a new one is the only way to know it.
+  const canSetPassword = isSuperAdminRole(useAuthStore((s) => s.user?.role.name));
+  const [newPassword, setNewPassword] = useState("");
   const [roleId, setRoleId] = useState<number | "">(rawUser?.role.id ?? "");
   const [departmentId, setDepartmentId] = useState<number | "">(rawUser?.departmentId ?? "");
   const [staffType, setStaffType] = useState<"OFFICE" | "SITE" | "">(rawUser?.staffType ?? "");
@@ -107,6 +115,10 @@ export function PartyDrawer({
       setError("Staff and workers sign in, so email and password are required.");
       return;
     }
+    if (target === "member" && (existing ? newPassword : password) && (existing ? newPassword : password).length < 8) {
+      setError("A password needs at least 8 characters.");
+      return;
+    }
     if (target === "member" && !existing && roleId === "") {
       setError("Pick a role for this member.");
       return;
@@ -125,6 +137,7 @@ export function PartyDrawer({
             staffType: staffType || (type === "Worker" ? "SITE" : "OFFICE"),
             onPayroll,
           });
+          if (newPassword) await api.updateUserPassword(existing.sourceId, newPassword);
         } else {
           await api.createUser({
             email: email.trim(),
@@ -254,9 +267,19 @@ export function PartyDrawer({
 
         {/* ---- Member-only fields ---- */}
         {has("password") && !existing && (
-          <DrawerField label="Password" required>
-            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} className="input" />
+          <DrawerField label="Password" required group>
+            <PasswordField value={password} onChange={setPassword} />
           </DrawerField>
+        )}
+        {existing?.source === "member" && rawUser?.isLoginUser && canSetPassword && (
+          <>
+            <DrawerField label="Current password" group>
+              <StoredPassword userId={existing.sourceId} />
+            </DrawerField>
+            <DrawerField label="Set new password" group>
+              <PasswordField value={newPassword} onChange={setNewPassword} placeholder="Leave blank to keep the current one" />
+            </DrawerField>
+          </>
         )}
 
         {has("role") && (

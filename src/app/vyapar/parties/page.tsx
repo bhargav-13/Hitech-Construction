@@ -95,7 +95,7 @@ export default function PartiesPage() {
     setError("");
     try {
       const [list, users, loanList, reimbList] = await Promise.all([
-        vyapar.getParties(undefined, projectId),
+        vyapar.getParties(undefined, projectId, true),
         api.getUsers(0, 500).then((r) => r.content).catch(() => [] as UserResponse[]),
         getAllLoans().catch(() => [] as PayrollLoan[]),
         getAllReimbursements().catch(() => [] as PayrollReimbursement[]),
@@ -104,7 +104,10 @@ export default function PartiesPage() {
       setMembers(users);
       setLoans(loanList);
       setReimbursements(reimbList);
-      setSelectedId((cur) => cur ?? list[0]?.id ?? null);
+      // ?open=<id> (from a report row) wins over the default first party.
+      const wanted = Number(new URLSearchParams(window.location.search).get("open"));
+      const opened = wanted && list.some((p) => p.id === wanted) ? wanted : null;
+      setSelectedId((cur) => opened ?? cur ?? list[0]?.id ?? null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Couldn't load parties.");
     } finally {

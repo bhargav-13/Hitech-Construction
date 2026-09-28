@@ -1040,11 +1040,12 @@ export function InvoiceBuilder({
 
   const partyOptions = useMemo(() => {
     const wanted = isSupplierSide ? "SUPPLIER" : "CUSTOMER";
-    return [...parties].sort((a, b) => {
+    // Deactivated parties stay out of the picker — except one already on this document.
+    return parties.filter((p) => p.isActive !== false || String(p.id) === partyId).sort((a, b) => {
       const rank = (p: Party) => (p.partyType === wanted ? 0 : 1);
       return rank(a) - rank(b) || a.name.localeCompare(b.name);
     });
-  }, [parties, isSupplierSide]);
+  }, [parties, isSupplierSide, partyId]);
 
   return (
     <Drawer

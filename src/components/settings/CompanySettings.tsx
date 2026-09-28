@@ -509,7 +509,11 @@ function CompanyStaff({ companyId, companyName }: { companyId: number; companyNa
         />
       </div>
 
-      <div className="max-h-64 space-y-0.5 overflow-y-auto rounded-lg border border-gray-100 p-1">
+      {/* `relative` matters: each row's checkbox is an absolutely-positioned sr-only input. With no
+          positioned ancestor here they were placed against the page instead, escaping this scroll
+          box and stretching the whole document — scrolling past the end then dragged the app
+          shell up and left a blank band under the sidebar. */}
+      <div className="relative max-h-64 space-y-0.5 overflow-y-auto rounded-lg border border-gray-100 p-1">
         {shown.map((u) => {
           const on = picked.has(u.id);
           return (

@@ -8,6 +8,7 @@ import { ScanButton } from "@/components/ScanButton";
 import { contactAddress, filledNote, matchOption, mobile10, stateOfGstin, validGstin, type ScannedContact } from "@/lib/docScan";
 import * as vyapar from "@/lib/vyaparApi";
 import { useVyaparProjectId } from "@/lib/projectScope";
+import { useProjects } from "@/lib/useProjects";
 import { GST_TYPES, STATES_OF_SUPPLY } from "@/lib/vyaparApi";
 import type { Party } from "@/lib/vyaparApi";
 import { usePartySettings } from "@/lib/usePartySettings";
@@ -48,6 +49,12 @@ export function PartyDialog({
   const [email, setEmail] = useState(existing?.email ?? "");
   const [billingAddress, setBillingAddress] = useState(existing?.billingAddress ?? "");
   const [partyGroup, setPartyGroup] = useState(existing?.partyGroup ?? "");
+  // Which project's directory the party sits in. "" = shared by every project.
+  const { projects } = useProjects();
+  const [projectPick, setProjectPick] = useState<string>(() => {
+    const id = existing ? existing.projectId : scopedProjectId;
+    return id != null ? String(id) : "";
+  });
 
   const [openingBalance, setOpeningBalance] = useState(existing?.openingBalance ?? 0);
   const [openingDate, setOpeningDate] = useState(existing?.openingDate ?? new Date().toISOString().slice(0, 10));
@@ -73,9 +80,9 @@ export function PartyDialog({
     const body: Partial<Party> = {
       name: name.trim(),
       bankAccountId: existing ? existing.bankAccountId : null,
-      // A new party joins the directory of whatever project is in scope; on "All projects" it stays
-      // null, which the backend reads as shared. Editing never moves a party between projects.
-      projectId: existing ? existing.projectId : scopedProjectId ?? null,
+      // The project picker defaults to the header scope for a new party. 0 is the explicit "shared"
+      // (null would read as "leave unchanged" on edit, and a party could never be un-assigned).
+      projectId: projectPick ? Number(projectPick) : existing?.projectId != null ? 0 : null,
       partyType,
       gstin: gstin.trim() || null,
       gstType,
@@ -222,6 +229,23 @@ export function PartyDialog({
                     { value: "SUPPLIER", label: "Supplier" },
                   ]}
                 />
+              </Field>
+              <Field label="Project">
+                <Select
+                  value={projectPick}
+                  onChange={setProjectPick}
+                  options={[
+                    { value: "", label: "All projects (shared)" },
+                    ...projects.map((p) => ({ value: p.id, label: p.name })),
+                    // Keep a project the list can't show (no access / archived) rather than blanking it.
+                    ...(projectPick && !projects.some((p) => p.id === projectPick)
+                      ? [{ value: projectPick, label: `Project #${projectPick}` }]
+                      : []),
+                  ]}
+                />
+                <p className="mt-1 text-[11px] text-gray-400">
+                  A project&apos;s party list shows its own parties plus shared ones already used there.
+                </p>
               </Field>
               <Field label="GST Type">
                 <Select value={gstType} onChange={setGstType} options={GST_TYPES.map((g) => ({ value: g, label: g }))} />

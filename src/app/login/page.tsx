@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Building2, Lock, Mail } from "lucide-react";
 import { useAppStore } from "@/lib/store";
 import { useAuthStore } from "@/lib/authStore";
+import { landingPath } from "@/lib/nav";
 
 // Real login against the Spring Boot backend (hitech-backend). On success we also sign the
 // mock store into its seeded "Admin" user so the not-yet-migrated feature screens (which
@@ -22,14 +23,14 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
 
   useEffect(() => {
-    if (authUser) router.replace("/project");
+    if (authUser) router.replace(landingPath(authUser.permissions));
   }, [authUser, router]);
 
   async function signIn() {
     const ok = await authLogin(email, password);
     if (ok) {
       mockLogin("u-admin");
-      router.push("/project");
+      router.push(landingPath(useAuthStore.getState().user?.permissions));
     }
   }
 

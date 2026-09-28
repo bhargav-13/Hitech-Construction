@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import * as tasksApi from "./tasksApi";
+import { useAuthStore } from "./authStore";
 import { priorityToApi, statusToApi, taskFromApi } from "./taskTypes";
 import type { SubTask, Task, TaskPriority, TaskStatus } from "./taskTypes";
 
@@ -60,6 +61,11 @@ interface TaskState {
   tasks: Task[];
   loading: boolean;
   loaded: boolean;
+  /**
+   * Whose tasks `tasks` holds. The store lives for the whole tab, so without this a second person
+   * signing in on the same browser saw the first person's list until a hard refresh.
+   */
+  ownerId: number | null;
   error: string | null;
   /** Server-side visibility mode: MINE = my involvement only, ALL = MINE ∪ subtree∩projects. */
   scope: TaskScope;
@@ -111,6 +117,7 @@ export const useTaskStore = create<TaskState>((set, get) => ({
   tasks: [],
   loading: false,
   loaded: false,
+  ownerId: null,
   error: null,
   scope: "MINE",
 
@@ -121,12 +128,17 @@ export const useTaskStore = create<TaskState>((set, get) => ({
   },
 
   load: async (force = false) => {
-    if (get().loading) return;
-    if (get().loaded && !force) return;
-    set({ loading: true, error: null });
+    const me = useAuthStore.getState().user?.id ?? null;
+    const sameUser = get().ownerId === me;
+    if (get().loading && sameUser) return;
+    if (get().loaded && !force && sameUser) return;
+    // A different person: drop the previous list at once rather than show it while loading.
+    set(sameUser ? { loading: true, error: null } : { tasks: [], loading: true, loaded: false, error: null, ownerId: me });
     try {
       const res = await tasksApi.listTasks({ scope: get().scope });
-      set({ tasks: res.map(taskFromApi), loading: false, loaded: true });
+      // Signed out or switched while the request was in flight — this answer belongs to nobody here.
+      if ((useAuthStore.getState().user?.id ?? null) !== me) return;
+      set({ tasks: res.map(taskFromApi), loading: false, loaded: true, ownerId: me });
     } catch (err) {
       set({ loading: false, error: err instanceof Error ? err.message : "Failed to load tasks" });
     }
@@ -228,3 +240,10 @@ export const useTaskStore = create<TaskState>((set, get) => ({
     set({ tasks: upsertLocal(get().tasks, updated) });
   },
 }));
+
+// Sign-out / sign-in as someone else empties the list, so the next screen loads the new user's.
+useAuthStore.subscribe((state, prev) => {
+  if ((state.user?.id ?? null) !== (prev.user?.id ?? null)) {
+    useTaskStore.setState({ tasks: [], loaded: false, loading: false, ownerId: null, scope: "MINE", error: null });
+  }
+});

@@ -41,11 +41,11 @@ export default function PayrollRunPage() {
   const [actionError, setActionError] = useState("");
   const [editing, setEditing] = useState<PayslipApi | null>(null);
   /**
-   * What an unmarked day is worth. Left on "Paid" a month with two ticks and twenty-eight blanks
-   * pays a full salary, which is what made runs off a partly-filled site muster look wrong. Choose
-   * "Unpaid" and only marked days count.
+   * What an unmarked day is worth. Defaults to "Unpaid": on "Paid" a member present one day out of
+   * twenty-four was paid for twenty-four, which is what the client reported: payable days are the
+   * days marked. Paying blank weekly offs / holidays (in weeks worked) is a separate, opt-in choice.
    */
-  const [unmarked, setUnmarked] = useState<UnmarkedDayPolicy>("PRESENT");
+  const [unmarked, setUnmarked] = useState<UnmarkedDayPolicy>("ABSENT");
   /**
    * Payroll profiles, keyed by member, so a downloaded slip carries designation, joining date, PAN
    * and bank account. Without them the slip prints a row of dashes where the employee's details
@@ -132,8 +132,11 @@ export default function PayrollRunPage() {
               </>
             ) : (
               <>
-                Only days carrying a mark are paid: present, half-day (½), paid leave and week-off. Blank days count
-                as <strong>unpaid</strong>, so finish the muster before you lock the run.
+                Only days carrying a mark are paid: present, half-day (½), paid leave and week-off.
+                {unmarked === "ABSENT_PAY_OFFS"
+                  ? " Blank weekly offs and public holidays (from each member's shift and holiday policy) are also paid, in weeks the member worked."
+                  : " Sundays and holidays are paid only when marked WO / PL — or choose “Unpaid, but pay weekly offs”."}{" "}
+                Other blank days count as <strong>unpaid</strong>, so finish the muster before you lock the run.
               </>
             )}
           </p>
@@ -170,10 +173,11 @@ export default function PayrollRunPage() {
                   value={unmarked}
                   onChange={(v) => setUnmarked(v as UnmarkedDayPolicy)}
                   size="sm"
-                  className="min-w-[150px]"
+                  className="min-w-[200px]"
                   options={[
-                    { value: "PRESENT", label: "Count as paid" },
                     { value: "ABSENT", label: "Count as unpaid" },
+                    { value: "ABSENT_PAY_OFFS", label: "Unpaid, but pay weekly offs" },
+                    { value: "PRESENT", label: "Count as paid" },
                   ]}
                 />
               </label>

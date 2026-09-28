@@ -45,6 +45,10 @@ const MODULES: { code: string; rule?: string }[] = [
   },
   { code: "AUDIT" },
   { code: "APPROVAL" },
+  {
+    code: "LIBRARY",
+    rule: "Each library inside still follows its own module: the Tender Library needs Tender access, staff in the Party Library need User Management, and edits need that module's Create / Edit.",
+  },
   { code: "USER_MANAGEMENT" },
   { code: "SETTINGS" },
 ];

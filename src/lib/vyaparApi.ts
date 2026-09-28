@@ -281,8 +281,13 @@ export const getDashboard = (projectId?: number) =>
   apiRequest<DashboardSummary>(`${BASE}/dashboard${qs({ projectId })}`);
 
 // ---- Parties ----
-export const getParties = (type?: PartyType, projectId?: number) =>
-  apiRequest<Party[]>(`${BASE}/parties${qs({ type, projectId })}`);
+/**
+ * @param own on a project, list only that project's own parties plus shared ones already used there
+ *   (the Parties screen and reports). Leave off for pickers — a bill must be able to pick any shared
+ *   party, or a new site could never reuse an existing supplier.
+ */
+export const getParties = (type?: PartyType, projectId?: number, own?: boolean) =>
+  apiRequest<Party[]>(`${BASE}/parties${qs({ type, projectId, own: own ? "true" : undefined })}`);
 export const createParty = (body: Partial<Party>) =>
   apiRequest<Party>(`${BASE}/parties`, { method: "POST", body });
 export const updateParty = (id: number, body: Partial<Party>) =>

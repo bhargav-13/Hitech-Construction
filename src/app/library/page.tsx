@@ -37,6 +37,17 @@ export default function LibraryPage() {
   const can = useCan();
   const options = OPTIONS.filter((o) => can(o.need)).map(({ value, label }) => ({ value, label }));
 
+  // The sidebar hides Library without LIBRARY:VIEW; a typed or bookmarked URL lands here instead.
+  if (!can("LIBRARY")) {
+    return (
+      <AppShell title="Library">
+        <div className="rounded-xl border border-dashed border-gray-300 bg-white p-10 text-center text-sm text-gray-500">
+          Your role doesn&apos;t include the Library. Ask an admin to switch it on under Settings › Roles &amp; Access.
+        </div>
+      </AppShell>
+    );
+  }
+
   return (
     <AppShell title="Library">
       <div className="space-y-4">

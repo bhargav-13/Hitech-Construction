@@ -2,7 +2,7 @@
 
 import { useEffect } from "react";
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import {
   LayoutGrid,
   FileText,
@@ -62,7 +62,6 @@ const ICONS: Record<string, React.ComponentType<{ size?: number; className?: str
 
 export function Sidebar() {
   const pathname = usePathname();
-  const router = useRouter();
   // Persisted so collapsing survives navigation — AppShell (and this sidebar) remount per route.
   const collapsed = useUiStore((s) => s.sidebarCollapsed);
   const toggleSidebar = useUiStore((s) => s.toggleSidebar);
@@ -105,7 +104,10 @@ export function Sidebar() {
   async function handleLogout() {
     await authLogout();
     logout();
-    router.replace("/login");
+    // A full page load, not a client-side route change: every in-memory store (tasks, checklist,
+    // notifications, caches) is dropped with it, so the next person to sign in on this browser
+    // never sees what the last one had loaded.
+    window.location.replace("/login");
   }
 
   return (

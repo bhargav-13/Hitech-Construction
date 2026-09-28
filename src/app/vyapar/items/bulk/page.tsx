@@ -63,7 +63,12 @@ export default function BulkUpdateItemsPage() {
     let n = 0;
     try {
       for (const [id, patch] of Object.entries(draft)) {
-        await vyapar.updateItem(Number(id), patch);
+        // The item endpoint is a full replace, not a patch: sending only the edited cell left
+        // `name` (and everything else) blank, which the server rejects as "name : must not be
+        // blank". Send the whole item with the edits laid over it.
+        const item = items.find((i) => i.id === Number(id));
+        if (!item) continue;
+        await vyapar.updateItem(Number(id), { ...item, ...patch });
         n++;
       }
       setSaved(n);

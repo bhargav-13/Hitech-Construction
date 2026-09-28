@@ -1,7 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { LayoutGrid, Mail, MapPin, Phone, Rows3, Search } from "lucide-react";
+import { LayoutGrid, Mail, MapPin, Phone, Power, Rows3, Search, Trash2 } from "lucide-react";
+import { RowMenu, RowMenuDivider, RowMenuItem } from "@/components/RowMenu";
+import { ConfirmDialog } from "@/components/tender/ConfirmDialog";
+import * as vyapar from "@/lib/vyaparApi";
 import { Spinner } from "@/components/Spinner";
 import { Select } from "@/components/Select";
 import { PartyDrawer } from "@/components/library/PartyDrawer";
@@ -33,6 +36,65 @@ export function PartyLibrary() {
   const [statusFilter, setStatusFilter] = useState<"active" | "inactive" | "all">("active");
   const [view, setView] = useState<"table" | "grid">("table");
   const [drawer, setDrawer] = useState<{ mode: "create" } | { mode: "edit"; party: LibraryParty } | null>(null);
+  const [confirm, setConfirm] = useState<{ kind: "toggle" | "delete"; party: LibraryParty } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [actionError, setActionError] = useState("");
+
+  /**
+   * Deactivate hides a party from pickers and the default "Active" list but keeps every record that
+   * mentions it; delete removes it outright and is refused (with the reason) once it has history.
+   * Both write to the system that owns the row — Members for staff, Vyapar for clients and vendors.
+   */
+  async function runAction() {
+    if (!confirm) return;
+    const { kind, party } = confirm;
+    setBusy(true);
+    setActionError("");
+    try {
+      if (party.raw.source === "member") {
+        if (kind === "toggle") await api.updateUser(party.sourceId, { isActive: !party.isActive });
+        else await api.deleteUserPermanently(party.sourceId);
+      } else {
+        if (kind === "toggle") await vyapar.updateParty(party.sourceId, { ...party.raw.party, isActive: !party.isActive });
+        else await vyapar.deleteParty(party.sourceId);
+      }
+      setConfirm(null);
+      refresh();
+    } catch (err) {
+      setConfirm(null);
+      setActionError(err instanceof Error ? err.message : "That didn't go through.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const actionsFor = (p: LibraryParty) => (
+    <RowMenu>
+      {(close) => (
+        <>
+          <RowMenuItem
+            icon={Power}
+            label={p.isActive ? "Deactivate" : "Activate"}
+            tone={p.isActive ? "warning" : "default"}
+            onClick={() => {
+              close();
+              setConfirm({ kind: "toggle", party: p });
+            }}
+          />
+          <RowMenuDivider />
+          <RowMenuItem
+            icon={Trash2}
+            label="Delete"
+            tone="danger"
+            onClick={() => {
+              close();
+              setConfirm({ kind: "delete", party: p });
+            }}
+          />
+        </>
+      )}
+    </RowMenu>
+  );
 
   useEffect(() => {
     api.getRoles().then(setRoles).catch(() => setRoles([]));
@@ -75,6 +137,14 @@ export function PartyLibrary() {
       </div>
 
       {error && <div className="rounded-lg bg-rose-50 px-4 py-2 text-sm text-rose-600">{error}</div>}
+      {actionError && (
+        <div className="flex items-start justify-between gap-3 rounded-lg bg-rose-50 px-4 py-2 text-sm text-rose-600">
+          <span>{actionError}</span>
+          <button onClick={() => setActionError("")} className="shrink-0 text-rose-400 hover:text-rose-600">
+            Dismiss
+          </button>
+        </div>
+      )}
 
       <div className="flex flex-wrap gap-1.5">
         <TypeChip label="All" count={parties.length} active={typeFilter === "all"} onClick={() => setTypeFilter("all")} />
@@ -157,17 +227,28 @@ export function PartyLibrary() {
       ) : view === "grid" ? (
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
           {filtered.map((p) => (
-            <button
+            // A div, not a <button>: the card holds the row menu, and a button inside a button is
+            // invalid markup (a hydration error).
+            <div
               key={p.key}
+              role="button"
+              tabIndex={0}
               onClick={() => setDrawer({ mode: "edit", party: p })}
-              className="group rounded-xl border border-gray-200 bg-white p-4 text-left transition-all duration-150 hover:-translate-y-0.5 hover:border-brand-accent hover:shadow-md active:scale-[0.99]"
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  setDrawer({ mode: "edit", party: p });
+                }
+              }}
+              className="group cursor-pointer rounded-xl border border-gray-200 bg-white p-4 text-left transition-all duration-150 hover:-translate-y-0.5 hover:border-brand-accent hover:shadow-md"
             >
               <div className="flex items-center gap-3">
                 <PartyAvatar party={p} size={44} />
-                <div className="min-w-0">
+                <div className="min-w-0 flex-1">
                   <div className="truncate font-medium text-gray-800 group-hover:text-brand-accent">{p.name}</div>
                   <div className="truncate text-xs text-gray-400">{p.subtitle ?? p.email ?? "—"}</div>
                 </div>
+                <div onClick={(e) => e.stopPropagation()}>{actionsFor(p)}</div>
               </div>
               <div className="mt-3 flex flex-wrap items-center gap-1.5">
                 <TypePill type={p.type} />
@@ -183,9 +264,11 @@ export function PartyLibrary() {
                 ) : (
                   <span />
                 )}
-                <StarRating value={ratingOf(p.key)} onChange={(n) => setRating(p.key, n)} size={13} />
+                <span onClick={(e) => e.stopPropagation()}>
+                  <StarRating value={ratingOf(p.key)} onChange={(n) => setRating(p.key, n)} size={13} />
+                </span>
               </div>
-            </button>
+            </div>
           ))}
         </div>
       ) : (
@@ -198,6 +281,7 @@ export function PartyLibrary() {
                 <th className="px-4 py-3">Mobile</th>
                 <th className="px-4 py-3">Details</th>
                 <th className="px-4 py-3">Rating</th>
+                <th className="w-12 px-2 py-3" aria-label="Actions" />
               </tr>
             </thead>
             <tbody>
@@ -241,14 +325,43 @@ export function PartyLibrary() {
                       "—"
                     )}
                   </td>
-                  <td className="px-4 py-2.5">
+                  <td className="px-4 py-2.5" onClick={(e) => e.stopPropagation()}>
                     <StarRating value={ratingOf(p.key)} onChange={(n) => setRating(p.key, n)} />
+                  </td>
+                  <td className="px-2 py-2.5 text-right" onClick={(e) => e.stopPropagation()}>
+                    {actionsFor(p)}
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
+      )}
+
+      {confirm && (
+        <ConfirmDialog
+          title={
+            confirm.kind === "delete"
+              ? `Delete ${confirm.party.name}?`
+              : `${confirm.party.isActive ? "Deactivate" : "Activate"} ${confirm.party.name}?`
+          }
+          body={
+            confirm.kind === "delete"
+              ? confirm.party.raw.source === "member"
+                ? "This removes the login and member record permanently. It can't be undone — deactivate instead if you may need them again."
+                : "This removes the party permanently. A party with bills or payments against it can't be deleted — deactivate it instead."
+              : confirm.party.isActive
+                ? confirm.party.raw.source === "member"
+                  ? "They won't be able to sign in and will drop out of pickers. Their history stays, and you can activate them again any time."
+                  : "It will be hidden from party pickers and the Active list. Its history stays, and you can activate it again any time."
+                : "It will show in lists and pickers again."
+          }
+          confirmLabel={confirm.kind === "delete" ? "Delete" : confirm.party.isActive ? "Deactivate" : "Activate"}
+          tone={confirm.kind === "delete" || confirm.party.isActive ? "danger" : "primary"}
+          busy={busy}
+          onCancel={() => setConfirm(null)}
+          onConfirm={runAction}
+        />
       )}
 
       {drawer && (

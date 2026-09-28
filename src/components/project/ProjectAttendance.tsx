@@ -5,14 +5,32 @@ import { Drawer } from "@/components/Drawer";
 import { DatePicker } from "@/components/DatePicker";
 import { Spinner } from "@/components/Spinner";
 import { useProjectAttendance } from "@/lib/usePayrollLive";
-import { editAttendance, getTeam, ApiError } from "@/lib/api";
-import type { TeamMemberResponse, AttendanceCodeApi } from "@/lib/api";
+import { editAttendance, getProjectStaff, getTeam, ApiError } from "@/lib/api";
+import type { TeamMemberResponse, AttendanceApiResponse, AttendanceCodeApi } from "@/lib/api";
 import { ATTENDANCE_META } from "@/lib/payrollConfig";
 import { ChevronLeft, ChevronRight, Clock, MapPin, Search, UserPlus, Users } from "lucide-react";
 
 // Local calendar date (not UTC) so keys match the muster / punch / calendar.
 const iso = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 const MARK_CODES: AttendanceCodeApi[] = ["P", "HD", "PL", "A"];
+
+/**
+ * How far back someone's work on this site keeps them on its daily roster. Mark a person here once
+ * and they are listed every day after — "Not marked" until someone marks them — rather than having
+ * to be added again each morning, which is what the client hit.
+ */
+const ROSTER_WINDOW_DAYS = 60;
+
+/** A roster line for the day: the saved attendance row, or a blank one for someone not yet marked. */
+type DayRow = Omit<AttendanceApiResponse, "code"> & { code: AttendanceCodeApi | null };
+
+function blankRow(userId: number, memberName: string, date: string, projectId: number): DayRow {
+  return {
+    workedHours: null, id: null, userId, memberName, date, code: null, inTime: null, outTime: null,
+    overtimeHours: 0, fineHours: 0, projectId, punchInLat: null, punchInLng: null, punchOutLat: null,
+    punchOutLng: null, faceScoreIn: null, faceScoreOut: null, punchInPhoto: null, punchOutPhoto: null,
+  };
+}
 
 function hoursWorked(inTime: string | null, outTime: string | null): number {
   if (!inTime || !outTime) return 0;
@@ -42,7 +60,39 @@ export function ProjectAttendance({ projectId }: { projectId: string }) {
   const [busyUser, setBusyUser] = useState<number | null>(null);
   const [actionError, setActionError] = useState("");
 
-  const { rows, loading, error, refresh } = useProjectAttendance(Number.isFinite(pid) ? pid : null, date, date);
+  const { rows: marked, loading, error, refresh } = useProjectAttendance(Number.isFinite(pid) ? pid : null, date, date);
+
+  // The standing roster: payroll members assigned to the project plus anyone who worked here in the
+  // last ROSTER_WINDOW_DAYS. The backend's project staff list already unions those two.
+  const [roster, setRoster] = useState<{ userId: number; name: string }[]>([]);
+  useEffect(() => {
+    if (!Number.isFinite(pid)) return;
+    let cancelled = false;
+    const from = new Date(date + "T00:00:00");
+    from.setDate(from.getDate() - ROSTER_WINDOW_DAYS);
+    Promise.all([getProjectStaff(pid, iso(from), date), getTeam().catch(() => [] as TeamMemberResponse[])])
+      .then(([staff, team]) => {
+        if (cancelled) return;
+        const onPayroll = new Set(team.filter((t) => t.onPayroll && t.active).map((t) => t.id));
+        // A member who has never worked here is only listed if they're on payroll — a project
+        // manager added for access shouldn't read "Not marked" every day.
+        setRoster(
+          staff
+            .filter((r) => r.lastSeen != null || r.presentDays > 0 || onPayroll.has(r.userId))
+            .map((r) => ({ userId: r.userId, name: r.name })),
+        );
+      })
+      .catch(() => !cancelled && setRoster([]));
+    return () => {
+      cancelled = true;
+    };
+  }, [pid, date]);
+
+  const rows = useMemo<DayRow[]>(() => {
+    const seen = new Set(marked.map((r) => r.userId));
+    const blanks = roster.filter((r) => !seen.has(r.userId)).map((r) => blankRow(r.userId, r.name, date, pid));
+    return [...marked, ...blanks.sort((a, b) => a.memberName.localeCompare(b.memberName))];
+  }, [marked, roster, date, pid]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -51,8 +101,12 @@ export function ProjectAttendance({ projectId }: { projectId: string }) {
   }, [rows, search]);
 
   const summary = useMemo(() => {
-    const s = { present: 0, absent: 0, halfDay: 0, paidLeave: 0, weekOff: 0 };
+    const s = { present: 0, absent: 0, halfDay: 0, paidLeave: 0, weekOff: 0, unmarked: 0 };
     for (const r of rows) {
+      if (r.code == null) {
+        s.unmarked++;
+        continue;
+      }
       switch (r.code) {
         case "P": s.present++; break;
         case "A": s.absent++; break;
@@ -104,6 +158,7 @@ export function ProjectAttendance({ projectId }: { projectId: string }) {
           <SummaryDot label="Absent" count={summary.absent} className="bg-rose-400" />
           <SummaryDot label="Half Day" count={summary.halfDay} className="bg-amber-400" />
           <SummaryDot label="Paid Leave" count={summary.paidLeave} className="bg-blue-400" />
+          {summary.unmarked > 0 && <SummaryDot label="Not marked" count={summary.unmarked} className="bg-gray-300" />}
         </div>
         <button
           onClick={() => setAdding(true)}
@@ -124,8 +179,8 @@ export function ProjectAttendance({ projectId }: { projectId: string }) {
       ) : filtered.length === 0 ? (
         <div className="flex min-h-[220px] flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-gray-300 bg-white text-center">
           <Users size={24} className="text-gray-300" />
-          <div className="text-sm font-medium text-gray-600">No attendance recorded for this project on {date}</div>
-          <p className="max-w-xs text-xs text-gray-400">Use “Add Staff” to mark someone present here, or ask them to punch in from their own dashboard.</p>
+          <div className="text-sm font-medium text-gray-600">No staff on this project yet</div>
+          <p className="max-w-xs text-xs text-gray-400">Use “Add Staff” once — after that they&apos;re listed here every day to mark, or they can punch in from their own dashboard.</p>
           <button onClick={() => setAdding(true)} className="mt-1 rounded-lg bg-brand-accent px-4 py-2 text-sm font-medium text-white hover:opacity-90">+ Add Staff</button>
         </div>
       ) : (
@@ -182,6 +237,7 @@ export function ProjectAttendance({ projectId }: { projectId: string }) {
                       {hrs > 0 ? <span className="text-xs text-gray-600">{hrs} hrs</span> : <span className="text-xs text-gray-300">—</span>}
                     </td>
                     <td className="px-4 py-3 text-right">
+                      {r.code == null && <span className="mr-2 text-[11px] text-gray-400">Not marked</span>}
                       <div className="inline-flex overflow-hidden rounded-lg ring-1 ring-gray-200">
                         {MARK_CODES.map((c) => {
                           const m = ATTENDANCE_META[c];
@@ -288,7 +344,10 @@ function AddStaffDrawer({ date, projectId, existing, onClose, onDone }: { date: 
   return (
     <Drawer title="Add Staff" onClose={onClose} onSave={save} saveLabel={saving ? "Adding…" : `Mark Present${picked.size ? ` (${picked.size})` : ""}`} width="max-w-md">
       <div className="space-y-4">
-        <p className="text-sm text-gray-500">Pick people to mark present on this project for {date}. This writes a real attendance row tagged to this project.</p>
+        <p className="text-sm text-gray-500">
+          Pick people to mark present on this project for {date}. From then on they stay on this project&apos;s daily
+          list — you won&apos;t need to add them again tomorrow.
+        </p>
         {error && <div className="rounded-lg bg-rose-50 px-4 py-2 text-sm text-rose-600">{error}</div>}
         <div className="flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 focus-within:border-cyan-500">
           <Search size={15} className="text-gray-400" />
@@ -297,7 +356,7 @@ function AddStaffDrawer({ date, projectId, existing, onClose, onDone }: { date: 
         {loading ? (
           <div className="flex items-center justify-center gap-2 py-10 text-sm text-gray-400"><Spinner size={16} className="text-brand-accent" /> Loading…</div>
         ) : available.length === 0 ? (
-          <div className="py-10 text-center text-sm text-gray-400">{team.length === 0 ? "No staff found." : "Everyone is already marked on this project today."}</div>
+          <div className="py-10 text-center text-sm text-gray-400">{team.length === 0 ? "No staff found." : "Everyone is already on this project's list."}</div>
         ) : (
           <div className="max-h-[420px] space-y-1.5 overflow-y-auto">
             {available.map((u) => {

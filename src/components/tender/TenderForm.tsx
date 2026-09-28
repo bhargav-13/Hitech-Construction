@@ -89,16 +89,57 @@ const ADDITIONAL_SECURITY_OPTIONS = [
 ];
 
 /**
- * GST is a yes/no question on the client's sheet. Older rows imported from the workbook carry
- * "Exclusive" / "Inclusive" — those stay selectable on that tender so editing it doesn't wipe them.
+ * Whether the quoted rates carry GST, and if so how. The client first wanted a plain Yes/No, then
+ * asked for Exclusive / Inclusive back: "Yes" alone doesn't say whether GST sits on top of the rate
+ * or inside it, and that changes the bid. A tender saved with any other value (a plain "Yes" from
+ * the earlier form, a workbook import) keeps it selectable so editing doesn't wipe it.
  */
 function gstOptions(current: string | null | undefined) {
   const base = [
     { value: "", label: "—" },
+    { value: "Exclusive", label: "Yes — Exclusive (GST extra on rates)" },
+    { value: "Inclusive", label: "Yes — Inclusive (GST within rates)" },
     { value: "Yes", label: "Yes" },
-    { value: "No", label: "No" },
+    { value: "No", label: "No GST" },
   ];
   return current && !base.some((o) => o.value === current) ? [...base, { value: current, label: current }] : base;
+}
+
+/** Answers the client's tenders actually give for these, extendable in place from the dropdown. */
+const PQ_CRITERIA_OPTIONS = [
+  "As per tender document",
+  "Similar work: 1 × 80% / 2 × 50% / 3 × 40% of estimate",
+  "Class registration only",
+  "Turnover + similar work experience",
+  "Not applicable",
+];
+const LAB_TEST_OPTIONS = [
+  "Included in rates (contractor's scope)",
+  "Paid by department",
+  "As per tender document",
+  "Not required",
+];
+const PRICE_ESCALATION_OPTIONS = [
+  "Not applicable",
+  "Applicable as per contract clause",
+  "Applicable after 12 months",
+  "Fixed price",
+];
+
+/** Local calendar date, YYYY-MM-DD — "today" for Paid On must be the Indian date, not UTC's. */
+function todayIso(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+function addDaysIso(iso: string, days: number): string {
+  const d = new Date(iso + "T00:00:00");
+  d.setDate(d.getDate() + days);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+/** Whole days from a to b (both YYYY-MM-DD), or null when either is missing. */
+function daysBetween(a: string | null | undefined, b: string | null | undefined): number | null {
+  if (!a || !b || !/^\d{4}-\d{2}-\d{2}/.test(a) || !/^\d{4}-\d{2}-\d{2}/.test(b)) return null;
+  return Math.round((new Date(b.slice(0, 10) + "T00:00:00").getTime() - new Date(a.slice(0, 10) + "T00:00:00").getTime()) / 86_400_000);
 }
 
 /** The reference number means something different per instrument — say which one is wanted. */
@@ -145,7 +186,14 @@ export function TenderForm({
   const [saveNote, setSaveNote] = useState<string | null>(null);
 
   const [f, setF] = useState<Partial<Tender>>(
-    tender ?? { source: "PORTAL", stage: initialStage, status: defaultStatus(initialStage), emdState: "PENDING" },
+    // Paid On starts on today for a new tender — the client's usual case — and stays editable.
+    tender ?? {
+      source: "PORTAL",
+      stage: initialStage,
+      status: defaultStatus(initialStage),
+      emdState: "PENDING",
+      emdPaidOn: todayIso(),
+    },
   );
   const [showMore, setShowMore] = useState(false);
 
@@ -281,7 +329,6 @@ export function TenderForm({
     text("msmeRelaxation", t.msmeRelaxation, "MSME relaxation");
     text("experienceTurnover", t.experienceTurnover, "experience / turnover");
     if (Object.keys(patch).length) set(patch);
-    if (patch.pqCriteria || patch.priceEscalation || patch.experienceTurnover) setShowMore(true);
     return filledNote(labels, t.uncertainFields);
   }
 
@@ -349,8 +396,9 @@ export function TenderForm({
           </DrawerField>
         </Section>
 
-        {/* Identity */}
-        <Section title="Tender">
+        {/* Tender details — field for field in the order of the client's tender sheet (and of the
+            Sorting / Research tables): S.No. is the row number, then Department … Remarks. */}
+        <Section title="Tender Details">
           <DrawerField label="Department">
             <input className="input" value={f.department ?? ""} onChange={(e) => set({ department: e.target.value })} placeholder="e.g. Rajkot Municipal Corporation" />
           </DrawerField>
@@ -360,96 +408,11 @@ export function TenderForm({
           <DrawerField label="Name of Work" className="col-span-2">
             <textarea className="input min-h-[60px]" value={f.nameOfWork ?? ""} onChange={(e) => set({ nameOfWork: e.target.value })} placeholder="Scope / title of the work" />
           </DrawerField>
-          <DrawerField label="Location">
-            <input className="input" value={f.location ?? ""} onChange={(e) => set({ location: e.target.value })} />
-          </DrawerField>
-          <DrawerField label="Class">
-            <CreatableSelect
-              value={f.classReq ?? ""}
-              onChange={(v) => set({ classReq: v || null })}
-              masterKey="tender.class"
-              builtIns={CLASS_OPTIONS}
-              createLabel="Add class"
-              placeholder="e.g. B Class & Above"
-            />
-          </DrawerField>
-        </Section>
-
-        {/* Commercials */}
-        <Section title="Commercials">
           <DrawerField label="Estimated Cost (₹)">
             <input type="number" className="input" value={f.estimatedCost ?? ""} onChange={(e) => set({ estimatedCost: num(e.target.value) })} />
           </DrawerField>
-          {isApplied && (
-            <>
-              <DrawerField label="Contract Value (₹)">
-                <input type="number" className="input" value={f.contractValue ?? ""} onChange={(e) => set({ contractValue: num(e.target.value) })} />
-              </DrawerField>
-              <DrawerField label="Variance %">
-                <input type="number" className="input" value={f.variancePct ?? ""} onChange={(e) => set({ variancePct: num(e.target.value) })} />
-              </DrawerField>
-            </>
-          )}
-          <DrawerField label="Fee (₹)">
-            <input type="number" className="input" value={f.fee ?? ""} onChange={(e) => set({ fee: num(e.target.value) })} />
-          </DrawerField>
-          <DrawerField label="GST">
-            <Select value={f.gst ?? ""} onChange={(v) => set({ gst: v || null })} options={gstOptions(f.gst)} />
-          </DrawerField>
-        </Section>
-
-        {/* EMD — instrument and payment state are separate fields, because "blocked capital" depends on both. */}
-        <Section title="EMD">
-          <DrawerField label="EMD (₹)">
-            <input type="number" className="input" value={f.emd ?? ""} onChange={(e) => set({ emd: num(e.target.value) })} />
-          </DrawerField>
-          <DrawerField label="Instrument">
-            <Select value={f.emdMode ?? ""} onChange={(v) => set({ emdMode: (v || null) as EmdMode | null })} options={EMD_MODE_OPTIONS} />
-          </DrawerField>
-          <DrawerField label="State">
-            <Select value={f.emdState ?? "PENDING"} onChange={(v) => set({ emdState: v as EmdState })} options={EMD_STATE_OPTIONS} />
-          </DrawerField>
-          {f.emdMode !== "EXEMPT" && (
-            <DrawerField label={instrumentNoLabel(f.emdMode)}>
-              <input
-                className="input"
-                value={f.emdInstrumentNo ?? ""}
-                onChange={(e) => set({ emdInstrumentNo: e.target.value })}
-                placeholder={instrumentNoPlaceholder(f.emdMode)}
-              />
-            </DrawerField>
-          )}
-          <DrawerField label="Paid On">
-            <DatePicker value={f.emdPaidOn ?? ""} onChange={(v) => set({ emdPaidOn: v })} />
-          </DrawerField>
-          <DrawerField label="Released On">
-            <DatePicker value={f.emdReleasedOn ?? ""} onChange={(v) => set({ emdReleasedOn: v })} />
-          </DrawerField>
-          <DrawerField label="Expiry / Maturity" className="col-span-2">
-            <DatePicker value={f.emdExpiry ?? ""} onChange={(v) => set({ emdExpiry: v })} />
-          </DrawerField>
-        </Section>
-
-        {/* Schedule */}
-        <Section title="Schedule">
           <DrawerField label="Deadline">
             <DatePicker value={f.deadline ?? ""} onChange={(v) => set({ deadline: v })} />
-          </DrawerField>
-          <DrawerField label="Next Follow Up">
-            <DatePicker value={f.nextFollowUp ?? ""} onChange={(v) => set({ nextFollowUp: v })} />
-          </DrawerField>
-          {/* A date on its own never said who to call or what to ask, so the chase note lives with it. */}
-          <DrawerField label="Follow Up Remarks" className="col-span-2">
-            <textarea
-              className="input resize-none"
-              rows={2}
-              value={f.nextFollowUpNote ?? ""}
-              onChange={(e) => set({ nextFollowUpNote: e.target.value })}
-              placeholder="What to chase on that date — e.g. call the EE about the corrigendum"
-            />
-          </DrawerField>
-          <DrawerField label="Hardcopy Due">
-            <DatePicker value={f.hardcopyDue ?? ""} onChange={(v) => set({ hardcopyDue: v })} />
           </DrawerField>
           <DrawerField label="Duration">
             <CreatableSelect
@@ -461,12 +424,73 @@ export function TenderForm({
               placeholder="e.g. 9 months"
             />
           </DrawerField>
+          <TextField label="Pre-bid Info" value={f.preBidInfo} onChange={(v) => set({ preBidInfo: v })} />
           <DrawerField label="Validity">
             <input className="input" value={f.validity == null ? "" : String(f.validity)} onChange={(e) => set({ validity: e.target.value })} placeholder="e.g. 120 days" />
           </DrawerField>
-          <DrawerField label="Pre-bid Date">
-            <DatePicker value={f.preBidDate ?? ""} onChange={(v) => set({ preBidDate: v })} />
+          <DrawerField label="Fee (₹)">
+            <input type="number" className="input" value={f.fee ?? ""} onChange={(e) => set({ fee: num(e.target.value) })} />
           </DrawerField>
+          <DrawerField label="EMD (₹)">
+            <input type="number" className="input" value={f.emd ?? ""} onChange={(e) => set({ emd: num(e.target.value) })} />
+          </DrawerField>
+          <DrawerField label="EMD Type">
+            <Select value={f.emdMode ?? ""} onChange={(v) => set({ emdMode: (v || null) as EmdMode | null })} options={EMD_MODE_OPTIONS} />
+          </DrawerField>
+          <TextField label="Office Address" value={f.officeAddress} onChange={(v) => set({ officeAddress: v })} wide />
+          <DrawerField label="Hardcopy Due">
+            <DatePicker value={f.hardcopyDue ?? ""} onChange={(v) => set({ hardcopyDue: v })} />
+          </DrawerField>
+          <DrawerField label="Tech Open">
+            <DatePicker value={f.techOpen ?? ""} onChange={(v) => set({ techOpen: v })} />
+          </DrawerField>
+          <DrawerField label="Price Open">
+            <DatePicker value={f.priceOpen ?? ""} onChange={(v) => set({ priceOpen: v })} />
+          </DrawerField>
+          <DrawerField label="PQ Criteria">
+            <CreatableSelect
+              value={f.pqCriteria ?? ""}
+              onChange={(v) => set({ pqCriteria: v || null })}
+              masterKey="tender.pqCriteria"
+              builtIns={PQ_CRITERIA_OPTIONS}
+              createLabel="Add criteria"
+              placeholder="Pick or add the PQ criteria"
+            />
+          </DrawerField>
+          <DrawerField label="Class">
+            <CreatableSelect
+              value={f.classReq ?? ""}
+              onChange={(v) => set({ classReq: v || null })}
+              masterKey="tender.class"
+              builtIns={CLASS_OPTIONS}
+              createLabel="Add class"
+              placeholder="e.g. B Class & Above"
+            />
+          </DrawerField>
+          <DrawerField label="GST">
+            <Select value={f.gst ?? ""} onChange={(v) => set({ gst: v || null })} options={gstOptions(f.gst)} />
+          </DrawerField>
+          <DrawerField label="Lab Test">
+            <CreatableSelect
+              value={f.labTest ?? ""}
+              onChange={(v) => set({ labTest: v || null })}
+              masterKey="tender.labTest"
+              builtIns={LAB_TEST_OPTIONS}
+              createLabel="Add option"
+              placeholder="—"
+            />
+          </DrawerField>
+          <DrawerField label="Price Escalation">
+            <CreatableSelect
+              value={f.priceEscalation ?? ""}
+              onChange={(v) => set({ priceEscalation: v || null })}
+              masterKey="tender.priceEscalation"
+              builtIns={PRICE_ESCALATION_OPTIONS}
+              createLabel="Add option"
+              placeholder="—"
+            />
+          </DrawerField>
+          <TextField label="Deposit Details" value={f.depositDetails} onChange={(v) => set({ depositDetails: v })} />
           <DrawerField label="DLP">
             <CreatableSelect
               value={f.dlp ?? ""}
@@ -477,8 +501,101 @@ export function TenderForm({
               placeholder="Defect liability period"
             />
           </DrawerField>
+          <TextField label="Stage Documents" value={f.stageDocuments} onChange={(v) => set({ stageDocuments: v })} />
+          <TextField label="View Documents (link/name)" value={f.viewDocuments} onChange={(v) => set({ viewDocuments: v })} />
+          <TextField label="Remarks" value={f.remarks} onChange={(v) => set({ remarks: v })} wide />
+        </Section>
+
+        {/* EMD — instrument and payment state are separate fields, because "blocked capital" depends on both. */}
+        <Section title="EMD Details">
+          <DrawerField label="State">
+            <Select value={f.emdState ?? "PENDING"} onChange={(v) => set({ emdState: v as EmdState })} options={EMD_STATE_OPTIONS} />
+          </DrawerField>
+          {f.emdMode !== "EXEMPT" ? (
+            <DrawerField label={instrumentNoLabel(f.emdMode)}>
+              <input
+                className="input"
+                value={f.emdInstrumentNo ?? ""}
+                onChange={(e) => set({ emdInstrumentNo: e.target.value })}
+                placeholder={instrumentNoPlaceholder(f.emdMode)}
+              />
+            </DrawerField>
+          ) : (
+            <div />
+          )}
+          <DrawerField label="Paid On">
+            <DatePicker
+              value={f.emdPaidOn ?? ""}
+              onChange={(v) => {
+                // Keep the instrument's validity in days when the paid date moves: the expiry follows.
+                const days = daysBetween(f.emdPaidOn, f.emdExpiry);
+                set({ emdPaidOn: v, ...(v && days != null ? { emdExpiry: addDaysIso(v, days) } : {}) });
+              }}
+            />
+          </DrawerField>
+          <DrawerField label="Released On">
+            <DatePicker value={f.emdReleasedOn ?? ""} onChange={(v) => set({ emdReleasedOn: v })} />
+          </DrawerField>
+          {/* Expiry is keyed as a validity in days (an FDR / BG is issued "for 180 days"); the date
+              is worked out from Paid On. The date stays editable for an instrument with a fixed end. */}
+          <DrawerField label="Validity (days)">
+            <input
+              type="number"
+              min={0}
+              className="input"
+              value={daysBetween(f.emdPaidOn, f.emdExpiry) ?? ""}
+              onChange={(e) => {
+                const n = e.target.value === "" ? null : Math.max(0, Math.round(Number(e.target.value)));
+                if (n == null) return set({ emdExpiry: null });
+                set({ emdExpiry: addDaysIso(f.emdPaidOn || todayIso(), n), ...(f.emdPaidOn ? {} : { emdPaidOn: todayIso() }) });
+              }}
+              placeholder="e.g. 180"
+            />
+          </DrawerField>
+          <DrawerField label="Expiry / Maturity">
+            <DatePicker value={f.emdExpiry ?? ""} onChange={(v) => set({ emdExpiry: v })} />
+            {(() => {
+              const left = daysBetween(todayIso(), f.emdExpiry);
+              if (left == null || f.emdState === "RELEASED" || f.emdReleasedOn) return null;
+              return (
+                <p className={`mt-1 text-[11px] ${left < 0 ? "text-rose-600" : left <= 15 ? "text-amber-600" : "text-gray-400"}`}>
+                  {left < 0 ? `Expired ${-left} day${left === -1 ? "" : "s"} ago` : left === 0 ? "Expires today" : `${left} day${left === 1 ? "" : "s"} left`}
+                </p>
+              );
+            })()}
+          </DrawerField>
+        </Section>
+
+        {/* The app's own fields — not columns on the client's sheet. */}
+        <Section title="Follow Up & Other">
+          <DrawerField label="Next Follow Up">
+            <DatePicker value={f.nextFollowUp ?? ""} onChange={(v) => set({ nextFollowUp: v })} />
+          </DrawerField>
+          <DrawerField label="Pre-bid Date">
+            <DatePicker value={f.preBidDate ?? ""} onChange={(v) => set({ preBidDate: v })} />
+          </DrawerField>
+          {/* A date on its own never said who to call or what to ask, so the chase note lives with it. */}
+          <DrawerField label="Follow Up Remarks" className="col-span-2">
+            <textarea
+              className="input resize-none"
+              rows={2}
+              value={f.nextFollowUpNote ?? ""}
+              onChange={(e) => set({ nextFollowUpNote: e.target.value })}
+              placeholder="What to chase on that date — e.g. call the EE about the corrigendum"
+            />
+          </DrawerField>
+          <DrawerField label="Location">
+            <input className="input" value={f.location ?? ""} onChange={(e) => set({ location: e.target.value })} />
+          </DrawerField>
+          <TextField label="Firm" value={f.firm} onChange={(v) => set({ firm: v })} />
           {isApplied && (
             <>
+              <DrawerField label="Contract Value (₹)">
+                <input type="number" className="input" value={f.contractValue ?? ""} onChange={(e) => set({ contractValue: num(e.target.value) })} />
+              </DrawerField>
+              <DrawerField label="Variance %">
+                <input type="number" className="input" value={f.variancePct ?? ""} onChange={(e) => set({ variancePct: num(e.target.value) })} />
+              </DrawerField>
               <DrawerField label="Submission Date">
                 <DatePicker value={f.submissionDate ?? ""} onChange={(v) => set({ submissionDate: v })} />
               </DrawerField>
@@ -488,6 +605,7 @@ export function TenderForm({
             </>
           )}
         </Section>
+
 
         {isGem && <Section title="GeM Details">{gemFields}</Section>}
 
@@ -542,7 +660,7 @@ export function TenderForm({
             onClick={() => setShowMore((v) => !v)}
             className="flex items-center gap-1 text-sm font-medium text-brand-accent"
           >
-            {showMore ? <ChevronDown size={15} /> : <ChevronRight size={15} />} More details (optional)
+            {showMore ? <ChevronDown size={15} /> : <ChevronRight size={15} />} Security deposit (optional)
           </button>
           {showMore && (
             <div className="mt-3 space-y-6">
@@ -592,18 +710,6 @@ export function TenderForm({
                 <DrawerField label="Released On">
                   <DatePicker value={f.securityReleasedOn ?? ""} onChange={(v) => set({ securityReleasedOn: v })} disabled={!canEditSecurity} />
                 </DrawerField>
-              </Section>
-
-              <Section title="Other">
-                <TextField label="PQ Criteria" value={f.pqCriteria} onChange={(v) => set({ pqCriteria: v })} wide />
-                <TextField label="Pre-bid Info" value={f.preBidInfo} onChange={(v) => set({ preBidInfo: v })} />
-                <TextField label="Lab Test" value={f.labTest} onChange={(v) => set({ labTest: v })} />
-                <TextField label="Price Escalation" value={f.priceEscalation} onChange={(v) => set({ priceEscalation: v })} />
-                <TextField label="Deposit Details" value={f.depositDetails} onChange={(v) => set({ depositDetails: v })} />
-                <TextField label="Firm" value={f.firm} onChange={(v) => set({ firm: v })} />
-                <TextField label="Office Address" value={f.officeAddress} onChange={(v) => set({ officeAddress: v })} wide />
-                <TextField label="View Documents (link/name)" value={f.viewDocuments} onChange={(v) => set({ viewDocuments: v })} wide />
-                <TextField label="Remarks" value={f.remarks} onChange={(v) => set({ remarks: v })} wide />
               </Section>
             </div>
           )}

@@ -350,6 +350,11 @@ export function updateUserPassword(id: number, newPassword: string) {
   return request<void>(`/api/v1/users/${id}/password`, { method: "PUT", body: { newPassword } });
 }
 
+/** Super Admin only. `password` is null until the member's password is set or used to sign in. */
+export function getStoredPassword(id: number) {
+  return request<{ password: string | null; loginUser: boolean }>(`/api/v1/users/${id}/stored-password`);
+}
+
 // ---- Projects (project-service, mirrors api-contracts/project.yaml) ----
 export type ProjectStatus = "NOT_STARTED" | "ONGOING" | "ONHOLD" | "COMPLETED";
 export type ProjectHealth = "HEALTHY" | "AT_RISK";
@@ -1134,9 +1139,10 @@ export function getPayrollRun(month: string) {
   return request<PayrollRunApi>(`/api/v1/payroll/runs/${month}`);
 }
 /** How days with no attendance mark are paid when a run is generated. */
-export type UnmarkedDayPolicy = "PRESENT" | "ABSENT";
+/** ABSENT = pay marked days only; ABSENT_PAY_OFFS = also blank weekly offs / holidays in weeks worked. */
+export type UnmarkedDayPolicy = "PRESENT" | "ABSENT" | "ABSENT_PAY_OFFS";
 
-export function generatePayrollRun(month: string, unmarked: UnmarkedDayPolicy = "PRESENT") {
+export function generatePayrollRun(month: string, unmarked: UnmarkedDayPolicy = "ABSENT") {
   return request<PayrollRunApi>(`/api/v1/payroll/runs/${month}/generate?unmarked=${unmarked}`, { method: "POST" });
 }
 export function editPayslip(month: string, userId: number, body: { gross: number; otherDeductions: number }) {

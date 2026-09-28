@@ -31,7 +31,7 @@ import {
   tdate,
 } from "./tenderHelpers";
 import { bucketOf } from "./tenderMetrics";
-import { BUCKET_META } from "./tenderTypes";
+import { BUCKET_META, EMD_MODE_META } from "./tenderTypes";
 
 /* ---------- import ---------- */
 
@@ -264,43 +264,60 @@ function download(wb: XLSX.WorkBook, filename: string) {
   XLSX.writeFile(wb, filename, { compression: true });
 }
 
-/** The columns we write back out, in the client's own order and naming. */
-function tenderRow(t: Tender) {
+/**
+ * The columns we write back out, in the client's own order and naming — their Sorting sheet's
+ * S.NO. … REMARKS run first, exactly as they listed it, then the fields the app adds (stage,
+ * outcome, security, follow-up) after REMARKS. Every header is one the importer reads back.
+ */
+function tenderRow(t: Tender, index: number) {
   return {
+    "S.NO.": index + 1,
     "DEPARTMENT": t.department ?? "",
     "TENDER ID": t.tenderId ?? "",
     "NAME OF WORK": t.nameOfWork ?? "",
+    "ESTIMATED COST": t.estimatedCost ?? "",
+    "DEADLINE": t.deadline ?? "",
+    "DURATION": t.duration ?? "",
+    "PRE BID INFO": t.preBidInfo ?? t.preBidDate ?? "",
+    "VALIDITY": t.validity ?? "",
+    "FEE": t.fee ?? "",
+    "EMD": t.emd ?? "",
+    "EMD TYPE": t.emdMode ? EMD_MODE_META[t.emdMode].label : (t.emdType ?? ""),
+    "OFFICE ADDRESS": t.officeAddress ?? "",
+    "HARDCOPY DUE": t.hardcopyDue ?? "",
+    "TECH OPEN": t.techOpen ?? "",
+    "PRICE OPEN": t.priceOpen ?? "",
+    "PQ CRITERIA": t.pqCriteria ?? "",
+    "CLASS": t.classReq ?? "",
+    "GST": t.gst ?? "",
+    "LAB TEST": t.labTest ?? "",
+    "PRICE ESCALATION": t.priceEscalation ?? "",
+    "DEPOSIT DETAILS": t.depositDetails ?? "",
+    "DLP": t.dlp ?? "",
+    "STAGE DOCUMENTS": t.stageDocuments ?? "",
+    "VIEW DOCUMENTS": t.viewDocuments ?? "",
+    "REMARKS": t.remarks ?? "",
+    // --- the app's own fields ---
     "LOCATION": t.location ?? "",
     "STAGE": BUCKET_META[bucketOf(t)].label,
     "STATUS": t.statusLabel ?? (t.status ?? ""),
-    "ESTIMATED COST": t.estimatedCost ?? "",
     "CONTRACT VALUE": t.contractValue ?? "",
     "VAR.(%)": t.variancePct ?? "",
-    "FEE": t.fee ?? "",
-    "EMD": t.emd ?? "",
-    "EMD MODE": t.emdMode ?? "",
     "EMD STATE": t.emdState ?? "",
+    "EMD PAID ON": t.emdPaidOn ?? "",
     "EMD RELEASED ON": t.emdReleasedOn ?? "",
+    "EMD EXPIRY": t.emdExpiry ?? "",
     "SECURITY TYPE": t.securityType ?? "",
     "SECURITY AMOUNT": t.securityAmount ?? "",
     "ADDITIONAL SECURITY": t.additionalSecurityAmount ?? "",
     "BG CHARGES": t.bgCharges ?? "",
-    "DEADLINE": t.deadline ?? "",
     "NEXT FOLLOW UP": t.nextFollowUp ?? "",
-    "HARDCOPY DUE": t.hardcopyDue ?? "",
     "DATE OF SUBMISSION": t.submissionDate ?? "",
     "DUE DATE": t.dueDate ?? "",
-    "DURATION": t.duration ?? "",
-    "VALIDITY": t.validity ?? "",
-    "DLP": t.dlp ?? "",
-    "PQ CRITERIA": t.pqCriteria ?? "",
-    "CLASS": t.classReq ?? "",
-    "OFFICE ADDRESS": t.officeAddress ?? "",
     "FIRM": t.firm ?? "",
     "LOSS REASON": t.lossReason ?? "",
     "L1 BIDDER": t.l1Bidder ?? "",
     "L1 VALUE": t.l1Value ?? "",
-    "REMARKS": t.remarks ?? "",
   };
 }
 

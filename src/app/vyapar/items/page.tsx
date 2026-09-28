@@ -65,7 +65,8 @@ export default function ItemsPage() {
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
   const [stockFilter, setStockFilter] = useState<"All" | "Low" | "Out">("All");
-  const [sortDesc, setSortDesc] = useState(false);
+  /** List order. The button next to the stock filter cycles quantity high→low → low→high → name. */
+  const [listSort, setListSort] = useState<"name-asc" | "name-desc" | "qty-desc" | "qty-asc">("name-asc");
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<Item | null>(null);
   const [adjusting, setAdjusting] = useState<Item | null>(null);
@@ -127,8 +128,20 @@ export default function ItemsPage() {
       if (!q) return true;
       return [i.name, i.itemCode, i.hsn, i.category].some((f) => f?.toLowerCase().includes(q));
     });
-    return [...list].sort((a, b) => (sortDesc ? b.name.localeCompare(a.name) : a.name.localeCompare(b.name)));
-  }, [scoped, search, stockFilter, sortDesc]);
+    const byName = (a: Item, b: Item) => a.name.localeCompare(b.name);
+    return [...list].sort((a, b) => {
+      switch (listSort) {
+        case "name-desc":
+          return byName(b, a);
+        case "qty-desc":
+          return (b.stockQty ?? 0) - (a.stockQty ?? 0) || byName(a, b);
+        case "qty-asc":
+          return (a.stockQty ?? 0) - (b.stockQty ?? 0) || byName(a, b);
+        default:
+          return byName(a, b);
+      }
+    });
+  }, [scoped, search, stockFilter, listSort]);
 
   const selected = items.find((i) => i.id === selectedId) ?? null;
 
@@ -446,9 +459,21 @@ export default function ItemsPage() {
                       ]}
                     />
                     <button
-                      onClick={() => setSortDesc((s) => !s)}
-                      title={sortDesc ? "Sort Z→A" : "Sort A→Z"}
-                      className="rounded-lg border border-gray-200 p-1.5 text-gray-400 transition-colors duration-150 hover:bg-gray-50 hover:text-gray-600"
+                      onClick={() =>
+                        setListSort((s) => (s === "qty-desc" ? "qty-asc" : s === "qty-asc" ? "name-asc" : "qty-desc"))
+                      }
+                      title={
+                        listSort === "qty-desc"
+                          ? "Quantity: high → low (click for low → high)"
+                          : listSort === "qty-asc"
+                            ? "Quantity: low → high (click for name A→Z)"
+                            : "Sort by quantity"
+                      }
+                      className={`rounded-lg border p-1.5 transition-colors duration-150 ${
+                        listSort.startsWith("qty")
+                          ? "border-cyan-300 bg-cyan-50 text-brand-accent"
+                          : "border-gray-200 text-gray-400 hover:bg-gray-50 hover:text-gray-600"
+                      }`}
                     >
                       <ArrowUpDown size={14} />
                     </button>
@@ -457,8 +482,24 @@ export default function ItemsPage() {
               </div>
 
               <div className="flex items-center justify-between border-b border-gray-100 bg-gray-50 px-3 py-1.5 text-[11px] font-medium tracking-wide text-gray-500 uppercase">
-                <span>Item</span>
-                <span>{tab === "SERVICES" ? "Price" : "Quantity"}</span>
+                <button
+                  type="button"
+                  onClick={() => setListSort((s) => (s === "name-asc" ? "name-desc" : "name-asc"))}
+                  className="uppercase hover:text-gray-700"
+                >
+                  Item{listSort === "name-asc" ? " ↑" : listSort === "name-desc" ? " ↓" : ""}
+                </button>
+                {tab === "SERVICES" ? (
+                  <span>Price</span>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setListSort((s) => (s === "qty-desc" ? "qty-asc" : "qty-desc"))}
+                    className="uppercase hover:text-gray-700"
+                  >
+                    Quantity{listSort === "qty-desc" ? " ↓" : listSort === "qty-asc" ? " ↑" : ""}
+                  </button>
+                )}
               </div>
 
               <div className="max-h-[560px] overflow-y-auto">

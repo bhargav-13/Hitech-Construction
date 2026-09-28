@@ -48,9 +48,23 @@ export const NAV_MODULE: Record<string, string> = {
   "/warehouse": "WAREHOUSE",
   "/equipment": "EQUIPMENT",
   "/asset": "ASSET",
-  // Library aggregates records the user can already reach elsewhere (members, Vyapar parties), and
-  // the backend has no LIBRARY:* permissions yet — left ungated until it does.
-  // "/library": "LIBRARY",
+  // Switched on/off per role in Roles & Access (V74 granted it to every existing role).
+  "/library": "LIBRARY",
   "/settings": "SETTINGS",
   "/services": "SERVICES",
 };
+
+/**
+ * Where to land after sign-in: Projects, the usual home, when the role can open it — otherwise the
+ * first sidebar module it can. Landing everyone on /project sent roles without project access (a
+ * Data Analyst with Taskopad and Payroll, say) straight to an "Access is denied" screen.
+ */
+export function landingPath(permissions: readonly string[] | null | undefined): string {
+  const perms = permissions ?? [];
+  const canOpen = (href: string) => {
+    const code = NAV_MODULE[href];
+    return !code || perms.includes(`${code}:VIEW`);
+  };
+  if (canOpen("/project")) return "/project";
+  return NAV_ITEMS.find((item) => item.href !== "/" && canOpen(item.href))?.href ?? "/approvals";
+}

@@ -27,6 +27,10 @@ import {
 } from "lucide-react";
 import { RowMenu, RowMenuDivider, RowMenuItem } from "@/components/RowMenu";
 import { DepartmentSelect } from "@/components/DepartmentSelect";
+import { PasswordField } from "@/components/PasswordField";
+import { StoredPassword } from "@/components/StoredPassword";
+import { useAuthStore } from "@/lib/authStore";
+import { isSuperAdminRole } from "@/lib/taskPermissions";
 
 // Unimplemented sections used to be listed here as "Coming soon" placeholders — that's been removed.
 const SECTIONS = ["Roles & Access", "Multi Level Approval", "Companies"] as const;
@@ -678,7 +682,11 @@ function RoleOrgChart({
 
   return (
     <div className="orgtree overflow-x-auto pb-3">
-      <ul>
+      {/* w-max lets the tree be as wide as it needs. Without it the centred flex row was capped at
+          the container width and a wide hierarchy spilled out both sides — the left half became
+          unreachable because a scroll container can't scroll into negative overflow. min-w-full
+          keeps a small tree centred. */}
+      <ul className="mx-auto w-max min-w-full">
         {roots.map((r) => (
           <Node key={r.id} role={r} seen={new Set()} />
         ))}
@@ -801,6 +809,9 @@ function UserDrawer({
   const [isActive, setIsActive] = useState(existing?.isActive ?? true);
   const [photoUrl, setPhotoUrl] = useState<string | null>(existing?.photoUrl ?? null);
   const [photoErr, setPhotoErr] = useState("");
+  // Only Super Admin sets another member's password from here (see PasswordField for why the
+  // current one can't be shown).
+  const canSetPassword = isSuperAdminRole(useAuthStore((s) => s.user?.role.name));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
@@ -831,6 +842,10 @@ function UserDrawer({
       setError("A password is required for members who sign in.");
       return;
     }
+    if (isLoginUser && password && password.length < 8) {
+      setError("A password needs at least 8 characters.");
+      return;
+    }
     setSaving(true);
     setError("");
     try {
@@ -848,6 +863,7 @@ function UserDrawer({
           // "" clears an existing photo (backend treats null as "unchanged").
           photoUrl: photoUrl ?? "",
         });
+        if (isLoginUser && password && canSetPassword) await api.updateUserPassword(existing.id, password);
       } else {
         await api.createUser({
           isLoginUser,
@@ -933,10 +949,22 @@ function UserDrawer({
               />
             </DrawerField>
 
-            {!existing && (
-              <DrawerField label="Password" required>
-                <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} className="input" />
+            {!existing ? (
+              <DrawerField label="Password" required group>
+                <PasswordField value={password} onChange={setPassword} />
               </DrawerField>
+            ) : (
+              canSetPassword &&
+              existing.isLoginUser && (
+                <>
+                  <DrawerField label="Current password" group>
+                    <StoredPassword userId={existing.id} />
+                  </DrawerField>
+                  <DrawerField label="Set new password" group>
+                    <PasswordField value={password} onChange={setPassword} placeholder="Leave blank to keep the current one" />
+                  </DrawerField>
+                </>
+              )
             )}
           </>
         )}

@@ -38,7 +38,7 @@ export function ProjectParties({ projectId }: { projectId: number }) {
     let cancelled = false;
     setLoading(true);
     setError("");
-    getParties(undefined, projectId)
+    getParties(undefined, projectId, true)
       .then((rows) => {
         if (!cancelled) setParties(rows);
       })

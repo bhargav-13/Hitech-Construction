@@ -23,6 +23,7 @@ import { inr, qty, bookDate, toIsoDate } from "@/lib/format";
 import { useVyaparProjectId } from "@/lib/projectScope";
 import * as vyapar from "@/lib/vyaparApi";
 import { fullInvoiceNo } from "@/lib/vyaparApi";
+import { docTypeHref, txnHref } from "@/lib/vyaparLinks";
 import type { CashBankTxn, Invoice, InvoiceLine, Item, Party, Payment } from "@/lib/vyaparApi";
 import { ChevronLeft, ChevronRight, Download } from "lucide-react";
 
@@ -137,7 +138,7 @@ function ReportDetail({ id, onBack }: { id: ReportId; onBack: () => void }) {
     try {
       const [inv, pty, itm, pay] = await Promise.all([
         vyapar.getInvoices(undefined, projectId),
-        vyapar.getParties(undefined, projectId),
+        vyapar.getParties(undefined, projectId, true),
         vyapar.getItems(projectId),
         vyapar.getPayments(undefined, projectId),
       ]);
@@ -406,6 +407,7 @@ function ReportBody({
           columns={txnReportColumns(id, parties)}
           rows={rows}
           detail={txnReportDetail(itemById)}
+          rowHref={(i) => docTypeHref(i.docType, i.id)}
         />
       </>
     );
@@ -413,7 +415,7 @@ function ReportBody({
 
   if (id === "daybook") {
     // Everything that happened, documents and payments together, newest first.
-    type Entry = { date: string | null; type: string; name: string; ref: string; in: number; out: number };
+    type Entry = { date: string | null; type: string; name: string; ref: string; in: number; out: number; href: string | null };
     const entries: Entry[] = [
       ...allInvoices.map((i) => ({
         date: i.invoiceDate,
@@ -422,6 +424,7 @@ function ReportBody({
         ref: fullInvoiceNo(i),
         in: i.docType === "SALE" || i.docType === "PURCHASE_RETURN" ? i.total : 0,
         out: i.docType === "PURCHASE" || i.docType === "SALE_RETURN" || i.docType === "EXPENSE" ? i.total : 0,
+        href: docTypeHref(i.docType, i.id),
       })),
       ...payments.map((p) => ({
         date: p.paymentDate,
@@ -430,6 +433,7 @@ function ReportBody({
         ref: p.reference ?? "—",
         in: p.direction === "IN" ? p.amount : 0,
         out: p.direction === "OUT" ? p.amount : 0,
+        href: txnHref(p.direction === "IN" ? "Payment-In" : "Payment-Out", p.id),
       })),
     ].sort((a, b) => (b.date ?? "").localeCompare(a.date ?? ""));
     const inSum = sum(entries.map((e) => e.in));
@@ -448,6 +452,7 @@ function ReportBody({
         <SimpleTable
           head={["Date", "Type", "Name", "Reference", "Money In", "Money Out"]}
           rows={entries.map((e) => [fmt(e.date), e.type, e.name, e.ref, e.in ? inr(e.in) : "—", e.out ? inr(e.out) : "—"])}
+          links={entries.map((e) => e.href)}
           alignRight={[4, 5]}
         />
       </>
@@ -533,6 +538,7 @@ function ReportBody({
         <SimpleTable
           head={["Date", "Invoice", "Party", "Revenue", "Cost", "Profit"]}
           rows={rows.map((r) => [fmt(r.inv.invoiceDate), fullInvoiceNo(r.inv), r.inv.partyName ?? "—", inr(r.revenue), inr(r.cost), inr(r.profit)])}
+          links={rows.map((r) => docTypeHref(r.inv.docType, r.inv.id))}
           alignRight={[3, 4, 5]}
         />
       </>
@@ -702,6 +708,7 @@ function ReportBody({
         <SimpleTable
           head={["Date", "Category", "Exp No.", "Party", "Total", "Balance", "Status"]}
           rows={expenses.map((e) => [fmt(e.invoiceDate), catOf(e), fullInvoiceNo(e) || "—", e.partyName ?? "—", inr(e.total), inr(e.balance), e.status])}
+          links={expenses.map((e) => docTypeHref(e.docType, e.id))}
           alignRight={[4, 5]}
         />
       </>
@@ -735,6 +742,7 @@ function ReportBody({
             p.city ?? "—",
             p.balance === 0 ? "—" : `${inr(Math.abs(p.balance))} ${p.balance > 0 ? "to receive" : "to pay"}`,
           ])}
+          links={rows.map((p) => `/vyapar/parties?open=${p.id}`)}
           alignRight={[5]}
         />
       </>
@@ -886,6 +894,7 @@ function ReportBody({
             inr(r.inv.taxAmount),
             inr(r.inv.total),
           ])}
+          links={rows.map((r) => docTypeHref(r.inv.docType, r.inv.id))}
           alignRight={[5, 6, 7]}
         />
       </>
@@ -1216,6 +1225,7 @@ function ReportBody({
         <SimpleTable
           head={["Date", "Type", "Invoice", "Party", "Discount", "Total"]}
           rows={rows.map((i) => [fmt(i.invoiceDate), vyapar.DOC_LABEL[i.docType], fullInvoiceNo(i), i.partyName ?? "—", inr(i.discount), inr(i.total)])}
+          links={rows.map((i) => docTypeHref(i.docType, i.id))}
           alignRight={[4, 5]}
         />
       </>
@@ -1297,6 +1307,7 @@ function ReportBody({
       <SimpleTable
         head={["Date", "Type", "Invoice", "Party", "Total", "Status"]}
         rows={allInvoices.map((i) => [fmt(i.invoiceDate), vyapar.DOC_LABEL[i.docType], fullInvoiceNo(i), i.partyName ?? "—", inr(i.total), i.status])}
+        links={allInvoices.map((i) => docTypeHref(i.docType, i.id))}
         alignRight={[4]}
       />
     </>
@@ -1404,6 +1415,7 @@ function BankStatementReport({ txns }: { txns: BankLedgerRow[] }) {
         minWidth={980}
         columns={columns}
         rows={rows}
+        rowHref={(t) => txnHref(t.type, t.id)}
       />
     </>
   );
@@ -1537,8 +1549,29 @@ const ReportMetaContext = createContext<{ title: string; filename: string }>({
  * the formatting: {@link sortableValue} pulls the number back out when a cell is one, and leaves
  * anything else as text.
  */
-function SimpleTable({ head, rows, alignRight = [] }: { head: string[]; rows: (string | number)[][]; alignRight?: number[] }) {
+function SimpleTable({
+  head,
+  rows,
+  alignRight = [],
+  links,
+}: {
+  head: string[];
+  rows: (string | number)[][];
+  alignRight?: number[];
+  /** The entry each row opens, by index into `rows`. Sorting reorders the rows, so the link is
+   *  tied to the row itself (a WeakMap keyed on the row array), not to its position. */
+  links?: (string | null)[];
+}) {
   const meta = useContext(ReportMetaContext);
+  const hrefOf = useMemo(() => {
+    if (!links) return undefined;
+    const map = new WeakMap<(string | number)[], string>();
+    rows.forEach((r, i) => {
+      const h = links[i];
+      if (h) map.set(r, h);
+    });
+    return (r: (string | number)[]) => map.get(r) ?? null;
+  }, [rows, links]);
   const columns: ReportColumn<(string | number)[]>[] = head.map((h, i) => ({
     key: `c${i}`,
     label: h,
@@ -1547,7 +1580,7 @@ function SimpleTable({ head, rows, alignRight = [] }: { head: string[]; rows: (s
     type: alignRight.includes(i) ? "number" : "text",
     align: alignRight.includes(i) ? "right" : "left",
   }));
-  return <ReportTable title={meta.title} filename={meta.filename} columns={columns} rows={rows} />;
+  return <ReportTable title={meta.title} filename={meta.filename} columns={columns} rows={rows} rowHref={hrefOf} />;
 }
 
 /** "₹1,23,456.78" → 123456.78; "- ₹500" → -500; anything not a number is left as text. */
