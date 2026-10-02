@@ -389,13 +389,24 @@ function DayView({
                     <input type="time" value={att?.outTime ?? ""} onChange={(e) => mark(m.id, { outTime: e.target.value || null })} className="rounded-md border border-gray-200 px-2 py-1 text-xs outline-none focus:border-cyan-500" />
                   </td>
                   {/* Hours actually worked, derived from the punch pair against the member's shift.
-                      A present day with no punch-out never had its length established, so it is
-                      flagged here rather than quietly counting as a full day in the payroll run. */}
+                      A present day with no punch-out is flagged so someone adds the time out; the run
+                      pays it as the Present day the calendar shows. A short day (under the half-day
+                      mark) is paid for its hours — that is what "short day" says here. */}
                   <td className="px-4 py-2.5">
                     {att?.workedHours != null ? (
-                      <span className="font-medium text-gray-700">{Number(att.workedHours).toFixed(2)}</span>
+                      <span className="inline-flex items-center gap-1.5">
+                        <span className="font-medium text-gray-700">{Number(att.workedHours).toFixed(2)}</span>
+                        {att.code === "A" && Number(att.workedHours) > 0 && (
+                          <span
+                            title={`Under the half-day mark — paid for ${Number(att.workedHours)} hours${att.payableDays != null ? ` (${Number(att.payableDays)} day)` : ""}`}
+                            className="rounded bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-700"
+                          >
+                            short day{att.payableDays != null ? ` · ${Number(att.payableDays)}d` : ""}
+                          </span>
+                        )}
+                      </span>
                     ) : att?.inTime && !att?.outTime ? (
-                      <span title="Punched in but never out — counts as half a day until corrected" className="inline-flex items-center gap-1 text-amber-600">
+                      <span title="Punched in but never out — add the time out so the hours are on record" className="inline-flex items-center gap-1 text-amber-600">
                         <AlertTriangle size={12} /> no punch-out
                       </span>
                     ) : (

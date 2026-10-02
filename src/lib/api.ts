@@ -774,6 +774,11 @@ export interface AttendanceApiResponse {
   punchOutPhoto: string | null;
   /** Back-camera site photo at punch-in (punchInPhoto is the front / face one). */
   punchInBackPhoto?: string | null;
+  /**
+   * Days this row pays, as the payroll run counts it: P / PL / WO 1, HD ½, and a short day (punched
+   * in and out for less than the half-day mark) its hours ÷ the shift's full day.
+   */
+  payableDays?: number | null;
 }
 
 export interface PunchRequestBody {

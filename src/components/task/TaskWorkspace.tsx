@@ -771,7 +771,7 @@ export function TaskWorkspace({ projectId, fill = false }: { projectId?: string;
           stickyHeader={fill}
         />
       ) : view === "Kanban" ? (
-        <KanbanView tasks={tasks} userName={userName} onOpen={setEditing} onMove={onPatchStatus} />
+        <KanbanView tasks={tasks} userName={userName} onOpen={setEditing} onMove={onPatchStatus} fill={fill} />
       ) : (
         <CalendarView tasks={tasks} onOpen={setEditing} />
       )}
@@ -1092,21 +1092,88 @@ function ListView({
   );
 }
 
+/** How close (px) to a scroll edge a dragged card has to be before the board scrolls for it. */
+const KANBAN_EDGE = 70;
+const KANBAN_STEP = 18;
+
+/**
+ * Kanban board. Every column scrolls on its own inside a board that fits the screen, so a long
+ * "Pending" column no longer drags the whole page down. The board moves with the mouse: grab any
+ * empty space and drag to pan sideways, and while a card is being dragged the board and the column
+ * under it scroll by themselves near their edges — no reaching for the scrollbar mid-drag.
+ */
 function KanbanView({
   tasks,
   userName,
   onOpen,
   onMove,
+  fill = false,
 }: {
   tasks: Task[];
   userName: (id: string) => string;
   onOpen: (t: Task) => void;
   onMove: (t: Task, s: TaskStatus) => void;
+  /** Fill the parent's height (Taskopad Tasks); otherwise cap at most of the viewport. */
+  fill?: boolean;
 }) {
   const [dragId, setDragId] = useState<string | null>(null);
+  const boardRef = useRef<HTMLDivElement>(null);
+  const pan = useRef<{ x: number; y: number; left: number; col: HTMLElement | null; top: number } | null>(null);
+  const [panning, setPanning] = useState(false);
+
+  // Grab-and-drag on empty space (not on a card, which has its own drag-to-move).
+  function onPointerDown(e: React.PointerEvent<HTMLDivElement>) {
+    if (e.button !== 0 || e.pointerType !== "mouse") return;
+    const target = e.target as HTMLElement;
+    if (target.closest("[data-kanban-card]")) return;
+    const board = boardRef.current;
+    if (!board) return;
+    const col = target.closest<HTMLElement>("[data-kanban-list]") ?? target.closest<HTMLElement>("[data-kanban-col]")?.querySelector<HTMLElement>("[data-kanban-list]") ?? null;
+    pan.current = { x: e.clientX, y: e.clientY, left: board.scrollLeft, col, top: col?.scrollTop ?? 0 };
+    setPanning(true);
+    board.setPointerCapture(e.pointerId);
+  }
+  function onPointerMove(e: React.PointerEvent<HTMLDivElement>) {
+    const p = pan.current;
+    const board = boardRef.current;
+    if (!p || !board) return;
+    board.scrollLeft = p.left - (e.clientX - p.x);
+    if (p.col) p.col.scrollTop = p.top - (e.clientY - p.y);
+  }
+  function endPan(e: React.PointerEvent<HTMLDivElement>) {
+    if (!pan.current) return;
+    pan.current = null;
+    setPanning(false);
+    boardRef.current?.releasePointerCapture(e.pointerId);
+  }
+
+  // While a card is dragged: scroll the board near its left/right edge, the column near its top/bottom.
+  function onBoardDragOver(e: React.DragEvent<HTMLDivElement>) {
+    const board = boardRef.current;
+    if (!board || !dragId) return;
+    const r = board.getBoundingClientRect();
+    if (e.clientX < r.left + KANBAN_EDGE) board.scrollLeft -= KANBAN_STEP;
+    else if (e.clientX > r.right - KANBAN_EDGE) board.scrollLeft += KANBAN_STEP;
+    const list = (e.target as HTMLElement).closest<HTMLElement>("[data-kanban-col]")?.querySelector<HTMLElement>("[data-kanban-list]");
+    if (list) {
+      const lr = list.getBoundingClientRect();
+      if (e.clientY < lr.top + KANBAN_EDGE) list.scrollTop -= KANBAN_STEP;
+      else if (e.clientY > lr.bottom - KANBAN_EDGE) list.scrollTop += KANBAN_STEP;
+    }
+  }
 
   return (
-    <div className="animate-fade-in flex gap-4 overflow-x-auto pb-2">
+    <div
+      ref={boardRef}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={endPan}
+      onPointerCancel={endPan}
+      onDragOver={onBoardDragOver}
+      className={`animate-fade-in flex gap-4 overflow-x-auto pb-2 ${fill ? "h-full" : "h-[70vh]"} ${
+        panning ? "cursor-grabbing select-none" : "cursor-grab"
+      }`}
+    >
       {/* One column per status a card can actually be dropped into, plus Awaiting Approval when
           something is sitting in it — a permanently empty column you cannot drag into is just a
           column that looks broken. Dropping *out* of it works: that is a manager overriding. */}
@@ -1123,20 +1190,25 @@ function KanbanView({
               if (t && t.status !== status) onMove(t, status);
               setDragId(null);
             }}
-            className="flex w-[260px] shrink-0 flex-col rounded-xl border border-gray-200 bg-gray-50/60 p-3"
+            data-kanban-col
+            className="flex max-h-full min-h-0 w-[270px] shrink-0 flex-col rounded-xl border border-gray-200 bg-gray-50/60 p-3"
           >
-            <div className="mb-3 flex items-center justify-between">
+            <div className="mb-3 flex shrink-0 items-center justify-between">
               <StatusChip status={status} />
               <span className="text-xs font-medium text-gray-400">{col.length}</span>
             </div>
-            <div className="space-y-2">
+            <div data-kanban-list className="-mr-1 min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
               {col.map((t) => (
                 <div
                   key={t.id}
+                  data-kanban-card
                   draggable
                   onDragStart={() => setDragId(t.id)}
+                  onDragEnd={() => setDragId(null)}
                   onClick={() => onOpen(t)}
-                  className="cursor-pointer rounded-lg border border-gray-200 bg-white p-3 transition-shadow duration-150 hover:shadow-md"
+                  className={`cursor-pointer rounded-lg border border-gray-200 bg-white p-3 transition-shadow duration-150 hover:shadow-md ${
+                    dragId === t.id ? "opacity-50" : ""
+                  }`}
                 >
                   <div className="mb-1.5 text-sm font-medium text-gray-800">{t.title}</div>
                   <div className="mb-2 flex items-center gap-1.5">

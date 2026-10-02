@@ -23,19 +23,31 @@ interface Stats {
   present: number; absent: number; halfDay: number; paidLeave: number;
   weekOff: number; unmarked: number; overtime: number; payableDays: number;
 }
+
+/** A day coded Absent that still has worked hours — paid by the hour, not zero. */
+const isShortDay = (r: AttendanceApiResponse) => r.code === "A" && Number(r.workedHours ?? 0) > 0;
+
+/** What a row pays: the server's figure (same as the payroll run), else the plain code value. */
+function rowPayable(r: AttendanceApiResponse): number {
+  if (r.payableDays != null) return Number(r.payableDays);
+  return r.code === "P" || r.code === "PL" || r.code === "WO" ? 1 : r.code === "HD" ? 0.5 : 0;
+}
+
 function summarize(rows: AttendanceApiResponse[]): Stats {
   const s: Stats = { present: 0, absent: 0, halfDay: 0, paidLeave: 0, weekOff: 0, unmarked: 0, overtime: 0, payableDays: 0 };
   for (const r of rows) {
     s.overtime += Number(r.overtimeHours ?? 0);
+    s.payableDays += rowPayable(r);
     switch (r.code) {
-      case "P": s.present++; s.payableDays += 1; break;
-      case "HD": s.halfDay++; s.payableDays += 0.5; break;
-      case "PL": s.paidLeave++; s.payableDays += 1; break;
-      case "WO": s.weekOff++; s.payableDays += 1; break;
+      case "P": s.present++; break;
+      case "HD": s.halfDay++; break;
+      case "PL": s.paidLeave++; break;
+      case "WO": s.weekOff++; break;
       case "A": s.absent++; break;
       case "NM": s.unmarked++; break;
     }
   }
+  s.payableDays = Math.round(s.payableDays * 100) / 100;
   return s;
 }
 
@@ -246,7 +258,11 @@ export default function MemberAttendancePage() {
                       {day}
                       {holiday && <PartyPopper size={11} className="mt-0.5 shrink-0 text-violet-500" />}
                     </span>
-                    {att && <span className="text-[10px] leading-none font-medium">{meta.label}</span>}
+                    {att && (
+                      <span className="text-[10px] leading-none font-medium">
+                        {isShortDay(att) ? `Short day · ${Number(att.workedHours)}h` : meta.label}
+                      </span>
+                    )}
                     {holiday && (
                       <span className="line-clamp-2 text-[10px] leading-tight font-medium text-violet-600">
                         {holiday.name}

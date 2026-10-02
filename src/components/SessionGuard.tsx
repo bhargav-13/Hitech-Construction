@@ -4,6 +4,9 @@ import { useEffect } from "react";
 import { getSessionUser, SESSION_USER_KEY } from "@/lib/api";
 import { useAuthStore } from "@/lib/authStore";
 
+/** How often an open tab re-reads the signed-in user's access while visible. */
+const ACCESS_POLL_MS = 15_000;
+
 /**
  * Keeps a page from showing one person's data after the browser has moved on to another.
  *
@@ -39,14 +42,26 @@ export function SessionGuard() {
       if (document.visibilityState === "visible") check();
     };
 
+    // Role / permission changes made by an admin show up without a re-login: re-check on focus and
+    // every ACCESS_POLL_MS while the tab is visible.
+    const refreshAccess = () => {
+      if (document.visibilityState === "visible") void useAuthStore.getState().refreshAccess();
+    };
+    const timer = window.setInterval(refreshAccess, ACCESS_POLL_MS);
+    const onFocus = () => {
+      check();
+      refreshAccess();
+    };
+
     window.addEventListener("storage", onStorage);
     window.addEventListener("pageshow", onPageShow);
-    window.addEventListener("focus", check);
+    window.addEventListener("focus", onFocus);
     document.addEventListener("visibilitychange", onVisible);
     return () => {
       window.removeEventListener("storage", onStorage);
       window.removeEventListener("pageshow", onPageShow);
-      window.removeEventListener("focus", check);
+      window.removeEventListener("focus", onFocus);
+      window.clearInterval(timer);
       document.removeEventListener("visibilitychange", onVisible);
     };
   }, []);

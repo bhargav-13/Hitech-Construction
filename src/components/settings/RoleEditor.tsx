@@ -14,9 +14,14 @@ import { Select } from "@/components/Select";
  * Finance, …) isn't shown, and any permission a role already holds on one is carried through save
  * untouched.
  *
+ * <p>A feature can have sub-features (Vyapar › Sales › Sale Invoices, Estimates, …). It then shows
+ * as a group row whose ticks set every sub-feature at once, and partly-ticked when only some are on;
+ * each sub-feature row below it can be set on its own — e.g. a role that sees only Sale Invoices.
+ *
  * <p>The server has the final word on consistency (PermissionRules): a module switched off loses
- * everything inside it, an action includes view, and module-level actions are derived from the
- * features. This screen applies the same rules as you click so what you see is what gets saved.
+ * everything inside it, an action includes view, a feature with sub-features holds whatever its
+ * sub-features hold, and module-level actions are derived from the features. This screen applies the
+ * same rules as you click so what you see is what gets saved.
  */
 
 type Action = PermissionResponse["action"];
@@ -63,11 +68,14 @@ const ACTION_LABEL: Record<Action, string> = {
   APPROVE: "Approve",
 };
 
-type Row = { key: string; label: string; perms: Partial<Record<Action, PermissionResponse>>; isModuleRow: boolean };
+/** Per action, the permissions a tick on this row sets — one for a plain row, one per sub-feature for a group. */
+type Perms = Partial<Record<Action, PermissionResponse[]>>;
+type Row = { key: string; label: string; perms: Perms; isModuleRow: boolean; depth: 0 | 1; isGroup: boolean };
 type Section = { module: ModuleResponse; switchPerm: PermissionResponse; rows: Row[]; rule?: string };
 
 const byAction = (perms: PermissionResponse[]) =>
-  Object.fromEntries(perms.map((p) => [p.action, p])) as Partial<Record<Action, PermissionResponse>>;
+  Object.fromEntries(perms.map((p) => [p.action, [p]])) as Perms;
+const sortBy = (a: ModuleResponse, b: ModuleResponse) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0);
 
 export function RoleEditor({
   modules,
@@ -98,19 +106,47 @@ export function RoleEditor({
     return MODULES.flatMap(({ code, rule }) => {
       const mod = modules.find((m) => m.code === code && !m.parentCode);
       const own = mod ? byAction(mod.permissions) : {};
-      if (!mod || !own.VIEW) return [];
-      const features = modules
-        .filter((m) => m.parentCode === code)
-        .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0));
+      const switchPerm = own.VIEW?.[0];
+      if (!mod || !switchPerm) return [];
+      const features = modules.filter((m) => m.parentCode === code).sort(sortBy);
       const rows: Row[] = features.length
-        ? features.map((f) => ({ key: f.code, label: f.name, perms: byAction(f.permissions), isModuleRow: false }))
+        ? features.flatMap((f): Row[] => {
+            const subs = modules.filter((m) => m.parentCode === f.code).sort(sortBy);
+            if (!subs.length) {
+              return [{ key: f.code, label: f.name, perms: byAction(f.permissions), isModuleRow: false, depth: 0, isGroup: false }];
+            }
+            const subRows: Row[] = subs.map((sf) => ({
+              key: sf.code, label: sf.name, perms: byAction(sf.permissions), isModuleRow: false, depth: 1, isGroup: false,
+            }));
+            const groupPerms: Perms = {};
+            for (const r of subRows) {
+              for (const [a, list] of Object.entries(r.perms) as [Action, PermissionResponse[]][]) {
+                (groupPerms[a] ??= []).push(...list);
+              }
+            }
+            return [{ key: f.code, label: f.name, perms: groupPerms, isModuleRow: false, depth: 0, isGroup: true }, ...subRows];
+          })
         : // A module without features is one row: its own actions, View being the switch itself.
-          [{ key: mod.code, label: mod.name, perms: own, isModuleRow: true }];
-      return [{ module: mod, switchPerm: own.VIEW, rows, rule }];
+          [{ key: mod.code, label: mod.name, perms: own, isModuleRow: true, depth: 0, isGroup: false }];
+      return [{ module: mod, switchPerm, rows, rule }];
     });
   }, [modules]);
 
+  /**
+   * A feature with sub-features holds nothing of its own — the server derives it from them — so its
+   * own permissions are never sent. Sending them would read as "all sub-features" on the server.
+   */
+  const groupOwnIds = useMemo(() => {
+    const ids = new Set<number>();
+    for (const m of modules) {
+      if (m.parentCode && modules.some((x) => x.parentCode === m.code)) for (const p of m.permissions) ids.add(p.id);
+    }
+    return ids;
+  }, [modules]);
+
   const has = (p?: PermissionResponse) => !!p && selected.has(p.id);
+  const allOn = (list?: PermissionResponse[]) => !!list?.length && list.every((p) => selected.has(p.id));
+  const someOn = (list?: PermissionResponse[]) => !!list?.some((p) => selected.has(p.id));
 
   function update(fn: (next: Set<number>) => void) {
     if (locked) return;
@@ -126,42 +162,44 @@ export function RoleEditor({
       if (on) {
         next.add(section.switchPerm.id);
         // Switching a module on starts everyone off able to see all of it — the usual first step.
-        for (const row of section.rows) if (row.perms.VIEW) next.add(row.perms.VIEW.id);
+        for (const row of section.rows) for (const p of row.perms.VIEW ?? []) next.add(p.id);
       } else {
         for (const p of section.module.permissions) next.delete(p.id);
-        for (const row of section.rows) for (const p of Object.values(row.perms)) if (p) next.delete(p.id);
+        for (const row of section.rows) for (const list of Object.values(row.perms)) for (const p of list ?? []) next.delete(p.id);
       }
     });
   }
 
   function setAction(row: Row, action: Action, on: boolean) {
     update((next) => {
-      const perm = row.perms[action];
-      if (!perm) return;
+      const list = row.perms[action];
+      if (!list?.length) return;
       if (on) {
-        next.add(perm.id);
-        if (row.perms.VIEW) next.add(row.perms.VIEW.id); // any action includes seeing it
+        for (const p of list) next.add(p.id);
+        for (const p of row.perms.VIEW ?? []) next.add(p.id); // any action includes seeing it
       } else if (action === "VIEW" && !row.isModuleRow) {
         // Can't act on what you can't see.
-        for (const p of Object.values(row.perms)) if (p) next.delete(p.id);
+        for (const l of Object.values(row.perms)) for (const p of l ?? []) next.delete(p.id);
       } else {
-        next.delete(perm.id);
+        for (const p of list) next.delete(p.id);
       }
     });
   }
 
   function setFull(row: Row, on: boolean) {
     update((next) => {
-      for (const [action, p] of Object.entries(row.perms)) {
-        if (!p || (row.isModuleRow && action === "VIEW")) continue;
-        if (on) next.add(p.id);
-        else next.delete(p.id);
+      for (const [action, list] of Object.entries(row.perms)) {
+        if (!list || (row.isModuleRow && action === "VIEW")) continue;
+        for (const p of list) {
+          if (on) next.add(p.id);
+          else next.delete(p.id);
+        }
       }
     });
   }
 
-  const isFull = (row: Row) =>
-    Object.entries(row.perms).every(([, p]) => !p || selected.has(p.id));
+  const isFull = (row: Row) => Object.values(row.perms).every((list) => !list || allOn(list));
+  const isPartlyFull = (row: Row) => Object.values(row.perms).some((list) => someOn(list));
 
   const onCount = sections.filter((s) => has(s.switchPerm)).length;
 
@@ -178,7 +216,7 @@ export function RoleEditor({
         name: name.trim(),
         description: description.trim() || undefined,
         reportsToRoleId: reportsToRoleId === "" ? null : Number(reportsToRoleId),
-        permissionIds: Array.from(selected),
+        permissionIds: Array.from(selected).filter((id) => !groupOwnIds.has(id)),
       };
       if (existing) await api.updateRole(existing.id, body);
       else await api.createRole(body);
@@ -272,7 +310,7 @@ export function RoleEditor({
       <div className="space-y-3">
         {sections.map((section) => {
           const on = isSuperAdmin || has(section.switchPerm);
-          const showMore = section.rows.some((r) => MORE.some((a) => r.perms[a]));
+          const showMore = section.rows.some((r) => MORE.some((a) => r.perms[a]?.length));
           const single = section.rows.length === 1 && section.rows[0].isModuleRow;
           return (
             <section key={section.module.code} className="overflow-hidden rounded-xl border border-gray-200 bg-white">
@@ -311,20 +349,41 @@ export function RoleEditor({
                       </thead>
                       <tbody>
                         {section.rows.map((row) => {
-                          const more = MORE.filter((a) => row.perms[a]);
-                          const moreOn = more.filter((a) => has(row.perms[a])).length;
+                          const more = MORE.filter((a) => row.perms[a]?.length);
+                          const moreOn = more.filter((a) => allOn(row.perms[a])).length;
                           const menuKey = `${section.module.code}:${row.key}`;
                           return (
-                            <tr key={row.key} className="border-t border-gray-100 first:border-t-0">
-                              <td className="px-3 py-2.5 text-gray-700">{single ? <span className="text-gray-400">{row.label}</span> : row.label}</td>
+                            <tr
+                              key={row.key}
+                              className={`border-t border-gray-100 first:border-t-0 ${row.depth === 1 ? "bg-gray-50/40" : ""}`}
+                            >
+                              <td className={`py-2.5 pr-3 ${row.depth === 1 ? "pl-9 text-gray-600" : "pl-3 text-gray-700"} ${row.isGroup ? "font-medium" : ""}`}>
+                                {single ? (
+                                  <span className="text-gray-400">{row.label}</span>
+                                ) : row.depth === 1 ? (
+                                  <span className="flex items-center gap-1.5">
+                                    <span className="text-gray-300">└</span>
+                                    {row.label}
+                                  </span>
+                                ) : (
+                                  row.label
+                                )}
+                              </td>
                               <td className="px-2 py-2.5 text-center">
-                                <Check checked={isSuperAdmin || isFull(row)} disabled={locked} onChange={(v) => setFull(row, v)} label={`${row.label} full access`} />
+                                <Check
+                                  checked={isSuperAdmin || isFull(row)}
+                                  mixed={!isSuperAdmin && !isFull(row) && isPartlyFull(row)}
+                                  disabled={locked}
+                                  onChange={(v) => setFull(row, v)}
+                                  label={`${row.label} full access`}
+                                />
                               </td>
                               {GRID.map((a) => (
                                 <td key={a} className="px-2 py-2.5 text-center">
-                                  {row.perms[a] ? (
+                                  {row.perms[a]?.length ? (
                                     <Check
-                                      checked={isSuperAdmin || has(row.perms[a]) || (row.isModuleRow && a === "VIEW")}
+                                      checked={isSuperAdmin || allOn(row.perms[a]) || (row.isModuleRow && a === "VIEW")}
+                                      mixed={!isSuperAdmin && row.isGroup && !allOn(row.perms[a]) && someOn(row.perms[a])}
                                       disabled={locked || (row.isModuleRow && a === "VIEW")}
                                       onChange={(v) => setAction(row, a, v)}
                                       label={`${row.label} ${ACTION_LABEL[a]}`}
@@ -345,7 +404,7 @@ export function RoleEditor({
                                           moreOn || isSuperAdmin ? "text-brand-accent hover:bg-cyan-50" : "text-gray-500 hover:bg-gray-100"
                                         }`}
                                       >
-                                        {isSuperAdmin ? "All" : moreOn ? more.filter((a) => has(row.perms[a])).map((a) => ACTION_LABEL[a]).join(", ") : "More permissions"}
+                                        {isSuperAdmin ? "All" : moreOn ? more.filter((a) => allOn(row.perms[a])).map((a) => ACTION_LABEL[a]).join(", ") : "More permissions"}
                                         <ChevronDown size={12} />
                                       </button>
                                       {openMore === menuKey && (
@@ -359,7 +418,7 @@ export function RoleEditor({
                                               >
                                                 <input
                                                   type="checkbox"
-                                                  checked={isSuperAdmin || has(row.perms[a])}
+                                                  checked={isSuperAdmin || allOn(row.perms[a])}
                                                   disabled={locked}
                                                   onChange={(e) => setAction(row, a, e.target.checked)}
                                                   className="h-4 w-4 accent-cyan-600"
@@ -388,7 +447,7 @@ export function RoleEditor({
       </div>
 
       <p className="pb-6 text-xs text-gray-400">
-        Changes apply the next time a person signs in or their session refreshes.
+        Changes apply within a few seconds for everyone with this role — nobody needs to sign out.
       </p>
     </div>
   );
@@ -415,10 +474,26 @@ function Switch({ on, disabled, onChange, label }: { on: boolean; disabled?: boo
   );
 }
 
-function Check({ checked, disabled, onChange, label }: { checked: boolean; disabled?: boolean; onChange: (v: boolean) => void; label: string }) {
+function Check({
+  checked,
+  mixed = false,
+  disabled,
+  onChange,
+  label,
+}: {
+  checked: boolean;
+  /** Some, not all, of what this tick covers is on — drawn as a dash. */
+  mixed?: boolean;
+  disabled?: boolean;
+  onChange: (v: boolean) => void;
+  label: string;
+}) {
   return (
     <input
       type="checkbox"
+      ref={(el) => {
+        if (el) el.indeterminate = mixed && !checked;
+      }}
       checked={checked}
       disabled={disabled}
       aria-label={label}

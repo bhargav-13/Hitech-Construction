@@ -18,6 +18,9 @@ import {
   ChevronLeft, ChevronRight, CircleCheck, Download, FileSpreadsheet, Lock, Pencil, Play, RefreshCw, Search, ShieldCheck, Unlock, Users, Wallet, X,
 } from "lucide-react";
 
+/** Payable days to two places at most — a short day makes 1.3333, which reads better as 1.33. */
+const days = (n: number | string) => String(Math.round(Number(n) * 100) / 100);
+
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 /**
@@ -97,7 +100,7 @@ export default function PayrollRunPage() {
   const head = ["Member", "Payable Days", "Gross", "PF", "ESIC", "PT", "Loan EMI", "Reimb.", "Net"];
   const data = useMemo(() => (run?.payslips ?? []).map((p) => [
     p.memberName,
-    `${p.payableDays} / ${p.totalDays}`,
+    `${days(p.payableDays)} / ${p.totalDays}`,
     p.gross, p.pf, p.esic, p.pt, p.loanEmi, p.reimbursements, p.net,
   ]), [run]);
 
@@ -318,7 +321,7 @@ export default function PayrollRunPage() {
                           <span className="font-medium text-gray-800">{p.memberName}</span>
                         </div>
                       </td>
-                      <td className="px-4 py-2.5 text-right text-gray-600">{p.payableDays} / {p.totalDays}</td>
+                      <td className="px-4 py-2.5 text-right text-gray-600">{days(p.payableDays)} / {p.totalDays}</td>
                       <td className="px-4 py-2.5 text-right text-gray-700">{inr(p.gross)}</td>
                       <td className="px-4 py-2.5 text-right text-gray-500">{Number(p.pf) > 0 ? `−${inr(p.pf)}` : "—"}</td>
                       <td className="px-4 py-2.5 text-right text-gray-500">{Number(p.esic) > 0 ? `−${inr(p.esic)}` : "—"}</td>

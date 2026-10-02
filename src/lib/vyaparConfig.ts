@@ -55,13 +55,28 @@ export const DOC_CONFIGS: DocConfig[] = [
   { type: "PARTY_TRANSFER", label: "Party To Party Transfer", title: "Party To Party Transfer", slug: "party-transfer", group: "OTHERS", prefix: "PTP", flow: "out", posts: true, hasLines: false },
 ];
 
-/** The Roles & Access feature a document type belongs to. Mirrors VyaparController.featureOf. */
+/**
+ * The Roles & Access (sub-)feature a document type belongs to. Mirrors VyaparController.featureOf.
+ * Sales and purchases are split per document (V77), so a role can hold Sale Invoices alone.
+ */
 export function docFeature(type: string): string {
   switch (type) {
     case "PURCHASE":
+      return "VYAPAR_PURCHASE_BILL";
     case "PURCHASE_ORDER":
+      return "VYAPAR_PURCHASE_ORDER";
     case "PURCHASE_RETURN":
-      return "VYAPAR_PURCHASE";
+      return "VYAPAR_PURCHASE_RETURN";
+    case "ESTIMATE":
+      return "VYAPAR_SALE_ESTIMATE";
+    case "PROFORMA":
+      return "VYAPAR_SALE_PROFORMA";
+    case "SALE_ORDER":
+      return "VYAPAR_SALE_ORDER";
+    case "DELIVERY_CHALLAN":
+      return "VYAPAR_SALE_CHALLAN";
+    case "SALE_RETURN":
+      return "VYAPAR_SALE_RETURN";
     case "EXPENSE":
       return "VYAPAR_EXPENSE";
     case "PAYMENT_IN":
@@ -69,7 +84,7 @@ export function docFeature(type: string): string {
     case "PARTY_TRANSFER":
       return "VYAPAR_PAYMENT";
     default:
-      return "VYAPAR_SALE";
+      return "VYAPAR_SALE_INVOICE";
   }
 }
 
@@ -97,24 +112,24 @@ export const VYAPAR_NAV: NavNode[] = [
     label: "Sale",
     icon: "file",
     children: [
-      { label: "Sale Invoices", href: "/vyapar/sale", feature: "VYAPAR_SALE" },
-      { label: "Estimate / Quotation", href: "/vyapar/estimate", feature: "VYAPAR_SALE" },
-      { label: "Proforma Invoice", href: "/vyapar/proforma", feature: "VYAPAR_SALE" },
+      { label: "Sale Invoices", href: "/vyapar/sale", feature: "VYAPAR_SALE_INVOICE" },
+      { label: "Estimate / Quotation", href: "/vyapar/estimate", feature: "VYAPAR_SALE_ESTIMATE" },
+      { label: "Proforma Invoice", href: "/vyapar/proforma", feature: "VYAPAR_SALE_PROFORMA" },
       { label: "Payment-In", href: "/vyapar/payment-in", feature: "VYAPAR_PAYMENT" },
-      { label: "Sale Order", href: "/vyapar/sale-order", feature: "VYAPAR_SALE" },
-      { label: "Delivery Challan", href: "/vyapar/delivery-challan", feature: "VYAPAR_SALE" },
-      { label: "Sale Return / Credit Note", href: "/vyapar/sale-return", feature: "VYAPAR_SALE" },
+      { label: "Sale Order", href: "/vyapar/sale-order", feature: "VYAPAR_SALE_ORDER" },
+      { label: "Delivery Challan", href: "/vyapar/delivery-challan", feature: "VYAPAR_SALE_CHALLAN" },
+      { label: "Sale Return / Credit Note", href: "/vyapar/sale-return", feature: "VYAPAR_SALE_RETURN" },
     ],
   },
   {
     label: "Purchase & Expense",
     icon: "cart",
     children: [
-      { label: "Purchase Bills", href: "/vyapar/purchase", feature: "VYAPAR_PURCHASE" },
+      { label: "Purchase Bills", href: "/vyapar/purchase", feature: "VYAPAR_PURCHASE_BILL" },
       { label: "Payment-Out", href: "/vyapar/payment-out", feature: "VYAPAR_PAYMENT" },
       { label: "Expenses", href: "/vyapar/expenses", feature: "VYAPAR_EXPENSE" },
-      { label: "Purchase Order", href: "/vyapar/purchase-order", feature: "VYAPAR_PURCHASE" },
-      { label: "Purchase Return / Dr. Note", href: "/vyapar/purchase-return", feature: "VYAPAR_PURCHASE" },
+      { label: "Purchase Order", href: "/vyapar/purchase-order", feature: "VYAPAR_PURCHASE_ORDER" },
+      { label: "Purchase Return / Dr. Note", href: "/vyapar/purchase-return", feature: "VYAPAR_PURCHASE_RETURN" },
     ],
   },
   {

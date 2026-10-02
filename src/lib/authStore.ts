@@ -14,6 +14,19 @@ interface AuthState {
   login: (email: string, password: string) => Promise<boolean>;
   logout: () => Promise<void>;
   hydrate: () => Promise<void>;
+  /**
+   * Re-read who I am and what I may do. Access is checked live on the server, so this keeps menus,
+   * tabs and buttons in step when someone edits my role — without signing out and back in.
+   */
+  refreshAccess: () => Promise<void>;
+}
+
+/** Same person, same role, same permissions? Order-insensitive. */
+function sameAccess(a: CurrentUserResponse, b: CurrentUserResponse): boolean {
+  if (a.id !== b.id || a.role?.id !== b.role?.id || a.role?.name !== b.role?.name) return false;
+  const pa = [...(a.permissions ?? [])].sort().join("|");
+  const pb = [...(b.permissions ?? [])].sort().join("|");
+  return pa === pb;
 }
 
 export const useAuthStore = create<AuthState>((set, get) => ({
@@ -52,6 +65,19 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     api.clearTokens();
     resetCompanyScope();
     set({ user: null });
+  },
+
+  refreshAccess: async () => {
+    const current = get().user;
+    if (!current || !api.getAccessToken()) return;
+    try {
+      const fresh = await api.getCurrentUser();
+      // Signed out or switched while the request was in flight.
+      if (get().user?.id !== current.id) return;
+      if (!sameAccess(current, fresh)) set({ user: fresh });
+    } catch {
+      // A network blip keeps the current view; an expired session is handled by the API layer.
+    }
   },
 
   hydrate: async () => {
