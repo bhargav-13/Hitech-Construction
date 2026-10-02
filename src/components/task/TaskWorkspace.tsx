@@ -104,7 +104,11 @@ const DATE_PRESETS: { label: string; range: () => [string, string] }[] = [
  * narrowed by the header project dropdown) and embedded in the project workspace scoped to one
  * project via `projectId`.
  */
-export function TaskWorkspace({ projectId }: { projectId?: string }) {
+/**
+ * `fill`: the workspace takes its parent's full height — toolbar, filters and view tabs stay fixed
+ * and only the list / board / calendar scrolls (the list keeps its column header pinned).
+ */
+export function TaskWorkspace({ projectId, fill = false }: { projectId?: string; fill?: boolean }) {
   const allTasks = useTaskStore((s) => s.tasks);
   const loading = useTaskStore((s) => s.loading);
   const loaded = useTaskStore((s) => s.loaded);
@@ -422,7 +426,7 @@ export function TaskWorkspace({ projectId }: { projectId?: string }) {
   }
 
   return (
-    <div className="space-y-4">
+    <div className={fill ? "flex h-full min-h-0 flex-col gap-4 [&>*]:shrink-0" : "space-y-4"}>
       {/* Toolbar */}
       <div className="flex flex-wrap items-center gap-2">
         <div className="flex min-w-[200px] flex-1 items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 transition-colors duration-150 focus-within:border-cyan-500">
@@ -738,6 +742,7 @@ export function TaskWorkspace({ projectId }: { projectId?: string }) {
         </div>
       )}
 
+      <div className={fill ? "!shrink min-h-0 flex-1 overflow-y-auto" : ""}>
       {loading && !loaded ? (
         <div className="flex min-h-[280px] items-center justify-center rounded-xl border border-gray-200 bg-white text-gray-400">
           <Loader2 className="mr-2 animate-spin" size={18} /> Loading tasks…
@@ -763,12 +768,14 @@ export function TaskWorkspace({ projectId }: { projectId?: string }) {
           onToggleSelect={toggleSelect}
           onToggleSelectAll={toggleSelectAll}
           allSelected={allSelected}
+          stickyHeader={fill}
         />
       ) : view === "Kanban" ? (
         <KanbanView tasks={tasks} userName={userName} onOpen={setEditing} onMove={onPatchStatus} />
       ) : (
         <CalendarView tasks={tasks} onOpen={setEditing} />
       )}
+      </div>
 
       {creating && <TaskDrawer defaultProjectId={effectiveProjectId ?? null} onClose={() => setCreating(false)} />}
       {importing && <TaskImportDrawer onClose={() => setImporting(false)} onImport={importParsedTasks} />}
@@ -899,6 +906,7 @@ function ListView({
   onToggleSelect,
   onToggleSelectAll,
   allSelected,
+  stickyHeader = false,
 }: {
   tasks: Task[];
   userName: (id: string) => string;
@@ -917,13 +925,19 @@ function ListView({
   onToggleSelect: (id: string) => void;
   onToggleSelectAll: () => void;
   allSelected: boolean;
+  /** Scroll inside the card (both ways) with the column header pinned to its top. */
+  stickyHeader?: boolean;
 }) {
   const show = (k: ColumnKey) => columns.includes(k);
   const showProjectCol = showProject && show("project");
   return (
-    <div className="animate-fade-in overflow-x-auto rounded-xl border border-gray-200 bg-white">
+    <div
+      className={`animate-fade-in rounded-xl border border-gray-200 bg-white ${
+        stickyHeader ? "max-h-full overflow-auto" : "overflow-x-auto"
+      }`}
+    >
       <table className="w-full min-w-[900px] border-collapse text-sm">
-        <thead>
+        <thead className={stickyHeader ? "sticky top-0 z-10" : undefined}>
           <tr className="border-b border-gray-100 bg-gray-50 text-left text-gray-500">
             <th className="w-10 px-4 py-2">
               <input

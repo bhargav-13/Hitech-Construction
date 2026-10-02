@@ -18,10 +18,16 @@ export function AppShell({
    * navigation beside it only takes room away from the BOQ tables that need it.
    */
   hideSidebar = false,
+  /**
+   * The page fills exactly the space under the top bar instead of scrolling as a whole, so it can
+   * keep its own header still and scroll just one region (e.g. the Taskopad task list).
+   */
+  fill = false,
 }: {
   title: string;
   children: React.ReactNode;
   hideSidebar?: boolean;
+  fill?: boolean;
 }) {
   const router = useRouter();
   const rehydrateAuth = useAppStore((s) => s.rehydrateAuth);
@@ -51,7 +57,7 @@ export function AppShell({
       <div className="flex min-w-0 flex-1 flex-col">
         <Topbar title={title} />
         <main className="min-w-0 flex-1 overflow-x-hidden overflow-y-auto bg-background p-6">
-          <div className="animate-fade-in">{children}</div>
+          <div className={`animate-fade-in ${fill ? "h-full" : ""}`}>{children}</div>
         </main>
       </div>
     </div>

@@ -15,7 +15,7 @@ import { inr } from "@/lib/format";
 import { exportRowsToCsv } from "@/lib/vyaparExport";
 import { downloadPayslip } from "@/lib/payslipExport";
 import {
-  ChevronLeft, ChevronRight, CircleCheck, Download, FileSpreadsheet, Lock, Pencil, Play, RefreshCw, ShieldCheck, Unlock, Users, Wallet, X,
+  ChevronLeft, ChevronRight, CircleCheck, Download, FileSpreadsheet, Lock, Pencil, Play, RefreshCw, Search, ShieldCheck, Unlock, Users, Wallet, X,
 } from "lucide-react";
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -40,6 +40,7 @@ export default function PayrollRunPage() {
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState("");
   const [editing, setEditing] = useState<PayslipApi | null>(null);
+  const [query, setQuery] = useState("");
   /**
    * What an unmarked day is worth. Defaults to "Unpaid": on "Paid" a member present one day out of
    * twenty-four was paid for twenty-four, which is what the client reported: payable days are the
@@ -85,6 +86,13 @@ export default function PayrollRunPage() {
     catch (err) { setActionError(err instanceof ApiError ? err.message : "Unable to mark the run paid."); }
     finally { setBusy(false); }
   }
+
+  // Name filter for the payslip table. Totals and Export stay on the whole run.
+  const slips = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    const all = run?.payslips ?? [];
+    return q ? all.filter((p) => p.memberName.toLowerCase().includes(q)) : all;
+  }, [run, query]);
 
   const head = ["Member", "Payable Days", "Gross", "PF", "ESIC", "PT", "Loan EMI", "Reimb.", "Net"];
   const data = useMemo(() => (run?.payslips ?? []).map((p) => [
@@ -252,57 +260,90 @@ export default function PayrollRunPage() {
         ) : run.payslips.length === 0 ? (
           <PayrollEmpty icon={Users} title="No payslips" hint="No members on payroll have data for this month yet." />
         ) : (
-          <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white">
-            <table className="w-full min-w-[900px] border-collapse text-sm">
-              <thead>
-                <tr className="border-b border-gray-100 bg-gray-50 text-left text-gray-500">
-                  <th className="px-4 py-2 font-medium">Member</th>
-                  <th className="px-4 py-2 text-right font-medium">Payable Days</th>
-                  <th className="px-4 py-2 text-right font-medium">Gross</th>
-                  <th className="px-4 py-2 text-right font-medium">PF</th>
-                  <th className="px-4 py-2 text-right font-medium">ESIC</th>
-                  <th className="px-4 py-2 text-right font-medium">PT</th>
-                  <th className="px-4 py-2 text-right font-medium">Loan EMI</th>
-                  <th className="px-4 py-2 text-right font-medium">Reimb.</th>
-                  <th className="px-4 py-2 text-right font-medium">Net Pay</th>
-                  <th className="px-4 py-2 text-right font-medium"></th>
-                </tr>
-              </thead>
-              <tbody>
-                {run.payslips.map((p) => (
-                  <tr key={p.id} className="border-b border-gray-50 last:border-b-0 even:bg-gray-50/40">
-                    <td className="px-4 py-2.5">
-                      <div className="flex items-center gap-2.5">
-                        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-cyan-50 text-xs font-semibold text-brand-accent">
-                          {p.memberName.split(" ").map((n) => n[0]).slice(0, 2).join("")}
-                        </div>
-                        <span className="font-medium text-gray-800">{p.memberName}</span>
-                      </div>
-                    </td>
-                    <td className="px-4 py-2.5 text-right text-gray-600">{p.payableDays} / {p.totalDays}</td>
-                    <td className="px-4 py-2.5 text-right text-gray-700">{inr(p.gross)}</td>
-                    <td className="px-4 py-2.5 text-right text-gray-500">{Number(p.pf) > 0 ? `−${inr(p.pf)}` : "—"}</td>
-                    <td className="px-4 py-2.5 text-right text-gray-500">{Number(p.esic) > 0 ? `−${inr(p.esic)}` : "—"}</td>
-                    <td className="px-4 py-2.5 text-right text-gray-500">{Number(p.pt) > 0 ? `−${inr(p.pt)}` : "—"}</td>
-                    <td className="px-4 py-2.5 text-right text-gray-500">{Number(p.loanEmi) > 0 ? `−${inr(p.loanEmi)}` : "—"}</td>
-                    <td className="px-4 py-2.5 text-right text-emerald-600">{Number(p.reimbursements) > 0 ? `+${inr(p.reimbursements)}` : "—"}</td>
-                    <td className="px-4 py-2.5 text-right font-semibold text-gray-900">{inr(p.net)}</td>
-                    <td className="px-2 py-2.5">
-                      <div className="flex items-center justify-end gap-1">
-                        {run.status === "DRAFT" && (
-                          <button onClick={() => setEditing(p)} title="Edit payslip" className="rounded-md p-1.5 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-700">
-                            <Pencil size={14} />
-                          </button>
-                        )}
-                        <button onClick={() => downloadPayslip(p, p.memberName, { profile: profiles[p.userId] })} title="Download payslip" className="rounded-md p-1.5 text-gray-400 transition-colors hover:bg-cyan-50 hover:text-brand-accent">
-                          <Download size={14} />
-                        </button>
-                      </div>
-                    </td>
+          <div className="space-y-3">
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="relative w-full max-w-xs">
+                <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                <input
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder="Search member…"
+                  className="w-full rounded-lg border border-gray-200 bg-white py-2 pl-9 pr-8 text-sm text-gray-800 outline-none transition-colors focus:border-brand-accent"
+                />
+                {query && (
+                  <button
+                    onClick={() => setQuery("")}
+                    title="Clear search"
+                    className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-0.5 text-gray-400 hover:text-gray-600"
+                  >
+                    <X size={14} />
+                  </button>
+                )}
+              </div>
+              {query && (
+                <span className="text-xs text-gray-500">
+                  {slips.length} of {run.payslips.length} members
+                </span>
+              )}
+            </div>
+            {slips.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-gray-300 bg-white py-10 text-center text-sm text-gray-400">
+                No member matches &ldquo;{query}&rdquo;.
+              </div>
+            ) : (
+            <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white">
+              <table className="w-full min-w-[900px] border-collapse text-sm">
+                <thead>
+                  <tr className="border-b border-gray-100 bg-gray-50 text-left text-gray-500">
+                    <th className="px-4 py-2 font-medium">Member</th>
+                    <th className="px-4 py-2 text-right font-medium">Payable Days</th>
+                    <th className="px-4 py-2 text-right font-medium">Gross</th>
+                    <th className="px-4 py-2 text-right font-medium">PF</th>
+                    <th className="px-4 py-2 text-right font-medium">ESIC</th>
+                    <th className="px-4 py-2 text-right font-medium">PT</th>
+                    <th className="px-4 py-2 text-right font-medium">Loan EMI</th>
+                    <th className="px-4 py-2 text-right font-medium">Reimb.</th>
+                    <th className="px-4 py-2 text-right font-medium">Net Pay</th>
+                    <th className="px-4 py-2 text-right font-medium"></th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {slips.map((p) => (
+                    <tr key={p.id} className="border-b border-gray-50 last:border-b-0 even:bg-gray-50/40">
+                      <td className="px-4 py-2.5">
+                        <div className="flex items-center gap-2.5">
+                          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-cyan-50 text-xs font-semibold text-brand-accent">
+                            {p.memberName.split(" ").map((n) => n[0]).slice(0, 2).join("")}
+                          </div>
+                          <span className="font-medium text-gray-800">{p.memberName}</span>
+                        </div>
+                      </td>
+                      <td className="px-4 py-2.5 text-right text-gray-600">{p.payableDays} / {p.totalDays}</td>
+                      <td className="px-4 py-2.5 text-right text-gray-700">{inr(p.gross)}</td>
+                      <td className="px-4 py-2.5 text-right text-gray-500">{Number(p.pf) > 0 ? `−${inr(p.pf)}` : "—"}</td>
+                      <td className="px-4 py-2.5 text-right text-gray-500">{Number(p.esic) > 0 ? `−${inr(p.esic)}` : "—"}</td>
+                      <td className="px-4 py-2.5 text-right text-gray-500">{Number(p.pt) > 0 ? `−${inr(p.pt)}` : "—"}</td>
+                      <td className="px-4 py-2.5 text-right text-gray-500">{Number(p.loanEmi) > 0 ? `−${inr(p.loanEmi)}` : "—"}</td>
+                      <td className="px-4 py-2.5 text-right text-emerald-600">{Number(p.reimbursements) > 0 ? `+${inr(p.reimbursements)}` : "—"}</td>
+                      <td className="px-4 py-2.5 text-right font-semibold text-gray-900">{inr(p.net)}</td>
+                      <td className="px-2 py-2.5">
+                        <div className="flex items-center justify-end gap-1">
+                          {run.status === "DRAFT" && (
+                            <button onClick={() => setEditing(p)} title="Edit payslip" className="rounded-md p-1.5 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-700">
+                              <Pencil size={14} />
+                            </button>
+                          )}
+                          <button onClick={() => downloadPayslip(p, p.memberName, { profile: profiles[p.userId] })} title="Download payslip" className="rounded-md p-1.5 text-gray-400 transition-colors hover:bg-cyan-50 hover:text-brand-accent">
+                            <Download size={14} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            )}
           </div>
         )}
 

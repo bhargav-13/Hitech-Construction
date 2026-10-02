@@ -5,10 +5,11 @@ import { AppShell } from "@/components/AppShell";
 import { Spinner } from "@/components/Spinner";
 import { useAuthStore } from "@/lib/authStore";
 import { useMyProfile, useTodayAttendance } from "@/lib/usePayrollLive";
-import { ApiError, getMyFace, saveMyFace, getMyLocations } from "@/lib/api";
+import { ApiError, getMyFace, saveMyFace, getMyLocations, getTeam } from "@/lib/api";
 import type { GeoPointApi, LocationApi } from "@/lib/api";
 import { isSameFace } from "@/lib/faceApi";
 import { FaceCapture, type FaceCaptureResult } from "@/components/payroll/FaceCapture";
+import { BackPhotoCapture } from "@/components/payroll/BackPhotoCapture";
 import {
   CheckCircle,
   Clock,
@@ -77,10 +78,12 @@ function metresBetween(lat1: number, lng1: number, lat2: number, lng2: number): 
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-// Which camera step is open: enrol the reference face, or verify a punch (carrying the GPS fix).
+// Which camera step is open: enrol the reference face, verify a punch (carrying the GPS fix), or -
+// for Site staff punching in - the back-camera site photo that follows the verified selfie.
 type Modal =
   | { kind: "enroll" }
-  | { kind: "punch"; type: "in" | "out"; lat: number | null; lng: number | null };
+  | { kind: "punch"; type: "in" | "out"; lat: number | null; lng: number | null }
+  | { kind: "back"; lat: number | null; lng: number | null; faceScore: number; front: string };
 
 export default function PunchPage() {
   const user = useAuthStore((s) => s.user);
@@ -99,13 +102,20 @@ export default function PunchPage() {
   const [status, setStatus] = useState<"idle" | "detecting" | "success" | "error">("idle");
   const [message, setMessage] = useState("");
   const [modal, setModal] = useState<Modal | null>(null);
+  // Site staff punch in with two photos: the face selfie (front) and the site (back camera).
+  const [isSite, setIsSite] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const [f, locs] = await Promise.all([getMyFace(), getMyLocations().catch(() => [])]);
+        const [f, locs, team] = await Promise.all([
+          getMyFace(),
+          getMyLocations().catch(() => []),
+          getTeam().catch(() => []),
+        ]);
         if (!cancelled) {
+          setIsSite(team.find((m) => m.id === user?.id)?.staffType === "SITE");
           setDescriptor(f.enrolled && f.descriptor?.length ? f.descriptor : null);
           setFacePhoto(f.photo);
           setMyLocations(locs);
@@ -117,7 +127,7 @@ export default function PunchPage() {
       }
     })();
     return () => { cancelled = true; };
-  }, []);
+  }, [user?.id]);
 
   const enrolled = !!descriptor;
 
@@ -182,20 +192,45 @@ export default function PunchPage() {
       return;
     }
 
-    const hadGps = modal.lat != null && modal.lng != null;
+    const faceScore = Number(cmp.distance.toFixed(3));
+    if (modal.type === "in" && isSite) {
+      // Face is verified — now the compulsory back-camera photo of the site.
+      setModal({ kind: "back", lat: modal.lat, lng: modal.lng, faceScore, front: result.photo });
+      return;
+    }
+    await submitPunch(modal.type, modal.lat, modal.lng, faceScore, result.photo, null);
+  }
+
+  async function onBackCaptured(backPhoto: string) {
+    if (modal?.kind !== "back") return;
+    await submitPunch("in", modal.lat, modal.lng, modal.faceScore, modal.front, backPhoto);
+  }
+
+  async function submitPunch(
+    type: "in" | "out",
+    lat: number | null,
+    lng: number | null,
+    faceScore: number,
+    photo: string,
+    backPhoto: string | null,
+  ) {
+    const hadGps = lat != null && lng != null;
     try {
       await punch({
-        direction: modal.type === "in" ? "IN" : "OUT",
-        lat: modal.lat,
-        lng: modal.lng,
-        faceScore: Number(cmp.distance.toFixed(3)),
+        direction: type === "in" ? "IN" : "OUT",
+        lat,
+        lng,
+        faceScore,
         projectId: null,
-        photo: result.photo,
+        photo,
+        backPhoto,
       });
       await refreshToday();
       setModal(null);
       setStatus("success");
-      setMessage(`${modal.type === "in" ? "Punched in" : "Punched out"} — face verified${hadGps ? " · location captured" : ""}`);
+      setMessage(
+        `${type === "in" ? "Punched in" : "Punched out"} — face verified${backPhoto ? " · site photo saved" : ""}${hadGps ? " · location captured" : ""}`,
+      );
     } catch (err) {
       setModal(null);
       setStatus("error");
@@ -320,13 +355,20 @@ export default function PunchPage() {
                 </div>
               )}
             </div>
-            {(today?.punchInPhoto || today?.punchOutPhoto) && (
+            {(today?.punchInPhoto || today?.punchOutPhoto || today?.punchInBackPhoto) && (
               <div className="mt-3 flex items-center gap-3 border-t border-gray-100 pt-3">
                 {today?.punchInPhoto && (
                   <figure className="text-center">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img src={today.punchInPhoto} alt="Punch-in selfie" className="h-14 w-14 rounded-lg object-cover ring-1 ring-emerald-200" />
-                    <figcaption className="mt-1 text-[9px] text-gray-400">In</figcaption>
+                    <figcaption className="mt-1 text-[9px] text-gray-400">{today.punchInBackPhoto ? "In · front" : "In"}</figcaption>
+                  </figure>
+                )}
+                {today?.punchInBackPhoto && (
+                  <figure className="text-center">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={today.punchInBackPhoto} alt="Punch-in site photo" className="h-14 w-14 rounded-lg object-cover ring-1 ring-emerald-200" />
+                    <figcaption className="mt-1 text-[9px] text-gray-400">In · back</figcaption>
                   </figure>
                 )}
                 {today?.punchOutPhoto && (
@@ -427,10 +469,27 @@ export default function PunchPage() {
       {modal?.kind === "punch" && (
         <FaceCapture
           title={`Verify to punch ${modal.type}`}
-          subtitle="Capture a selfie to confirm it's you."
-          actionLabel={modal.type === "in" ? "Capture & Punch In" : "Capture & Punch Out"}
+          subtitle={
+            modal.type === "in" && isSite
+              ? "Step 1 of 2 — front photo: capture a selfie to confirm it's you."
+              : "Capture a selfie to confirm it's you."
+          }
+          actionLabel={modal.type === "in" ? (isSite ? "Capture front photo" : "Capture & Punch In") : "Capture & Punch Out"}
           onCapture={onPunchCaptured}
           onCancel={() => setModal(null)}
+        />
+      )}
+      {modal?.kind === "back" && (
+        <BackPhotoCapture
+          title="Punch in — site photo"
+          subtitle="Step 2 of 2 — back photo: point the back camera at the site. Both photos are required for site staff."
+          actionLabel="Capture & Punch In"
+          onCapture={onBackCaptured}
+          onCancel={() => {
+            setModal(null);
+            setStatus("error");
+            setMessage("Punch-in cancelled — site staff need both the front (face) and back (site) photo.");
+          }}
         />
       )}
     </AppShell>

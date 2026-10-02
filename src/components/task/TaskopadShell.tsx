@@ -18,8 +18,11 @@ const TABS = [
   { label: "Checklist", href: "/taskopad/checklist", feature: "TASKOPAD_CHECKLIST" },
 ];
 
-/** Shared chrome for the Taskopad module: breadcrumb + horizontal section tabs. */
-export function TaskopadShell({ children }: { children: React.ReactNode }) {
+/**
+ * Shared chrome for the Taskopad module: breadcrumb + horizontal section tabs. With `fill`, the
+ * chrome stays put and the page body gets the remaining height to scroll inside.
+ */
+export function TaskopadShell({ children, fill = false }: { children: React.ReactNode; fill?: boolean }) {
   const pathname = usePathname();
   // A tab the role's Roles & Access features don't cover isn't shown.
   const can = useCan();
@@ -35,8 +38,8 @@ export function TaskopadShell({ children }: { children: React.ReactNode }) {
   }, [loadApprovals, pathname, canSeeApprovals]);
 
   return (
-    <AppShell title="Taskopad">
-      <div className="space-y-5">
+    <AppShell title="Taskopad" fill={fill}>
+      <div className={fill ? "flex h-full min-h-0 flex-col gap-5" : "space-y-5"}>
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-1.5 text-xs text-gray-400">
             <Link href="/taskopad" className="transition-colors duration-150 hover:text-gray-600 hover:underline">
@@ -75,7 +78,7 @@ export function TaskopadShell({ children }: { children: React.ReactNode }) {
           })}
         </div>
 
-        <div className="min-w-0">{children}</div>
+        <div className={fill ? "min-h-0 min-w-0 flex-1" : "min-w-0"}>{children}</div>
       </div>
     </AppShell>
   );

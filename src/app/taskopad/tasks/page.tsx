@@ -7,10 +7,10 @@ import { TaskWorkspace } from "@/components/task/TaskWorkspace";
 /** All tasks across every project. The project-scoped view lives in the project workspace. */
 export default function TaskopadTasksPage() {
   return (
-    <TaskopadShell>
+    <TaskopadShell fill>
       {/* TaskWorkspace reads query params, which needs a boundary for the production build. */}
       <Suspense fallback={null}>
-        <TaskWorkspace />
+        <TaskWorkspace fill />
       </Suspense>
     </TaskopadShell>
   );

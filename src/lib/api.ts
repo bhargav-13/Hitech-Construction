@@ -772,6 +772,8 @@ export interface AttendanceApiResponse {
   faceScoreOut: number | null;
   punchInPhoto: string | null;
   punchOutPhoto: string | null;
+  /** Back-camera site photo at punch-in (punchInPhoto is the front / face one). */
+  punchInBackPhoto?: string | null;
 }
 
 export interface PunchRequestBody {
@@ -781,6 +783,8 @@ export interface PunchRequestBody {
   faceScore: number | null;
   projectId?: number | null;
   photo?: string | null;
+  /** Back-camera photo of the site — compulsory on punch-in for Site staff. */
+  backPhoto?: string | null;
 }
 
 // ---- Payroll: face enrolment (self-service, for the punch page) ----

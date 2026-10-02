@@ -224,6 +224,11 @@ export function ProjectAttendance({ projectId }: { projectId: string }) {
                             // eslint-disable-next-line @next/next/no-img-element
                             <img src={r.punchInPhoto} alt="Punch-in selfie" title="Punch-in selfie (face verified)" className="h-6 w-6 rounded object-cover ring-1 ring-emerald-200" />
                           )}
+                          {r.punchInBackPhoto && (
+                            // Back-camera site photo — hover to enlarge so the site is actually visible.
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img src={r.punchInBackPhoto} alt="Punch-in site photo" title="Punch-in site photo (back camera)" className="relative h-6 w-6 rounded object-cover ring-1 ring-emerald-200 transition-transform hover:z-20 hover:scale-[6]" />
+                          )}
                           {r.punchOutPhoto && (
                             // eslint-disable-next-line @next/next/no-img-element
                             <img src={r.punchOutPhoto} alt="Punch-out selfie" title="Punch-out selfie (face verified)" className="h-6 w-6 rounded object-cover ring-1 ring-rose-200" />
