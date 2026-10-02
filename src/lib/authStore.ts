@@ -27,6 +27,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     try {
       const res = await api.login(email, password);
       api.setTokens(res.accessToken, res.refreshToken);
+      api.setSessionUser(res.user.id);
       // A new session starts with no company: the previous user's choice may not be one this user
       // can open. The list reloads for them and settles on the first company they have.
       resetCompanyScope();
@@ -57,11 +58,13 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     if (get().hydrated) return;
     const token = api.getAccessToken();
     if (!token) {
+      api.setSessionUser(null);
       set({ hydrated: true });
       return;
     }
     try {
       const user = await api.getCurrentUser();
+      api.setSessionUser(user.id);
       set({ user, hydrated: true });
     } catch {
       api.clearTokens();

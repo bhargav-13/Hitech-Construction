@@ -4,6 +4,23 @@ export const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://loca
 
 const ACCESS_TOKEN_KEY = "hitech_access_token";
 const REFRESH_TOKEN_KEY = "hitech_refresh_token";
+/**
+ * Who this browser is signed in as, written beside the tokens. Every open tab compares it with the
+ * user it loaded for (components/SessionGuard.tsx), so signing in as someone else in one tab
+ * reloads the others instead of leaving the previous person's data on screen.
+ */
+export const SESSION_USER_KEY = "hitech_session_user";
+
+export function getSessionUser(): string | null {
+  if (typeof window === "undefined") return null;
+  return localStorage.getItem(SESSION_USER_KEY);
+}
+
+export function setSessionUser(userId: number | string | null) {
+  if (typeof window === "undefined") return;
+  if (userId == null) localStorage.removeItem(SESSION_USER_KEY);
+  else localStorage.setItem(SESSION_USER_KEY, String(userId));
+}
 
 export function getAccessToken(): string | null {
   if (typeof window === "undefined") return null;
@@ -25,6 +42,7 @@ export function clearTokens() {
   if (typeof window === "undefined") return;
   localStorage.removeItem(ACCESS_TOKEN_KEY);
   localStorage.removeItem(REFRESH_TOKEN_KEY);
+  localStorage.removeItem(SESSION_USER_KEY);
 }
 
 // ---- Active company ----
@@ -1165,6 +1183,8 @@ export function myPayslips() {
 export interface AccessSelfApi {
   superAdmin: boolean;
   hasSubtree: boolean;
+  /** Everyone below me in the role ladder (excludes me; empty for Super Admin, whose team is everyone). */
+  teamUserIds?: number[];
 }
 
 export function getAccessSelf() {

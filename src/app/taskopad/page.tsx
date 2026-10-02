@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -21,7 +21,7 @@ import {
 import { AlarmClock, CalendarClock, CheckCircle2, ListChecks, UserRound } from "lucide-react";
 import { TaskopadShell } from "@/components/task/TaskopadShell";
 import { UserAvatar } from "@/components/task/TaskBits";
-import { Select } from "@/components/Select";
+import { getAccessSelf } from "@/lib/api";
 import { useAuthStore } from "@/lib/authStore";
 import { useUsers } from "@/lib/useUsers";
 import { useProjects } from "@/lib/useProjects";
@@ -44,42 +44,78 @@ export default function TaskopadDashboardPage() {
     load();
   }, [load]);
 
-  const [scope, setScope] = useState<"My Task" | "All Task">("All Task");
+  // Who sits under me in the role ladder. Until this answers, the dashboard stays on "My tasks".
+  const [access, setAccess] = useState<{ superAdmin: boolean; teamIds: Set<string> } | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    getAccessSelf()
+      .then((r) => {
+        if (!cancelled) setAccess({ superAdmin: r.superAdmin, teamIds: new Set((r.teamUserIds ?? []).map(String)) });
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  const canSeeTeam = !!access && (access.superAdmin || access.teamIds.size > 0);
+
+  // The dashboard follows the Tasks screen's My / All toggle, but only managers get the team view.
+  const storeScope = useTaskStore((s) => s.scope);
+  const setStoreScope = useTaskStore((s) => s.setScope);
+  const teamView = canSeeTeam && storeScope === "ALL";
+
   const [range, setRange] = useState<"Monthly" | "Weekly">("Monthly");
 
-  // "My Task" is the signed-in backend user.
   const router = useRouter();
   const meId = authUser ? String(authUser.id) : "";
-  const live = useMemo(
-    () => allTasks.filter((t) => !t.isDraft && (projectScope === "all" || t.projectId === projectScope)),
-    [allTasks, projectScope]
+  /**
+   * Whose tasks this dashboard is about: just me, or me + the people who report to me (everyone,
+   * for Super Admin). The task list also carries tasks I merely created or follow for someone
+   * else — those belong on the Tasks screen, not on my dashboard, where they read as another
+   * person's work and overdue items leaking in.
+   */
+  const everyone = teamView && !!access?.superAdmin;
+  const teamIds = teamView ? access?.teamIds : undefined;
+  const isMine = useCallback(
+    (assigneeId: string) => everyone || assigneeId === meId || !!teamIds?.has(assigneeId),
+    [everyone, teamIds, meId]
   );
-  const scoped = useMemo(
-    () => (scope === "My Task" ? live.filter((t) => t.assigneeId === meId || t.followerIds.includes(meId)) : live),
-    [live, scope]
+
+  const live = useMemo(
+    () =>
+      allTasks.filter(
+        (t) => !t.isDraft && isMine(t.assigneeId) && (projectScope === "all" || t.projectId === projectScope)
+      ),
+    [allTasks, projectScope, isMine]
   );
 
   const totalTask = live.length;
   const assignedToMe = live.filter((t) => t.assigneeId === meId).length;
+  const completed = live.filter((t) => t.status === "Completed").length;
   const dueToday = live.filter((t) => isDueToday(t)).length;
   const pastDue = live.filter((t) => isOverdue(t)).length;
-  // Drill-down targets for the score cards.
+  // Drill-down targets for the score cards. "My tasks" drills stay pinned to me.
   const todayIso = toIso(new Date());
   const yesterdayIso = toIso(new Date(Date.now() - 86_400_000));
+  const mineDrill: Record<string, string> = !teamView && meId ? { assignee: meId } : {};
 
   const priorityData = (["Low", "Medium", "High"] as const).map((p) => ({
     name: p,
-    value: scoped.filter((t) => t.priority === p).length,
+    value: live.filter((t) => t.priority === p).length,
   }));
 
-  const statsData = useMemo(() => buildStats(scoped, range), [scoped, range]);
+  const statsData = useMemo(() => buildStats(live, range), [live, range]);
 
-  const teamIncomplete = users
-    .map((u) => ({
-      ...u,
-      count: live.filter((t) => t.assigneeId === u.id && t.status !== "Completed").length,
-    }))
-    .sort((a, b) => b.count - a.count);
+  // Only people I manage (and me) — never the whole company directory.
+  const teamIncomplete = teamView
+    ? users
+        .filter((u) => isMine(u.id))
+        .map((u) => ({
+          ...u,
+          count: live.filter((t) => t.assigneeId === u.id && t.status !== "Completed").length,
+        }))
+        .sort((a, b) => b.count - a.count)
+    : [];
 
   const recentProjects = useMemo(() => {
     const withCounts = projects
@@ -108,6 +144,35 @@ export default function TaskopadDashboardPage() {
   return (
     <TaskopadShell>
       <div className="animate-fade-in space-y-5">
+        {/* My / team switch — only for people with someone reporting to them. */}
+        {canSeeTeam && (
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-xs text-gray-500">
+              {teamView
+                ? access?.superAdmin
+                  ? "Showing everyone's tasks"
+                  : "Showing tasks assigned to you and your team"
+                : "Showing tasks assigned to you"}
+            </p>
+            <div className="flex rounded-lg bg-gray-100 p-0.5 text-xs">
+              {([
+                ["MINE", "My tasks"],
+                ["ALL", access?.superAdmin ? "All users" : "My team"],
+              ] as const).map(([value, label]) => (
+                <button
+                  key={value}
+                  onClick={() => void setStoreScope(value)}
+                  className={`rounded-md px-2.5 py-1 font-medium transition-all duration-150 ${
+                    storeScope === value ? "bg-white text-gray-800 shadow-sm" : "text-gray-500"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* KPI strip */}
         <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
           <Kpi
@@ -115,21 +180,31 @@ export default function TaskopadDashboardPage() {
             value={totalTask}
             icon={ListChecks}
             tint="bg-cyan-50 text-brand-accent"
-            drill={{}}
+            drill={mineDrill}
           />
-          <Kpi
-            label="Assigned to me"
-            value={assignedToMe}
-            icon={UserRound}
-            tint="bg-green-50 text-green-600"
-            drill={meId ? { assignee: meId } : {}}
-          />
+          {teamView ? (
+            <Kpi
+              label="Assigned to me"
+              value={assignedToMe}
+              icon={UserRound}
+              tint="bg-green-50 text-green-600"
+              drill={meId ? { assignee: meId } : {}}
+            />
+          ) : (
+            <Kpi
+              label="Completed"
+              value={completed}
+              icon={CheckCircle2}
+              tint="bg-green-50 text-green-600"
+              drill={{ ...mineDrill, status: "Completed" }}
+            />
+          )}
           <Kpi
             label="Due today"
             value={dueToday}
             icon={AlarmClock}
             tint="bg-amber-50 text-amber-600"
-            drill={{ dueFrom: todayIso, dueTo: todayIso }}
+            drill={{ ...mineDrill, dueFrom: todayIso, dueTo: todayIso }}
           />
           <Kpi
             label="Past due tasks"
@@ -137,7 +212,7 @@ export default function TaskopadDashboardPage() {
             icon={CalendarClock}
             tint="bg-rose-50 text-rose-600"
             valueClass={pastDue > 0 ? "text-rose-600" : undefined}
-            drill={{ dueTo: yesterdayIso }}
+            drill={{ ...mineDrill, dueTo: yesterdayIso }}
           />
         </div>
 
@@ -147,16 +222,6 @@ export default function TaskopadDashboardPage() {
             <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
               <h3 className="text-sm font-semibold text-gray-800">Statistics</h3>
               <div className="flex items-center gap-2">
-                <Select
-                  value={scope}
-                  onChange={(v) => setScope(v as "My Task" | "All Task")}
-                  size="sm"
-                  className="w-[110px]"
-                  options={[
-                    { value: "All Task", label: "All Task" },
-                    { value: "My Task", label: "My Task" },
-                  ]}
-                />
                 <div className="flex rounded-lg bg-gray-100 p-0.5 text-xs">
                   {(["Monthly", "Weekly"] as const).map((r) => (
                     <button
@@ -234,40 +299,49 @@ export default function TaskopadDashboardPage() {
 
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
           {/* Upcoming (replaces TaskOPad's empty calendar with something useful) */}
-          <div className="rounded-xl border border-gray-200 bg-white p-4 transition-shadow duration-150 hover:shadow-md lg:col-span-2">
+          <div
+            className={`rounded-xl border border-gray-200 bg-white p-4 transition-shadow duration-150 hover:shadow-md ${
+              teamView ? "lg:col-span-2" : "lg:col-span-3"
+            }`}
+          >
             <div className="mb-3 flex items-center justify-between">
               <h3 className="text-sm font-semibold text-gray-800">Upcoming & Overdue</h3>
-              <Link href="/taskopad/tasks" className="text-xs font-medium text-brand-accent hover:underline">
+              <Link
+                href={`/taskopad/tasks?${new URLSearchParams(mineDrill).toString()}`}
+                className="text-xs font-medium text-brand-accent hover:underline"
+              >
                 View all
               </Link>
             </div>
             <UpcomingList tasks={live} userName={userName} />
           </div>
 
-          {/* Team incomplete — self-start so it sizes to its content instead of stretching to
-              match the taller card beside it (which left an empty gap under the list). */}
-          <div className="self-start rounded-xl border border-gray-200 bg-white p-4 transition-shadow duration-150 hover:shadow-md">
-            <h3 className="mb-3 text-sm font-semibold text-gray-800">Team Incomplete Task</h3>
-            {/* Cap the height so a large team scrolls instead of pushing the page down. */}
-            <div className="max-h-[280px] space-y-2.5 overflow-y-auto pr-1">
-              {teamIncomplete.map((u) => (
-                <div key={u.id} className="flex items-center gap-2.5">
-                  <UserAvatar id={u.id} name={u.name} size={30} />
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate text-sm font-medium text-gray-800">{u.name}</div>
-                    <div className="truncate text-xs text-gray-400">{u.role}</div>
+          {/* Team incomplete — managers' team view only. self-start so it sizes to its content
+              instead of stretching to match the taller card beside it. */}
+          {teamView && (
+            <div className="self-start rounded-xl border border-gray-200 bg-white p-4 transition-shadow duration-150 hover:shadow-md">
+              <h3 className="mb-3 text-sm font-semibold text-gray-800">Team Incomplete Task</h3>
+              {/* Cap the height so a large team scrolls instead of pushing the page down. */}
+              <div className="max-h-[280px] space-y-2.5 overflow-y-auto pr-1">
+                {teamIncomplete.map((u) => (
+                  <div key={u.id} className="flex items-center gap-2.5">
+                    <UserAvatar id={u.id} name={u.name} size={30} />
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-sm font-medium text-gray-800">{u.name}</div>
+                      <div className="truncate text-xs text-gray-400">{u.role}</div>
+                    </div>
+                    <span
+                      className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
+                        u.count > 0 ? "bg-cyan-50 text-brand-accent" : "bg-gray-100 text-gray-400"
+                      }`}
+                    >
+                      {u.count}
+                    </span>
                   </div>
-                  <span
-                    className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
-                      u.count > 0 ? "bg-cyan-50 text-brand-accent" : "bg-gray-100 text-gray-400"
-                    }`}
-                  >
-                    {u.count}
-                  </span>
-                </div>
-              ))}
+                ))}
+              </div>
             </div>
-          </div>
+          )}
         </div>
 
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">

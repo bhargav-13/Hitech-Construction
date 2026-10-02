@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Building2, Lock, Mail } from "lucide-react";
 import { useAppStore } from "@/lib/store";
@@ -22,15 +22,24 @@ export default function LoginPage() {
   const [email, setEmail] = useState("admin@hitech.local");
   const [password, setPassword] = useState("");
 
+  // Set while a sign-in from this form is landing, so the effect below doesn't race it with a
+  // client-side route change.
+  const signingIn = useRef(false);
+
   useEffect(() => {
-    if (authUser) router.replace(landingPath(authUser.permissions));
+    if (authUser && !signingIn.current) router.replace(landingPath(authUser.permissions));
   }, [authUser, router]);
 
   async function signIn() {
+    signingIn.current = true;
     const ok = await authLogin(email, password);
     if (ok) {
       mockLogin("u-admin");
-      router.push(landingPath(useAuthStore.getState().user?.permissions));
+      // A full page load, not router.push: the new person starts from empty stores, so nothing
+      // anyone loaded earlier in this tab can show up under their name.
+      window.location.replace(landingPath(useAuthStore.getState().user?.permissions));
+    } else {
+      signingIn.current = false;
     }
   }
 
