@@ -115,7 +115,8 @@ export default function PunchPage() {
           getTeam().catch(() => []),
         ]);
         if (!cancelled) {
-          setIsSite(team.find((m) => m.id === user?.id)?.staffType === "SITE");
+          // TEMPORARILY DISABLED: two-photo site punch-in is off until the mobile app ships it too.
+          // setIsSite(team.find((m) => m.id === user?.id)?.staffType === "SITE");
           setDescriptor(f.enrolled && f.descriptor?.length ? f.descriptor : null);
           setFacePhoto(f.photo);
           setMyLocations(locs);
