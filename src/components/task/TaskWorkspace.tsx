@@ -219,8 +219,19 @@ export function TaskWorkspace({ projectId, fill = false }: { projectId?: string;
   }
 
   // Drill-down: apply any filters passed in the URL (e.g. from a dashboard score card/chart).
+  // Applied once per distinct query (and once more for the status filter when the server's
+  // statuses land) — never on every render, or setting the filters re-renders and re-applies them
+  // in a loop that blocks every navigation.
+  const appliedQuery = useRef<string | null>(null);
+  const appliedStatusRows = useRef<typeof statusRows | null>(null);
   useEffect(() => {
     if (!searchParams) return;
+    const query = searchParams.toString();
+    // statusRows is memoised, so a new array means the statuses really changed (server rows landed).
+    if (appliedQuery.current === query && appliedStatusRows.current === statusRows) return;
+    const firstTime = appliedQuery.current !== query;
+    appliedQuery.current = query;
+    appliedStatusRows.current = statusRows;
     const status = searchParams.get("status");
     const priority = searchParams.get("priority");
     const assignee = searchParams.get("assignee");
@@ -231,6 +242,7 @@ export function TaskWorkspace({ projectId, fill = false }: { projectId?: string;
       if (ids.length) setStatusIds(ids);
       if (status === "Completed") setHideCompleted(false);
     }
+    if (!firstTime) return; // only the status filter depends on the statuses having loaded
     const next: FilterRule[] = [];
     if (priority) next.push({ id: "url-p", field: "priority", values: [priority] });
     if (assignee) next.push({ id: "url-a", field: "assignee", values: [assignee] });

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import { create } from "zustand";
 import * as tasksApi from "./tasksApi";
 import { statusFromApi, statusToApi, TASK_STATUSES } from "./taskTypes";
@@ -101,8 +101,14 @@ export function useTaskStatuses() {
     void load();
   }, [load]);
 
-  const sorted = [...rows].sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name));
-  const active = sorted.filter((r) => r.active);
+  // Memoised: callers use these arrays as effect dependencies. A fresh array every render re-ran
+  // those effects on every render — the Tasks page's URL-filter effect then set state, rendered,
+  // and looped forever, which starved navigation (sidebar links stopped working).
+  const sorted = useMemo(
+    () => [...rows].sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name)),
+    [rows],
+  );
+  const active = useMemo(() => sorted.filter((r) => r.active), [sorted]);
 
   /** The label a task shows: its own status row, else the built-in one for its base state. */
   function rowFor(task: Pick<Task, "status" | "statusId">): StatusRow {
