@@ -21,6 +21,9 @@ import { useAuthStore } from "@/lib/authStore";
 import { useTableSort } from "@/lib/useTableSort";
 import { SortTh } from "@/components/vyapar/SortTh";
 import { useOwnRecordLock } from "@/lib/permissions";
+import { useRefreshTick } from "@/lib/autoRefresh";
+import { getHomeSites } from "@/lib/api";
+import type { HomeSite } from "@/lib/api";
 
 type PostingFilter = "all" | "OFFICE" | "SITE";
 type GroupBy = "SALARY" | "SHIFT" | "MANAGER" | "NONE";
@@ -59,11 +62,20 @@ export default function PayrollPeoplePage() {
   const [notice, setNotice] = useState("");
 
   const memberIds = useMemo(() => members.map((m) => m.id), [members]);
+  // Home office/site per person — its approval rule decides who approves their leave.
+  const [homeSites, setHomeSites] = useState<Record<number, HomeSite>>({});
+  useEffect(() => {
+    if (!memberIds.length) return;
+    getHomeSites(memberIds)
+      .then((list) => setHomeSites(Object.fromEntries(list.map((h) => [h.userId, h]))))
+      .catch(() => setHomeSites({}));
+  }, [memberIds]);
   const { profiles, loading: profilesLoading, error: profilesError, refresh: refreshProfiles } = usePayrollProfiles(memberIds.length ? memberIds : undefined);
   const { shifts } = useShifts();
 
   const openProfile = (id: number) => router.push(`/payroll/staff/${id}`);
 
+  const tick = useRefreshTick(); // silent re-load on the module auto-refresh
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -78,7 +90,7 @@ export default function PayrollPeoplePage() {
       }
     })();
     return () => { cancelled = true; };
-  }, [reload]);
+  }, [reload, tick]);
 
   const rows = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -107,13 +119,14 @@ export default function PayrollPeoplePage() {
     code: (m: UserResponse) => profiles[m.id]?.details?.staffCode ?? "",
     posting: (m: UserResponse) => m.staffType ?? "",
     dept: (m: UserResponse) => m.departmentName ?? "",
+    home: (m: UserResponse) => homeSites[m.id]?.projectName ?? "",
     pay: (m: UserResponse) => {
       const p = profiles[m.id];
       return p ? Number(p.salary.workType ? p.salary.workRate : p.salary.monthlyCtc) : null;
     },
     setup: (m: UserResponse) => profileProgress(profiles[m.id]).percent,
     status: (m: UserResponse) => staffStatusOf(profiles[m.id]),
-  }), [profiles]);
+  }), [profiles, homeSites]);
   const { sorted: sortedRows, sortKey, sortDir, toggle: sortBy } = useTableSort(rows, staffSort, { key: "name" });
 
   const groups = useMemo(() => {
@@ -346,7 +359,7 @@ export default function PayrollPeoplePage() {
                     <thead>
                       <tr className="border-b border-gray-100 bg-gray-50 text-left text-xs text-gray-500">
                         <th className="w-10 px-3 py-2" />
-                        <SortTh label="Name" sortKey="name" activeKey={sortKey} dir={sortDir} onSort={sortBy} className="px-2" /><SortTh label="Staff ID" sortKey="code" activeKey={sortKey} dir={sortDir} onSort={sortBy} className="px-3" /><SortTh label="Posting" sortKey="posting" activeKey={sortKey} dir={sortDir} onSort={sortBy} className="px-3" /><SortTh label="Department" sortKey="dept" activeKey={sortKey} dir={sortDir} onSort={sortBy} className="px-3" />
+                        <SortTh label="Name" sortKey="name" activeKey={sortKey} dir={sortDir} onSort={sortBy} className="px-2" /><SortTh label="Staff ID" sortKey="code" activeKey={sortKey} dir={sortDir} onSort={sortBy} className="px-3" /><SortTh label="Posting" sortKey="posting" activeKey={sortKey} dir={sortDir} onSort={sortBy} className="px-3" /><SortTh label="Department" sortKey="dept" activeKey={sortKey} dir={sortDir} onSort={sortBy} className="px-3" /><SortTh label="Home Site" sortKey="home" activeKey={sortKey} dir={sortDir} onSort={sortBy} className="px-3" />
                         <SortTh label="Salary" sortKey="pay" activeKey={sortKey} dir={sortDir} onSort={sortBy} align="right" className="px-3" /><SortTh label="Setup" sortKey="setup" activeKey={sortKey} dir={sortDir} onSort={sortBy} className="px-3" /><SortTh label="Status" sortKey="status" activeKey={sortKey} dir={sortDir} onSort={sortBy} className="px-3" /><th className="sticky right-0 bg-gray-50" />
                       </tr>
                     </thead>
@@ -384,6 +397,16 @@ export default function PayrollPeoplePage() {
                               ) : <span className="text-xs text-gray-300">—</span>}
                             </td>
                             <td className="px-3 py-2.5 text-gray-600">{m.departmentName ?? "—"}</td>
+                            <td className="px-3 py-2.5 text-xs" title="Their leave follows this office/site's approval rule. Set it in the staff profile (Employment).">
+                              {homeSites[m.id]?.projectName ? (
+                                <span className="text-gray-700">
+                                  {homeSites[m.id]!.projectName}
+                                  {homeSites[m.id]!.auto && <span className="ml-1 text-gray-400">(auto)</span>}
+                                </span>
+                              ) : (
+                                <span className="rounded bg-amber-50 px-1.5 py-0.5 text-amber-700">Not set</span>
+                              )}
+                            </td>
                             <td className="px-3 py-2.5 text-right font-medium text-gray-800">{payLabel(m)}</td>
                             <td className="px-3 py-2.5">
                               <div className="flex items-center gap-2">

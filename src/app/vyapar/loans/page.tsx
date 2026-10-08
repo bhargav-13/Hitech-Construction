@@ -13,6 +13,7 @@ import { loanAccountImportConfig } from "@/lib/vyaparImportConfigs";
 import * as vyapar from "@/lib/vyaparApi";
 import type { LoanAccount } from "@/lib/vyaparApi";
 import { FileSpreadsheet, FileText, Landmark, Plus, Upload } from "lucide-react";
+import { isBackgroundRefresh, useAutoRefresh } from "@/lib/autoRefresh";
 
 /** Loan Accounts — outstanding principal, EMI and interest per lender. */
 export default function LoanAccountsPage() {
@@ -24,7 +25,7 @@ export default function LoanAccountsPage() {
   const [exporting, setExporting] = useState(false);
 
   const load = useCallback(async () => {
-    setLoading(true);
+    if (!isBackgroundRefresh()) setLoading(true);
     setError("");
     try {
       setLoans(await vyapar.getLoanAccounts());
@@ -34,6 +35,7 @@ export default function LoanAccountsPage() {
       setLoading(false);
     }
   }, []);
+  useAutoRefresh(load);
 
   useEffect(() => {
     load();

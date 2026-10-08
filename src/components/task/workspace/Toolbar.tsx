@@ -38,6 +38,7 @@ import {
   ruleIsEmpty,
 } from "./taskFilters";
 import type { ColumnKey, ColumnPref, DateTypeFilter, FilterRule, RuleField, Variance, ViewKey } from "./taskFilters";
+import { isInFloatingPanel } from "@/lib/floatingPanel";
 
 // ---- A small anchored popover (closes on outside click / Escape) ----------------------------------
 
@@ -47,7 +48,7 @@ function usePopover() {
   useEffect(() => {
     if (!open) return;
     const onDown = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+      if (ref.current && !ref.current.contains(e.target as Node) && !isInFloatingPanel(e.target)) setOpen(false);
     };
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
     window.addEventListener("mousedown", onDown);

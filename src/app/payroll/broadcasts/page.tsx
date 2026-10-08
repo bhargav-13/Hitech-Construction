@@ -10,6 +10,7 @@ import { formatDateTimeIST } from "@/lib/datetime";
 import { MAX_ATTACHMENT_BYTES, readFileAsDataUrl } from "@/lib/dataUrlFile";
 import { Megaphone, Paperclip, Plus, Search, Send, Trash2 } from "lucide-react";
 import { previewFile } from "@/lib/filePreview";
+import { useRefreshTick } from "@/lib/autoRefresh";
 
 /**
  * Broadcasts — PagarBook's "Send Message": one message to all staff or a chosen few. Each
@@ -22,6 +23,7 @@ export default function BroadcastsPage() {
   const [error, setError] = useState("");
   const [composing, setComposing] = useState(false);
 
+  const tick = useRefreshTick(); // silent re-load on the module auto-refresh
   useEffect(() => {
     let cancelled = false;
     getBroadcasts()
@@ -29,7 +31,7 @@ export default function BroadcastsPage() {
       .catch((err) => { if (!cancelled) setError(err instanceof ApiError ? err.message : "Unable to load broadcasts."); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, []);
+  }, [tick]);
 
   async function remove(b: BroadcastApi) {
     if (!confirm("Delete this broadcast from the list? Staff who already received it keep the notification.")) return;

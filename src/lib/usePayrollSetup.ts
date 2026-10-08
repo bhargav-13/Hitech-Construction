@@ -11,6 +11,7 @@ import type {
   LeavePolicyRequest,
   PayrollProfileResponse,
 } from "./api";
+import { isBackgroundRefresh, useAutoRefresh } from "./autoRefresh";
 
 /**
  * Fetch hooks for the real Payroll setup policies (Shifts, Holiday Policy, Leave Policy) and
@@ -25,7 +26,7 @@ export function useShifts() {
   const [error, setError] = useState("");
 
   const refresh = useCallback(async () => {
-    setLoading(true);
+    if (!isBackgroundRefresh()) setLoading(true);
     try {
       setShifts(await api.getShifts());
       setError("");
@@ -35,6 +36,7 @@ export function useShifts() {
       setLoading(false);
     }
   }, []);
+  useAutoRefresh(refresh);
 
   useEffect(() => {
     refresh();
@@ -64,7 +66,7 @@ export function useHolidayPolicies() {
   const [error, setError] = useState("");
 
   const refresh = useCallback(async () => {
-    setLoading(true);
+    if (!isBackgroundRefresh()) setLoading(true);
     try {
       setHolidayPolicies(await api.getHolidayPolicies());
       setError("");
@@ -74,6 +76,7 @@ export function useHolidayPolicies() {
       setLoading(false);
     }
   }, []);
+  useAutoRefresh(refresh);
 
   useEffect(() => {
     refresh();
@@ -103,7 +106,7 @@ export function useLeavePolicies() {
   const [error, setError] = useState("");
 
   const refresh = useCallback(async () => {
-    setLoading(true);
+    if (!isBackgroundRefresh()) setLoading(true);
     try {
       setLeavePolicies(await api.getLeavePolicies());
       setError("");
@@ -113,6 +116,7 @@ export function useLeavePolicies() {
       setLoading(false);
     }
   }, []);
+  useAutoRefresh(refresh);
 
   useEffect(() => {
     refresh();
@@ -147,7 +151,7 @@ export function usePayrollProfiles(userIds?: number[]) {
   const key = userIds ? userIds.slice().sort((a, b) => a - b).join(",") : "";
 
   const refresh = useCallback(async () => {
-    setLoading(true);
+    if (!isBackgroundRefresh()) setLoading(true);
     try {
       const list = await api.getPayrollProfiles(userIds);
       const map: Record<number, PayrollProfileResponse> = {};
@@ -161,6 +165,7 @@ export function usePayrollProfiles(userIds?: number[]) {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key]);
+  useAutoRefresh(refresh);
 
   useEffect(() => {
     refresh();

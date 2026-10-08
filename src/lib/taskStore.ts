@@ -36,6 +36,8 @@ export interface TaskInput {
   reminderRecipients?: string;
   reminderFrequency?: string;
   reminderDays?: string | null;
+  /** Update only: the updatedAt the editor opened with; null = save even if changed meanwhile. */
+  expectedUpdatedAt?: string | null;
 }
 
 function toUpsert(input: TaskInput): tasksApi.TaskUpsertRequest {
@@ -74,6 +76,7 @@ function toUpsert(input: TaskInput): tasksApi.TaskUpsertRequest {
     reminderRecipients: input.reminderRecipients,
     reminderFrequency: input.reminderFrequency,
     reminderDays: input.reminderDays ?? null,
+    expectedUpdatedAt: input.expectedUpdatedAt ?? null,
   };
 }
 
@@ -83,6 +86,8 @@ interface TaskState {
   tasks: Task[];
   loading: boolean;
   loaded: boolean;
+  /** When the task list last came from the server (ms) — drives "Updated 2 min ago". */
+  lastLoadedAt: number;
   /**
    * Whose tasks `tasks` holds. The store lives for the whole tab, so without this a second person
    * signing in on the same browser saw the first person's list until a hard refresh.
@@ -127,6 +132,8 @@ interface TaskState {
   setRecurrenceStopped: (taskId: string, stopped: boolean) => Promise<void>;
   /** Merge server copies into the list (e.g. after a restore from the recycle bin). */
   reload: () => Promise<void>;
+  /** Re-read one task from the server into the list (not counted as our own write). */
+  refreshOne: (id: string) => Promise<void>;
   bulkRemove: (ids: string[]) => Promise<void>;
   removeTask: (id: string) => Promise<void>;
   // ---- Completion approvals ----
@@ -144,6 +151,22 @@ interface TaskState {
   ) => Promise<void>;
 }
 
+/**
+ * updatedAt stamps this browser produced itself — a task drawer uses it to tell "someone else
+ * changed this while I had it open" from "that was my own save".
+ */
+const ownStamps = new Map<string, string>();
+
+export function isOwnStamp(taskId: string, updatedAt: string): boolean {
+  return ownStamps.get(taskId) === updatedAt;
+}
+
+/** upsertLocal for a response to our own write. */
+function upsertMine(tasks: Task[], updated: Task): Task[] {
+  ownStamps.set(updated.id, updated.updatedAt);
+  return upsertLocal(tasks, updated);
+}
+
 function upsertLocal(tasks: Task[], updated: Task): Task[] {
   const idx = tasks.findIndex((t) => t.id === updated.id);
   if (idx === -1) return [updated, ...tasks];
@@ -156,6 +179,7 @@ export const useTaskStore = create<TaskState>((set, get) => ({
   tasks: [],
   loading: false,
   loaded: false,
+  lastLoadedAt: 0,
   ownerId: null,
   error: null,
   scope: "MINE",
@@ -173,11 +197,18 @@ export const useTaskStore = create<TaskState>((set, get) => ({
     if (get().loaded && !force && sameUser) return;
     // A different person: drop the previous list at once rather than show it while loading.
     set(sameUser ? { loading: true, error: null } : { tasks: [], loading: true, loaded: false, error: null, ownerId: me });
+    const before = get().tasks;
     try {
       const res = await tasksApi.listTasks({ scope: get().scope });
       // Signed out or switched while the request was in flight — this answer belongs to nobody here.
       if ((useAuthStore.getState().user?.id ?? null) !== me) return;
-      set({ tasks: res.map(taskFromApi), loading: false, loaded: true, ownerId: me });
+      // A save landed while this list was in flight: the list predates it, so applying it would
+      // briefly undo that save on screen. Drop it; the next refresh picks everything up.
+      if (sameUser && get().loaded && get().tasks !== before) {
+        set({ loading: false });
+        return;
+      }
+      set({ tasks: res.map(taskFromApi), loading: false, loaded: true, ownerId: me, lastLoadedAt: Date.now() });
     } catch (err) {
       set({ loading: false, error: err instanceof Error ? err.message : "Failed to load tasks" });
     }
@@ -185,6 +216,7 @@ export const useTaskStore = create<TaskState>((set, get) => ({
 
   createTask: async (input) => {
     const created = taskFromApi(await tasksApi.createTask(toUpsert(input)));
+    ownStamps.set(created.id, created.updatedAt);
     set({ tasks: [created, ...get().tasks] });
     // Several assignees: the server made one linked copy each, but returns only the first.
     if (input.assigneeIds && input.assigneeIds.length > 1) await get().load(true);
@@ -193,7 +225,7 @@ export const useTaskStore = create<TaskState>((set, get) => ({
 
   saveTask: async (id, input) => {
     const updated = taskFromApi(await tasksApi.updateTask(Number(id), toUpsert(input)));
-    set({ tasks: upsertLocal(get().tasks, updated) });
+    set({ tasks: upsertMine(get().tasks, updated) });
   },
 
   patchTask: async (id, patch) => {
@@ -207,7 +239,7 @@ export const useTaskStore = create<TaskState>((set, get) => ({
         statusId: patch.statusId ? Number(patch.statusId) : undefined,
       })
     );
-    set({ tasks: upsertLocal(get().tasks, updated) });
+    set({ tasks: upsertMine(get().tasks, updated) });
   },
 
   bulkPatch: async (ids, patch) => {
@@ -220,7 +252,7 @@ export const useTaskStore = create<TaskState>((set, get) => ({
       statusId: patch.statusId ? Number(patch.statusId) : undefined,
       dueDate: patch.dueDate || undefined,
     });
-    set({ tasks: updated.map(taskFromApi).reduce((acc, t) => upsertLocal(acc, t), get().tasks) });
+    set({ tasks: updated.map(taskFromApi).reduce((acc, t) => upsertMine(acc, t), get().tasks) });
   },
 
   patchSubtask: async (taskId, subtaskId, patch) => {
@@ -233,20 +265,29 @@ export const useTaskStore = create<TaskState>((set, get) => ({
         assigneeId: patch.assigneeId === undefined ? undefined : patch.assigneeId ? Number(patch.assigneeId) : 0,
       })
     );
-    set({ tasks: upsertLocal(get().tasks, updated) });
+    set({ tasks: upsertMine(get().tasks, updated) });
   },
 
   setRecurrenceStopped: async (taskId, stopped) => {
     const res = stopped
       ? await tasksApi.stopRecurrence(Number(taskId))
       : await tasksApi.resumeRecurrence(Number(taskId));
-    set({ tasks: upsertLocal(get().tasks, taskFromApi(res)) });
+    set({ tasks: upsertMine(get().tasks, taskFromApi(res)) });
     // The flag is written across the whole series server-side; refetch so every occurrence shows it.
     await get().load(true);
   },
 
   reload: async () => {
     await get().load(true);
+  },
+
+  refreshOne: async (id) => {
+    try {
+      const fresh = taskFromApi(await tasksApi.getTask(Number(id)));
+      set({ tasks: upsertLocal(get().tasks, fresh) });
+    } catch {
+      // Gone or no longer visible: leave the list alone; the next full refresh settles it.
+    }
   },
 
   bulkRemove: async (ids) => {
@@ -275,7 +316,7 @@ export const useTaskStore = create<TaskState>((set, get) => ({
   approve: async (id) => {
     const updated = taskFromApi(await tasksApi.approveTaskCompletion(Number(id)));
     set({
-      tasks: upsertLocal(get().tasks, updated),
+      tasks: upsertMine(get().tasks, updated),
       approvals: get().approvals.filter((t) => t.id !== id),
     });
   },
@@ -283,19 +324,19 @@ export const useTaskStore = create<TaskState>((set, get) => ({
   reject: async (id, note) => {
     const updated = taskFromApi(await tasksApi.rejectTaskCompletion(Number(id), note));
     set({
-      tasks: upsertLocal(get().tasks, updated),
+      tasks: upsertMine(get().tasks, updated),
       approvals: get().approvals.filter((t) => t.id !== id),
     });
   },
 
   toggleSubtask: async (taskId, subtaskId) => {
     const updated = taskFromApi(await tasksApi.toggleSubtask(Number(taskId), Number(subtaskId)));
-    set({ tasks: upsertLocal(get().tasks, updated) });
+    set({ tasks: upsertMine(get().tasks, updated) });
   },
 
   addComment: async (taskId, text) => {
     const updated = taskFromApi(await tasksApi.addComment(Number(taskId), text));
-    set({ tasks: upsertLocal(get().tasks, updated) });
+    set({ tasks: upsertMine(get().tasks, updated) });
   },
 
   addAttachment: async (taskId, file) => {
@@ -307,7 +348,7 @@ export const useTaskStore = create<TaskState>((set, get) => ({
         dataUrl: file.dataUrl,
       })
     );
-    set({ tasks: upsertLocal(get().tasks, updated) });
+    set({ tasks: upsertMine(get().tasks, updated) });
   },
 }));
 

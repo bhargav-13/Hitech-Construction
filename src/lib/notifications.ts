@@ -4,6 +4,7 @@ import { useEffect } from "react";
 import { create } from "zustand";
 import * as tasksApi from "./tasksApi";
 import { useAuthStore } from "./authStore";
+import { announceNew } from "./browserNotify";
 
 // Server-side notifications (project-service `notifications` table). The server writes them when
 // something happens — assigned, commented, status changed, reminder due, due today, overdue — so a
@@ -35,6 +36,8 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
       const [items, count] = await Promise.all([tasksApi.getNotifications(40), tasksApi.getUnreadNotificationCount()]);
       if ((useAuthStore.getState().user?.id ?? null) !== me) return; // switched user mid-flight
       set({ items, unread: count.count, loaded: true, ownerId: me });
+      // Mirror anything new as a desktop (Chrome / Edge) notification — see browserNotify.
+      announceNew(me, items);
     } catch {
       // A bell that can't reach the server just stays as it was; the next poll will try again.
       set({ loaded: true });

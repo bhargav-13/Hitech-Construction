@@ -27,6 +27,7 @@ import type { DocType, Invoice, InvoiceLine, Item, Party } from "@/lib/vyaparApi
 import { Download, FileText, Plus, Search, Upload } from "lucide-react";
 import { ApprovalBadge } from "@/components/approval/ApprovalBadge";
 import { DOC_APPROVAL_TYPE, useApprovalStates } from "@/lib/approvals";
+import { isBackgroundRefresh, useAutoRefresh } from "@/lib/autoRefresh";
 
 const PAYMENT_TYPES = ["Cash", "Credit", "Bank", "UPI", "Cheque"];
 
@@ -101,7 +102,7 @@ export function InvoiceWorkspace({
   const [range, setRange] = useState<DateRange>(() => defaultRange("This Year"));
 
   const load = useCallback(async () => {
-    setLoading(true);
+    if (!isBackgroundRefresh()) setLoading(true);
     setError("");
     try {
       const [inv, pty, itm] = await Promise.all([
@@ -118,6 +119,7 @@ export function InvoiceWorkspace({
       setLoading(false);
     }
   }, [docType, projectId]);
+  useAutoRefresh(load);
 
   useEffect(() => {
     load();

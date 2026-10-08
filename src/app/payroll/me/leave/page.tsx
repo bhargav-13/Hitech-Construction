@@ -1,14 +1,14 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { PayrollShell } from "@/components/payroll/PayrollShell";
 import { Drawer, DrawerField } from "@/components/Drawer";
 import { Spinner } from "@/components/Spinner";
 import { Select } from "@/components/Select";
 import { DatePicker } from "@/components/DatePicker";
 import { useMyLeave } from "@/lib/usePayrollLive";
-import { ApiError } from "@/lib/api";
-import type { LeaveBalanceApi, LeaveRequestApi } from "@/lib/api";
+import { ApiError, previewLeaveApproval } from "@/lib/api";
+import type { ApprovalPreview, LeaveBalanceApi, LeaveRequestApi } from "@/lib/api";
 import { todayIST } from "@/lib/datetime";
 import { LeaveStatusPill } from "@/components/payroll/LeaveStatusPill";
 import { CalendarDays, Plus, X } from "lucide-react";
@@ -181,6 +181,11 @@ function ApplyLeaveDrawer({
   const [reason, setReason] = useState("");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  // Who this leave will go to — from the applicant's home office/site and its approval rule.
+  const [approvers, setApprovers] = useState<ApprovalPreview | null>(null);
+  useEffect(() => {
+    previewLeaveApproval().then(setApprovers).catch(() => setApprovers(null));
+  }, []);
 
   async function submit() {
     if (!type) { setError("Pick a leave type."); return; }
@@ -259,6 +264,15 @@ function ApplyLeaveDrawer({
         <DrawerField label="Reason">
           <textarea value={reason} onChange={(e) => setReason(e.target.value)} rows={3} className="input" placeholder="Why do you need this leave? (optional)" />
         </DrawerField>
+        {approvers && approvers.steps.some((s) => !s.skipped) && (
+          <div className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600">
+            <span className="font-medium text-slate-700">Will be approved by: </span>
+            {approvers.steps
+              .filter((s) => !s.skipped)
+              .map((s) => (s.approvers.length ? `${s.roleNames} (${s.approvers.join(" / ")})` : s.roleNames))
+              .join(" → ")}
+          </div>
+        )}
       </div>
     </Drawer>
   );

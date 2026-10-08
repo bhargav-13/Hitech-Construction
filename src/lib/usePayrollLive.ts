@@ -19,6 +19,7 @@ import type {
   ReimbursementCreateBody,
 } from "./api";
 import { useVyaparProjectId } from "./projectScope";
+import { isBackgroundRefresh, useAutoRefresh } from "./autoRefresh";
 
 /**
  * Fetch hooks for the real Payroll data layer (attendance, leave, loans, reimbursements,
@@ -35,7 +36,7 @@ export function useMemberAttendance(userId: number | null, from: string, to: str
 
   const refresh = useCallback(async () => {
     if (!userId) return;
-    setLoading(true);
+    if (!isBackgroundRefresh()) setLoading(true);
     try {
       setRows(await api.getMemberAttendance(userId, from, to));
       setError("");
@@ -45,6 +46,7 @@ export function useMemberAttendance(userId: number | null, from: string, to: str
       setLoading(false);
     }
   }, [userId, from, to]);
+  useAutoRefresh(refresh);
 
   useEffect(() => {
     refresh();
@@ -74,7 +76,7 @@ export function useMuster(from: string, to: string) {
   const [loadedKey, setLoadedKey] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
-    setLoading(true);
+    if (!isBackgroundRefresh()) setLoading(true);
     try {
       setRows(
         scopedProjectId === undefined
@@ -89,6 +91,7 @@ export function useMuster(from: string, to: string) {
       setLoading(false);
     }
   }, [from, to, scopedProjectId]);
+  useAutoRefresh(refresh);
 
   useEffect(() => {
     refresh();
@@ -115,7 +118,7 @@ export function useProjectAttendance(projectId: number | null, from: string, to:
 
   const refresh = useCallback(async () => {
     if (!projectId) return;
-    setLoading(true);
+    if (!isBackgroundRefresh()) setLoading(true);
     try {
       setRows(await api.getProjectAttendance(projectId, from, to));
       setError("");
@@ -125,6 +128,7 @@ export function useProjectAttendance(projectId: number | null, from: string, to:
       setLoading(false);
     }
   }, [projectId, from, to]);
+  useAutoRefresh(refresh);
 
   useEffect(() => {
     refresh();
@@ -139,7 +143,7 @@ export function useTodayAttendance() {
   const [error, setError] = useState("");
 
   const refresh = useCallback(async () => {
-    setLoading(true);
+    if (!isBackgroundRefresh()) setLoading(true);
     try {
       setToday(await api.getTodayAttendance());
       setError("");
@@ -149,6 +153,7 @@ export function useTodayAttendance() {
       setLoading(false);
     }
   }, []);
+  useAutoRefresh(refresh);
 
   useEffect(() => {
     refresh();
@@ -172,7 +177,7 @@ export function useLocations() {
   const [error, setError] = useState("");
 
   const refresh = useCallback(async () => {
-    setLoading(true);
+    if (!isBackgroundRefresh()) setLoading(true);
     try {
       setLocations(await api.getLocations());
       setError("");
@@ -182,6 +187,7 @@ export function useLocations() {
       setLoading(false);
     }
   }, []);
+  useAutoRefresh(refresh);
 
   useEffect(() => {
     refresh();
@@ -219,7 +225,7 @@ export function useMyProfile(userId: number | null) {
       setLoading(false);
       return;
     }
-    setLoading(true);
+    if (!isBackgroundRefresh()) setLoading(true);
     try {
       setProfile(await api.getPayrollProfile(userId));
       setError("");
@@ -234,6 +240,7 @@ export function useMyProfile(userId: number | null) {
       setLoading(false);
     }
   }, [userId]);
+  useAutoRefresh(refresh);
 
   useEffect(() => {
     refresh();
@@ -251,7 +258,7 @@ export function useMyLeave() {
   const [error, setError] = useState("");
 
   const refresh = useCallback(async () => {
-    setLoading(true);
+    if (!isBackgroundRefresh()) setLoading(true);
     try {
       const [rs, bal] = await Promise.all([api.myLeave(), api.myLeaveBalance()]);
       setRequests(rs);
@@ -263,6 +270,7 @@ export function useMyLeave() {
       setLoading(false);
     }
   }, []);
+  useAutoRefresh(refresh);
 
   useEffect(() => {
     refresh();
@@ -287,7 +295,7 @@ export function usePendingLeave() {
   const [error, setError] = useState("");
 
   const refresh = useCallback(async () => {
-    setLoading(true);
+    if (!isBackgroundRefresh()) setLoading(true);
     try {
       setRequests(await api.pendingLeave());
       setError("");
@@ -297,6 +305,7 @@ export function usePendingLeave() {
       setLoading(false);
     }
   }, []);
+  useAutoRefresh(refresh);
 
   useEffect(() => {
     refresh();
@@ -319,7 +328,7 @@ export function useLoans() {
   const [error, setError] = useState("");
 
   const refresh = useCallback(async () => {
-    setLoading(true);
+    if (!isBackgroundRefresh()) setLoading(true);
     try {
       setLoans(await api.getLoansApi());
       setError("");
@@ -329,6 +338,7 @@ export function useLoans() {
       setLoading(false);
     }
   }, []);
+  useAutoRefresh(refresh);
 
   useEffect(() => {
     refresh();
@@ -358,7 +368,7 @@ export function useMyLoans() {
   const [error, setError] = useState("");
 
   const refresh = useCallback(async () => {
-    setLoading(true);
+    if (!isBackgroundRefresh()) setLoading(true);
     try {
       setLoans(await api.myLoansApi());
       setError("");
@@ -368,6 +378,7 @@ export function useMyLoans() {
       setLoading(false);
     }
   }, []);
+  useAutoRefresh(refresh);
 
   useEffect(() => {
     refresh();
@@ -384,7 +395,7 @@ export function useReimbursements() {
   const [error, setError] = useState("");
 
   const refresh = useCallback(async () => {
-    setLoading(true);
+    if (!isBackgroundRefresh()) setLoading(true);
     try {
       setRows(await api.getReimbursementsApi());
       setError("");
@@ -394,6 +405,7 @@ export function useReimbursements() {
       setLoading(false);
     }
   }, []);
+  useAutoRefresh(refresh);
 
   useEffect(() => {
     refresh();
@@ -423,7 +435,7 @@ export function useMyReimbursements() {
   const [error, setError] = useState("");
 
   const refresh = useCallback(async () => {
-    setLoading(true);
+    if (!isBackgroundRefresh()) setLoading(true);
     try {
       setRows(await api.myReimbursementsApi());
       setError("");
@@ -433,6 +445,7 @@ export function useMyReimbursements() {
       setLoading(false);
     }
   }, []);
+  useAutoRefresh(refresh);
 
   useEffect(() => {
     refresh();
@@ -455,7 +468,7 @@ export function usePayrollRuns() {
   const [error, setError] = useState("");
 
   const refresh = useCallback(async () => {
-    setLoading(true);
+    if (!isBackgroundRefresh()) setLoading(true);
     try {
       setRuns(await api.listPayrollRuns());
       setError("");
@@ -465,6 +478,7 @@ export function usePayrollRuns() {
       setLoading(false);
     }
   }, []);
+  useAutoRefresh(refresh);
 
   useEffect(() => {
     refresh();
@@ -505,7 +519,7 @@ export function usePayrollRun(month: string) {
   const [error, setError] = useState("");
 
   const refresh = useCallback(async () => {
-    setLoading(true);
+    if (!isBackgroundRefresh()) setLoading(true);
     try {
       setRun(await api.getPayrollRun(month));
       setError("");
@@ -520,6 +534,7 @@ export function usePayrollRun(month: string) {
       setLoading(false);
     }
   }, [month]);
+  useAutoRefresh(refresh);
 
   useEffect(() => {
     refresh();
@@ -534,7 +549,7 @@ export function useMyPayslips() {
   const [error, setError] = useState("");
 
   const refresh = useCallback(async () => {
-    setLoading(true);
+    if (!isBackgroundRefresh()) setLoading(true);
     try {
       setSlips(await api.myPayslips());
       setError("");
@@ -544,6 +559,7 @@ export function useMyPayslips() {
       setLoading(false);
     }
   }, []);
+  useAutoRefresh(refresh);
 
   useEffect(() => {
     refresh();

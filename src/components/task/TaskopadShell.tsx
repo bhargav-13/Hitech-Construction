@@ -1,12 +1,14 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { ChevronRight } from "lucide-react";
+import { BellRing, ChevronRight, RefreshCw, X } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { useTaskStore } from "@/lib/taskStore";
 import { useCan } from "@/lib/permissions";
+import { useAgo, useTaskAutoRefresh } from "@/lib/useTaskAutoRefresh";
+import { requestBrowserNotify, useBrowserNotify } from "@/lib/browserNotify";
 
 const TABS = [
   { label: "Dashboard", href: "/taskopad" },
@@ -32,6 +34,28 @@ export function TaskopadShell({ children, fill = false }: { children: React.Reac
   const active = TABS.slice().reverse().find((t) => pathname === t.href || pathname.startsWith(t.href + "/"));
   const approvalsCount = useTaskStore((s) => s.approvals.length);
   const loadApprovals = useTaskStore((s) => s.loadApprovals);
+  // Background refresh every few minutes; waits while anyone is mid-edit (see useTaskAutoRefresh).
+  const { refresh, busy } = useTaskAutoRefresh(canSeeApprovals);
+  const lastLoadedAt = useTaskStore((s) => s.lastLoadedAt);
+  const ago = useAgo(lastLoadedAt);
+  // One-time invitation to turn on desktop alerts (browsers only let a click ask for permission).
+  const desktop = useBrowserNotify();
+  const [askDismissed, setAskDismissed] = useState(true);
+  useEffect(() => {
+    try {
+      setAskDismissed(localStorage.getItem("hitech.browserNotify.asked") === "1");
+    } catch {
+      setAskDismissed(false);
+    }
+  }, []);
+  const dismissAsk = () => {
+    setAskDismissed(true);
+    try {
+      localStorage.setItem("hitech.browserNotify.asked", "1");
+    } catch {
+      /* ignore */
+    }
+  };
 
   // Keep the "Approvals" badge current whenever the module is open — for roles that have the queue.
   useEffect(() => {
@@ -50,7 +74,38 @@ export function TaskopadShell({ children, fill = false }: { children: React.Reac
             <span className="font-medium text-gray-600">{active?.label ?? "Dashboard"}</span>
           </div>
           {/* No bell here: notifications live in the global header's bell, one feed for the whole app. */}
+          {lastLoadedAt > 0 && (
+            <button
+              type="button"
+              onClick={() => void refresh()}
+              disabled={busy}
+              title="Taskopad refreshes itself every 3 minutes (never while you are editing). Click to refresh now."
+              className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-gray-400 transition-colors duration-150 hover:bg-gray-100 hover:text-gray-600 disabled:opacity-60"
+            >
+              <RefreshCw size={12} className={busy ? "animate-spin" : ""} />
+              Updated {ago}
+            </button>
+          )}
         </div>
+
+        {desktop.state === "default" && !askDismissed && (
+          <div className="flex items-center gap-3 rounded-lg border border-cyan-100 bg-cyan-50/60 px-3 py-2 text-sm text-gray-700">
+            <BellRing size={16} className="shrink-0 text-brand-accent" />
+            <span className="min-w-0 flex-1">
+              Get a desktop alert when a task is assigned to you, commented on, due or overdue — even when this tab isn&apos;t open.
+            </span>
+            <button
+              type="button"
+              onClick={() => void requestBrowserNotify().finally(dismissAsk)}
+              className="shrink-0 rounded-md bg-brand-accent px-3 py-1 text-xs font-medium text-white hover:opacity-90"
+            >
+              Turn on
+            </button>
+            <button type="button" onClick={dismissAsk} aria-label="Not now" className="shrink-0 rounded p-1 text-gray-400 hover:bg-white hover:text-gray-600">
+              <X size={14} />
+            </button>
+          </div>
+        )}
 
         <div className="flex gap-5 border-b border-gray-200">
           {tabs.map((t) => {

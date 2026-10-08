@@ -23,6 +23,8 @@ import {
   ArrowLeft, ArrowRight, Building2, Check, Clock, CalendarDays, FileText, Landmark,
   Mail, Phone, Plus, Palmtree, Upload, Wallet, X,
 } from "lucide-react";
+import { getHomeSites, getProjects } from "@/lib/api";
+import type { HomeSite } from "@/lib/api";
 
 /** One uploaded identity document: a label plus the file (kept as a data URL, like punch selfies). */
 type DocRow = { type: string; fileName: string; dataUrl: string };
@@ -140,6 +142,14 @@ function WizardForm({
   const [shiftId, setShiftId] = useState<string>(existing?.shiftId != null ? String(existing.shiftId) : shifts[0] ? String(shifts[0].id) : "");
   const [holidayPolicyId, setHolidayPolicyId] = useState<string>(existing?.holidayPolicyId != null ? String(existing.holidayPolicyId) : holidayPolicies[0] ? String(holidayPolicies[0].id) : "");
   const [leavePolicyId, setLeavePolicyId] = useState<string>(existing?.leavePolicyId != null ? String(existing.leavePolicyId) : leavePolicies[0] ? String(leavePolicies[0].id) : "");
+  // Home office/site: "" = automatic (from the projects they're on). Its approval rules apply to their leave.
+  const [homeProjectId, setHomeProjectId] = useState<string>(existing?.homeProjectId != null ? String(existing.homeProjectId) : "");
+  const [projectOptions, setProjectOptions] = useState<{ id: number; name: string }[]>([]);
+  const [autoHome, setAutoHome] = useState<HomeSite | null>(null);
+  useEffect(() => {
+    getProjects({ size: 500 }).then((r) => setProjectOptions(r.content.map((p) => ({ id: p.id, name: p.name })))).catch(() => setProjectOptions([]));
+    getHomeSites([member.id]).then((r) => setAutoHome(r[0] ?? null)).catch(() => setAutoHome(null));
+  }, [member.id]);
   const [monthlyCtc, setMonthlyCtc] = useState(existing?.salary.monthlyCtc ?? 0);
   const [workType, setWorkType] = useState<"DAILY" | "HOURLY" | "PIECE">(existing?.salary.workType ?? "DAILY");
   const [contractPay, setContractPay] = useState<"MONTHLY" | "DAILY" | "HOURLY">(
@@ -266,6 +276,7 @@ function WizardForm({
     shiftId: shiftId ? Number(shiftId) : null,
     holidayPolicyId: holidayPolicyId ? Number(holidayPolicyId) : null,
     leavePolicyId: leavePolicyId ? Number(leavePolicyId) : null,
+    homeProjectId: homeProjectId ? Number(homeProjectId) : 0,
   });
 
   // Live progress from the current form (so the header % moves as they fill things in).
@@ -396,6 +407,20 @@ function WizardForm({
                 </Field>
                 <Field label="Joining Date">
                   <DatePicker value={joiningDate} onChange={setJoiningDate} placeholder="Joining date" />
+                </Field>
+                <Field label="Home office / site">
+                  <select value={homeProjectId} onChange={(e) => setHomeProjectId(e.target.value)} className="input w-full">
+                    <option value="">
+                      Automatic{autoHome && autoHome.auto && autoHome.projectName ? ` — ${autoHome.projectName}` : autoHome && autoHome.auto ? " — not on any project yet" : ""}
+                    </option>
+                    {projectOptions.map((p) => (
+                      <option key={p.id} value={p.id}>{p.name}</option>
+                    ))}
+                  </select>
+                  <span className="mt-1 block text-[11px] text-gray-400">
+                    Leave follows this office/site&apos;s approval rule (Settings → Approvals → Leave).
+                    {autoHome && autoHome.projectCount > 1 && !homeProjectId && " They are on several projects — pick one to be sure."}
+                  </span>
                 </Field>
               </div>
             </div>

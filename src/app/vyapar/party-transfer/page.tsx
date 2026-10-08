@@ -13,6 +13,7 @@ import { inr } from "@/lib/format";
 import * as vyapar from "@/lib/vyaparApi";
 import { fullInvoiceNo } from "@/lib/vyaparApi";
 import type { Invoice, Party } from "@/lib/vyaparApi";
+import { isBackgroundRefresh, useAutoRefresh } from "@/lib/autoRefresh";
 
 /**
  * Party To Party Transfer — its own screen, not the shared document workspace.
@@ -51,6 +52,7 @@ export default function PartyTransferPage() {
       setLoading(false);
     }
   }, [projectId]);
+  useAutoRefresh(load);
 
   useEffect(() => {
     load();

@@ -11,6 +11,7 @@ import { ExportDialog, type ExportColumn } from "@/components/vyapar/ExportDialo
 import * as vyapar from "@/lib/vyaparApi";
 import type { BankAccount, CashBankTxn } from "@/lib/vyaparApi";
 import { SlidersHorizontal } from "lucide-react";
+import { isBackgroundRefresh, useAutoRefresh } from "@/lib/autoRefresh";
 
 /** Cash In Hand — running cash balance with its own ledger and the Adjust Cash dialog. */
 export default function CashInHandPage() {
@@ -23,7 +24,7 @@ export default function CashInHandPage() {
   const [exporting, setExporting] = useState(false);
 
   const load = useCallback(async () => {
-    setLoading(true);
+    if (!isBackgroundRefresh()) setLoading(true);
     setError("");
     try {
       const [t, a] = await Promise.all([vyapar.getCashTxns(), vyapar.getBankAccounts().catch(() => [])]);
@@ -35,6 +36,7 @@ export default function CashInHandPage() {
       setLoading(false);
     }
   }, []);
+  useAutoRefresh(load);
 
   useEffect(() => {
     load();

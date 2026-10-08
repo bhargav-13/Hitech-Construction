@@ -9,6 +9,7 @@ import { useVyaparProjectId } from "@/lib/projectScope";
 import * as vyapar from "@/lib/vyaparApi";
 import type { Item } from "@/lib/vyaparApi";
 import { Save, Search } from "lucide-react";
+import { isBackgroundRefresh, useAutoRefresh } from "@/lib/autoRefresh";
 
 type Mode = "Pricing" | "Stock" | "Item Information";
 type Draft = Record<number, Partial<Item>>;
@@ -29,7 +30,7 @@ export default function BulkUpdateItemsPage() {
   const projectId = useVyaparProjectId();
 
   const load = useCallback(async () => {
-    setLoading(true);
+    if (!isBackgroundRefresh()) setLoading(true);
     try {
       setItems(await vyapar.getItems(projectId));
       setDraft({});
@@ -37,6 +38,7 @@ export default function BulkUpdateItemsPage() {
       setLoading(false);
     }
   }, [projectId]);
+  useAutoRefresh(load);
 
   useEffect(() => {
     load();

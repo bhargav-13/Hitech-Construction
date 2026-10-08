@@ -42,6 +42,7 @@ import {
   TriangleAlert,
   Users,
 } from "lucide-react";
+import { useRefreshTick } from "@/lib/autoRefresh";
 
 // Local calendar date (not UTC) so keys match muster / punch.
 const iso = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -98,6 +99,7 @@ function AdminAttendanceDashboard() {
   const monthTo = `${year}-${pad(monthIdx + 1)}-${pad(new Date(year, monthIdx + 1, 0).getDate())}`;
   const { rows, loading: musterLoading, error } = useMuster(monthFrom, monthTo);
 
+  const tick = useRefreshTick(); // silent re-load on the module auto-refresh
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -111,7 +113,7 @@ function AdminAttendanceDashboard() {
       }
     })();
     return () => { cancelled = true; };
-  }, []);
+  }, [tick]);
 
   /**
    * The roster this dashboard counts: active **and on payroll**.
@@ -466,6 +468,7 @@ const TOOLTIP_STYLE = {
  */
 function ThingsToDo() {
   const [items, setItems] = useState<{ celebrations: string[]; joinees: string[]; leave: number; claims: number } | null>(null);
+  const tick = useRefreshTick(); // silent re-load on the module auto-refresh
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -496,7 +499,7 @@ function ThingsToDo() {
       if (!cancelled) setItems({ celebrations, joinees, leave: leave.length, claims: claims.filter((c) => c.status === "PENDING").length });
     })();
     return () => { cancelled = true; };
-  }, []);
+  }, [tick]);
   if (!items) return null;
   return (
     <div className="grid grid-cols-1 gap-3 md:grid-cols-3">

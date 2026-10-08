@@ -26,6 +26,7 @@ import { fullInvoiceNo } from "@/lib/vyaparApi";
 import { docTypeHref, txnHref } from "@/lib/vyaparLinks";
 import type { CashBankTxn, Invoice, InvoiceLine, Item, Party, Payment } from "@/lib/vyaparApi";
 import { ChevronLeft, ChevronRight, Download } from "lucide-react";
+import { isBackgroundRefresh, useAutoRefresh } from "@/lib/autoRefresh";
 
 type ReportId = string;
 
@@ -134,7 +135,7 @@ function ReportDetail({ id, onBack }: { id: ReportId; onBack: () => void }) {
   const [user, setUser] = useState("all");
 
   const load = useCallback(async () => {
-    setLoading(true);
+    if (!isBackgroundRefresh()) setLoading(true);
     try {
       const [inv, pty, itm, pay] = await Promise.all([
         vyapar.getInvoices(undefined, projectId),
@@ -168,6 +169,7 @@ function ReportDetail({ id, onBack }: { id: ReportId; onBack: () => void }) {
       setLoading(false);
     }
   }, [projectId, id]);
+  useAutoRefresh(load);
 
   useEffect(() => {
     load();

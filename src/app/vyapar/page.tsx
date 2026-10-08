@@ -30,6 +30,7 @@ import {
   TriangleAlert,
   Wallet,
 } from "lucide-react";
+import { isBackgroundRefresh, useAutoRefresh } from "@/lib/autoRefresh";
 
 /** Quick links mirroring Vyapar's "Most Used Reports" strip. */
 const QUICK_REPORTS = [
@@ -53,7 +54,7 @@ export default function VyaparHomePage() {
   const projectId = useVyaparProjectId();
 
   const load = useCallback(async () => {
-    setLoading(true);
+    if (!isBackgroundRefresh()) setLoading(true);
     setError("");
     try {
       const [summary, cashTxns] = await Promise.all([
@@ -68,6 +69,7 @@ export default function VyaparHomePage() {
       setLoading(false);
     }
   }, [projectId]);
+  useAutoRefresh(load);
 
   useEffect(() => {
     if (canView) load();

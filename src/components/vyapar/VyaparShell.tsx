@@ -28,6 +28,8 @@ import {
   Users,
   Wrench,
 } from "lucide-react";
+import { AutoRefreshBadge } from "@/components/AutoRefreshBadge";
+import { useAutoRefreshClock } from "@/lib/autoRefresh";
 
 const ICONS: Record<string, React.ComponentType<{ size?: number; className?: string }>> = {
   home: Home,
@@ -46,6 +48,8 @@ const ICONS: Record<string, React.ComponentType<{ size?: number; className?: str
  * Add Sale / Add Purchase / Add More quick-create menu.
  */
 export function VyaparShell({ children }: { children: React.ReactNode }) {
+  // Every Vyapar screen refreshes itself every 3 minutes — never while someone is editing.
+  useAutoRefreshClock();
   const pathname = usePathname();
   const router = useRouter();
   const [addOpen, setAddOpen] = useState(false);
@@ -138,6 +142,8 @@ export function VyaparShell({ children }: { children: React.ReactNode }) {
               <Plus size={14} /> Add Purchase
             </Link>
             )}
+
+            <AutoRefreshBadge />
 
             {/* Vyapar puts a calculator in its title bar. Theirs launches the Windows Calculator;
                 a web app can't, so this is our own — see CalculatorPanel. */}

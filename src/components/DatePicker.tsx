@@ -261,6 +261,7 @@ export function DatePicker({
         createPortal(
           <div
             ref={popRef}
+            data-floating-panel=""
             style={{ position: "fixed", top: pos.top, left: pos.left, width: WIDTH }}
             className="animate-menu-pop z-50 overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-2xl ring-1 ring-black/[0.04]"
           >

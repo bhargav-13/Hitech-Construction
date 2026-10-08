@@ -12,6 +12,7 @@ import { ExportDialog, type ExportColumn } from "@/components/vyapar/ExportDialo
 import * as vyapar from "@/lib/vyaparApi";
 import type { Cheque } from "@/lib/vyaparApi";
 import { CheckCircle2, FileSpreadsheet, FileText, RotateCcw, Search, Wallet } from "lucide-react";
+import { isBackgroundRefresh, useAutoRefresh } from "@/lib/autoRefresh";
 
 const STATUS_STYLE: Record<string, string> = {
   OPEN: "bg-amber-50 text-amber-700",
@@ -30,7 +31,7 @@ export default function ChequesPage() {
   const [exporting, setExporting] = useState(false);
 
   const load = useCallback(async () => {
-    setLoading(true);
+    if (!isBackgroundRefresh()) setLoading(true);
     setError("");
     try {
       setCheques(await vyapar.getCheques());
@@ -40,6 +41,7 @@ export default function ChequesPage() {
       setLoading(false);
     }
   }, []);
+  useAutoRefresh(load);
 
   useEffect(() => {
     load();

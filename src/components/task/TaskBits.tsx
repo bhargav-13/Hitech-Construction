@@ -7,6 +7,7 @@ import { ASSIGNABLE_TASK_STATUSES, PRIORITY_STYLE, STATUS_STYLE, TASK_PRIORITIES
 import type { Task, TaskPriority, TaskStatus } from "@/lib/taskTypes";
 import { useTaskStatuses } from "@/lib/useTaskStatuses";
 import type { StatusRow } from "@/lib/useTaskStatuses";
+import { isInFloatingPanel } from "@/lib/floatingPanel";
 
 /**
  * Inline pill picker: the coloured chip is the trigger, and choosing opens a themed, animated menu
@@ -35,7 +36,7 @@ function ChipMenu({
   useEffect(() => {
     if (!open) return;
     const onDown = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+      if (ref.current && !ref.current.contains(e.target as Node) && !isInFloatingPanel(e.target)) setOpen(false);
     };
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
     window.addEventListener("mousedown", onDown);
@@ -312,7 +313,7 @@ function useDismiss(open: boolean, close: () => void) {
   useEffect(() => {
     if (!open) return;
     const onDown = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) close();
+      if (ref.current && !ref.current.contains(e.target as Node) && !isInFloatingPanel(e.target)) close();
     };
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && close();
     window.addEventListener("mousedown", onDown);

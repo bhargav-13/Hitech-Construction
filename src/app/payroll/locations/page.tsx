@@ -12,6 +12,7 @@ import { useLocations } from "@/lib/usePayrollLive";
 import { getTeam, getProjects, ApiError } from "@/lib/api";
 import type { GeoPointApi, LocationApi, ProjectResponse, TeamMemberResponse } from "@/lib/api";
 import { Building2, LayoutGrid, Map as MapIcon, MapPin, Navigation, Pencil, Plus, Search, Trash2, UserCheck, Users } from "lucide-react";
+import { useRefreshTick } from "@/lib/autoRefresh";
 
 function center(points: GeoPointApi[]): { lat: number; lng: number } {
   if (!points.length) return { lat: 0, lng: 0 };
@@ -311,6 +312,7 @@ function AssignStaffDialog({
   const [picked, setPicked] = useState<Set<number>>(() => new Set(location.memberIds));
   const [saving, setSaving] = useState(false);
 
+  const tick = useRefreshTick(); // silent re-load on the module auto-refresh
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -324,7 +326,7 @@ function AssignStaffDialog({
       }
     })();
     return () => { cancelled = true; };
-  }, []);
+  }, [tick]);
 
   const rows = useMemo(() => {
     const q = search.trim().toLowerCase();

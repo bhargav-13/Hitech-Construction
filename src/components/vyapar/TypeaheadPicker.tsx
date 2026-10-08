@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Plus } from "lucide-react";
+import { isInFloatingPanel } from "@/lib/floatingPanel";
 
 /**
  * Vyapar's search-as-you-type picker, used for the item cell on an invoice line and for the party
@@ -70,7 +71,7 @@ export function TypeaheadPicker<T>({
   useEffect(() => {
     if (!open) return;
     const onDown = (e: MouseEvent) => {
-      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false);
+      if (rootRef.current && !rootRef.current.contains(e.target as Node) && !isInFloatingPanel(e.target)) setOpen(false);
     };
     window.addEventListener("mousedown", onDown);
     return () => window.removeEventListener("mousedown", onDown);

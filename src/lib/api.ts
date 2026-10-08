@@ -722,6 +722,11 @@ export interface PayrollProfileResponse {
   leavePolicyId: number | null;
   /** PagarBook-style staff details. Omit (or null) to leave what is stored untouched. */
   details?: StaffDetailsApi | null;
+  /**
+   * Home office/site (project id) — its approval rules apply to this person's leave. On save:
+   * omit/null leaves it unchanged, 0 clears it (back to automatic, from project membership).
+   */
+  homeProjectId?: number | null;
 }
 export type PayrollProfileRequest = PayrollProfileResponse;
 
@@ -1090,10 +1095,14 @@ export interface ApprovalState {
   trail: ApprovalAction[];
 }
 
+/** Who may approve a step: anyone with the role, or only role holders on the applicant's office/site. */
+export type ApprovalScope = "ANY" | "SAME_PROJECT";
+
 export interface ApprovalChainLevel {
   levelOrder: number;
   roleIds: number[];
   roleNames: string[];
+  scope: ApprovalScope;
 }
 
 export interface ApprovalChain {
@@ -1103,17 +1112,84 @@ export interface ApprovalChain {
   mode: ApprovalMode;
   published: boolean;
   levels: ApprovalChainLevel[];
+  /** Leave a step out when nobody (at the office/site) holds its role. */
+  skipEmpty: boolean;
+  /** Null = the company default; set = the rule for this office/site (project). */
+  projectId: number | null;
+  projectName: string | null;
+}
+
+export interface ApprovalChainInput {
+  mode?: ApprovalMode;
+  published?: boolean;
+  skipEmpty?: boolean;
+  levels?: { roleIds: number[]; scope: ApprovalScope }[];
 }
 
 export function getApprovalChains() {
   return request<ApprovalChain[]>("/api/v1/approval-chains");
 }
 
-export function saveApprovalChain(
-  entityType: string,
-  body: { mode?: ApprovalMode; published?: boolean; levels?: { roleIds: number[] }[] }
-) {
+export function saveApprovalChain(entityType: string, body: ApprovalChainInput) {
   return request<ApprovalChain>(`/api/v1/approval-chains/${entityType}`, { method: "PUT", body });
+}
+
+/** Office/site rules for one approval type. */
+export function getApprovalRules(entityType: string) {
+  return request<ApprovalChain[]>(`/api/v1/approval-chains/${entityType}/rules`);
+}
+
+export function saveApprovalRule(entityType: string, projectId: number, body: ApprovalChainInput) {
+  return request<ApprovalChain>(`/api/v1/approval-chains/${entityType}/rules/${projectId}`, { method: "PUT", body });
+}
+
+export function deleteApprovalRule(entityType: string, projectId: number) {
+  return request<void>(`/api/v1/approval-chains/${entityType}/rules/${projectId}`, { method: "DELETE" });
+}
+
+export interface ApprovalPreviewStep {
+  levelOrder: number;
+  roleNames: string;
+  from: string;
+  approvers: string[];
+  skipped: boolean;
+  note: string | null;
+}
+
+export interface ApprovalPreview {
+  userId: number;
+  userName: string;
+  projectId: number | null;
+  projectName: string | null;
+  chainUsed: string | null;
+  steps: ApprovalPreviewStep[];
+  message: string | null;
+}
+
+/** "Test a chain" for any approval type, on a chosen office/site. */
+export function previewApprovalChain(entityType: string, userId: number, projectId?: number | null) {
+  const q = new URLSearchParams({ userId: String(userId) });
+  if (projectId) q.set("projectId", String(projectId));
+  return request<ApprovalPreview>(`/api/v1/approval-chains/${entityType}/preview?${q}`);
+}
+
+/** Who a person's leave would go to — their home office/site worked out by the server. Omit userId for yourself. */
+export function previewLeaveApproval(userId?: number) {
+  return request<ApprovalPreview>(`/api/v1/payroll/leave/approval-preview${userId ? `?userId=${userId}` : ""}`);
+}
+
+export interface HomeSite {
+  userId: number;
+  projectId: number | null;
+  projectName: string | null;
+  /** True when worked out from project membership rather than set on the profile. */
+  auto: boolean;
+  projectCount: number;
+}
+
+export function getHomeSites(userIds: number[]) {
+  if (!userIds.length) return Promise.resolve([] as HomeSite[]);
+  return request<HomeSite[]>(`/api/v1/payroll/home-sites?userIds=${userIds.join(",")}`);
 }
 
 // ---- Running approvals across every feature (/api/v1/approvals) ----
@@ -1329,6 +1405,12 @@ export interface PayslipApi {
   leaveDetail?: string | null;
   /** The expense claims this slip reimbursed — "Travel ₹500 (CLM-12); Food ₹200 (CLM-14)". */
   claimDetail?: string | null;
+  /** Hour-based view, display only (never paid): punch hours that month, hourly rate, their value. */
+  workedHours?: number | null;
+  hourRate?: number | null;
+  hourBasedAmount?: number | null;
+  /** How the rate was worked out, e.g. "₹30000 ÷ (26 working days × 8 h)". */
+  hourBasis?: string | null;
 }
 export interface PayrollRunApi {
   id: number;

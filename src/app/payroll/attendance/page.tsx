@@ -25,6 +25,7 @@ import { useTableSort } from "@/lib/useTableSort";
 import { SortTh } from "@/components/vyapar/SortTh";
 import { PunchPhotoThumbs, punchShots } from "@/components/payroll/PunchPhotos";
 import { useOwnRecordLock } from "@/lib/permissions";
+import { useRefreshTick } from "@/lib/autoRefresh";
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
@@ -79,9 +80,10 @@ export default function AttendancePage() {
   // feel laggy. A genuine date/month switch flips it false and shows the loader again.
   const { rows, loading, ready: musterReady, error, refresh } = useMuster(range.from, range.to);
 
+  const tick = useRefreshTick(); // silent re-load on the module auto-refresh
   useEffect(() => {
     getPayrollPeople().then((r) => { setMembers(r.content.filter((u) => u.onPayroll)); setMembersLoading(false); }).catch(() => setMembersLoading(false));
-  }, []);
+  }, [tick]);
 
   const memberIds = useMemo(() => members.map((m) => m.id), [members]);
   const { profiles } = usePayrollProfiles(memberIds.length ? memberIds : undefined);

@@ -28,6 +28,7 @@ import { useTableSort } from "@/lib/useTableSort";
 import { SortTh } from "@/components/vyapar/SortTh";
 import { PunchPhotoThumbs } from "@/components/payroll/PunchPhotos";
 import { previewFile } from "@/lib/filePreview";
+import { isBackgroundRefresh, useAutoRefresh } from "@/lib/autoRefresh";
 
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const pad = (n: number) => String(n).padStart(2, "0");
@@ -448,6 +449,7 @@ export function AttendanceTab({ member, leaveTypes }: { member: UserResponse; le
     try { setRows(await getMemberAttendance(member.id, mon.from, mon.to)); setError(""); }
     catch (err) { setError(err instanceof ApiError ? err.message : "Unable to load attendance."); setRows([]); }
   }, [member.id, mon.from, mon.to]);
+  useAutoRefresh(load);
   useEffect(() => { setRows(null); load(); }, [load]);
 
   const byDate = useMemo(() => new Map((rows ?? []).map((r) => [r.date, r])), [rows]);
@@ -674,6 +676,7 @@ export function PaymentsTab({ member }: { member: UserResponse }) {
     try { setRows(await getPaymentsApi({ userId: member.id })); setError(""); }
     catch (err) { setError(err instanceof ApiError ? err.message : "Unable to load payments."); setRows([]); }
   }, [member.id]);
+  useAutoRefresh(load);
   useEffect(() => { load(); }, [load]);
 
   async function remove(p: PaymentApi) {
@@ -725,6 +728,7 @@ export function LoansTab({ member }: { member: UserResponse }) {
     try { setRows((await getLoansApi()).filter((l) => l.userId === member.id)); setError(""); }
     catch (err) { setError(err instanceof ApiError ? err.message : "Unable to load loans."); setRows([]); }
   }, [member.id]);
+  useAutoRefresh(load);
   useEffect(() => { load(); }, [load]);
 
   async function act(l: LoanApi, action: "PAUSE" | "RESUME" | "CLOSE" | "WRITE_OFF") {
@@ -829,6 +833,7 @@ export function WorkTab({ member }: { member: UserResponse }) {
     try { setRows(await getWorkLogsApi(mon.from, mon.to, member.id)); setError(""); }
     catch (err) { setError(err instanceof ApiError ? err.message : "Unable to load work logs."); setRows([]); }
   }, [member.id, mon.from, mon.to]);
+  useAutoRefresh(load);
   useEffect(() => { load(); }, [load]);
   useEffect(() => { getWorkItemsApi().then((i) => setItems(i.filter((x) => x.active))).catch(() => {}); }, []);
 

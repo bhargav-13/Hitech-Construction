@@ -31,6 +31,7 @@ import { useDepartments } from "@/lib/useDepartments";
 import { useAuthStore } from "@/lib/authStore";
 import { useProjects } from "@/lib/useProjects";
 import { useProjectScope } from "@/lib/projectScope";
+import { useEditLock } from "@/lib/editLock";
 import { useTaskStore } from "@/lib/taskStore";
 import { getAccessSelf } from "@/lib/api";
 import { unreadOn, useTaskSeen, useTaskUnread } from "@/lib/taskNotifications";
@@ -764,7 +765,14 @@ export function TaskWorkspace({ projectId, fill = false }: { projectId?: string;
         />
       )}
       {customizing && <CustomizeDrawer pref={columnPref} onChange={updateColumns} onClose={() => setCustomizing(false)} />}
-      {editing && <TaskDrawer existing={editing} onClose={closeDrawer} />}
+      {editing && (
+        <TaskDrawer
+          key={`${editing.id}|${editing.updatedAt}`}
+          existing={editing}
+          onClose={closeDrawer}
+          onReload={(fresh) => setEditing(fresh)}
+        />
+      )}
     </div>
   );
 }
@@ -1410,6 +1418,8 @@ function KanbanView({
   fill?: boolean;
 }) {
   const [dragKey, setDragKey] = useState<string | null>(null);
+  // A card mid-drag must not be refreshed out from under the pointer.
+  useEditLock(dragKey != null);
   const boardRef = useRef<HTMLDivElement>(null);
   const pan = useRef<{ x: number; y: number; left: number; col: HTMLElement | null; top: number } | null>(null);
   const [panning, setPanning] = useState(false);

@@ -24,7 +24,9 @@ import { useAuthStore } from "@/lib/authStore";
 import { useUsers } from "@/lib/useUsers";
 import { useDepartments } from "@/lib/useDepartments";
 import { useProjects } from "@/lib/useProjects";
-import { useTaskStore } from "@/lib/taskStore";
+import { isOwnStamp, useTaskStore } from "@/lib/taskStore";
+import { ApiError } from "@/lib/api";
+import { useEditLock } from "@/lib/editLock";
 import { useTaskSeen } from "@/lib/taskNotifications";
 import { useTaskStatuses } from "@/lib/useTaskStatuses";
 import * as tasksApi from "@/lib/tasksApi";
@@ -219,11 +221,45 @@ export function TaskDrawer({
   existing,
   defaultProjectId,
   onClose,
+  onReload,
 }: {
   existing?: Task;
   defaultProjectId?: string | null;
   onClose: () => void;
+  /** Reopen the drawer on a fresher copy of the task (someone else changed it meanwhile). */
+  onReload?: (fresh: Task) => void;
 }) {
+  // While this drawer is open, Taskopad's background refresh waits.
+  useEditLock();
+  // The version of the task this form started from. A save sends it back so the server can refuse
+  // to overwrite someone else's newer edit; "Keep my changes" moves it forward on purpose.
+  const [baseline, setBaseline] = useState<string | null>(existing?.updatedAt ?? null);
+  const live = useTaskStore((s) => (existing ? s.tasks.find((t) => t.id === existing.id) : undefined));
+  const changedElsewhere =
+    !!existing && !!live && !!baseline && live.updatedAt !== baseline && !isOwnStamp(live.id, live.updatedAt);
+  const [conflict, setConflict] = useState("");
+  const changedByName = (t: Task) => {
+    const last = [...(t.activity ?? [])].sort((a, b) => a.at.localeCompare(b.at)).pop();
+    return (last && users.find((u) => u.id === last.userId)?.name) || "Someone";
+  };
+  const lastAsDraft = useRef(false);
+  // The list refresh waits while this drawer is open, so watch just this one task instead: a light
+  // re-read every minute that updates the list's copy (never this form) and raises the banner below.
+  const refreshOne = useTaskStore((s) => s.refreshOne);
+  useEffect(() => {
+    if (!existing) return;
+    const t = window.setInterval(() => {
+      if (!document.hidden) void refreshOne(existing.id);
+    }, 60_000);
+    return () => window.clearInterval(t);
+  }, [existing, refreshOne]);
+  /** Throw away this form and reopen on the server's latest copy. */
+  async function reloadLatest() {
+    if (!existing || !onReload) return;
+    await refreshOne(existing.id);
+    const fresh = useTaskStore.getState().tasks.find((t) => t.id === existing.id);
+    if (fresh) onReload(fresh);
+  }
   const { projects } = useProjects();
   const { users } = useUsers();
   const { departments } = useDepartments();
@@ -408,7 +444,8 @@ export function TaskDrawer({
     return null;
   }
 
-  async function save(asDraft: boolean) {
+  async function save(asDraft: boolean, overwrite = false) {
+    lastAsDraft.current = asDraft;
     // An assignee may move the work along but not rewrite the record, so their save is a narrow
     // PATCH of just those two fields rather than a full PUT of the (disabled) form.
     if (existing && !rights.canEditAll) {
@@ -456,10 +493,12 @@ export function TaskDrawer({
       recurrenceExcludeDays: recurrenceRule === "CUSTOM" ? recurrenceExcludeDays : "",
       recurrenceUntil: isRepeating ? recurrenceUntil || "" : "",
       departmentId: departmentId || null,
+      expectedUpdatedAt: existing && !overwrite ? baseline : null,
     };
 
     setSaving(true);
     setError("");
+    setConflict("");
     try {
       const targetId = existing?.id ?? createdId;
       let taskId: string;
@@ -476,7 +515,13 @@ export function TaskDrawer({
       await flushDrafts(taskId);
       requestClose();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not save the task.");
+      if (err instanceof ApiError && err.status === 409) {
+        // Someone saved this task after it was opened here — ask instead of overwriting them.
+        setConflict(err.message);
+        if (existing) void refreshOne(existing.id);
+      } else {
+        setError(err instanceof Error ? err.message : "Could not save the task.");
+      }
       setSaving(false);
     }
   }
@@ -708,6 +753,29 @@ export function TaskDrawer({
           {/* Form */}
           <div className="flex min-w-0 flex-1 flex-col border-r border-gray-100">
             <div className="flex-1 space-y-4 overflow-y-auto px-6 py-5">
+              {changedElsewhere && live && !conflict && (
+                <div className="flex flex-wrap items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                  <span className="min-w-0 flex-1">
+                    <b>{changedByName(live)}</b> updated this task at {formatTaskDateTime(live.updatedAt)} while you had it open.
+                  </span>
+                  {onReload && (
+                    <button
+                      type="button"
+                      onClick={() => void reloadLatest()}
+                      className="rounded-md border border-amber-300 bg-white px-2.5 py-1 font-medium hover:bg-amber-100"
+                    >
+                      Reload
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setBaseline(live.updatedAt)}
+                    className="rounded-md px-2.5 py-1 font-medium hover:bg-amber-100"
+                  >
+                    Keep my changes
+                  </button>
+                </div>
+              )}
               <input
                 value={title}
                 onChange={(e) => {
@@ -973,6 +1041,30 @@ export function TaskDrawer({
               </div>
 
               {error && <div className="text-xs font-medium text-rose-600">{error}</div>}
+              {conflict && (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs text-amber-800">
+                  <p className="font-medium">{conflict}</p>
+                  <p className="mt-0.5">Saving now would replace their changes.</p>
+                  <div className="mt-2 flex gap-2">
+                    {live && onReload && (
+                      <button
+                        type="button"
+                        onClick={() => void reloadLatest()}
+                        className="rounded-md border border-amber-300 bg-white px-2.5 py-1 font-medium hover:bg-amber-100"
+                      >
+                        Reload their version
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => void save(lastAsDraft.current, true)}
+                      className="rounded-md bg-amber-600 px-2.5 py-1 font-medium text-white hover:bg-amber-700"
+                    >
+                      Save mine anyway
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Footer */}

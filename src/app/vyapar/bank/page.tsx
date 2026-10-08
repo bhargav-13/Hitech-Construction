@@ -31,6 +31,7 @@ import {
   Trash2,
   Upload,
 } from "lucide-react";
+import { isBackgroundRefresh, useAutoRefresh } from "@/lib/autoRefresh";
 
 type EntryKind = "BANK_TO_CASH" | "CASH_TO_BANK" | "BANK_TO_BANK" | "ADJUST_BANK";
 
@@ -81,7 +82,7 @@ export default function BankAccountsPage() {
   const [menuOpen, setMenuOpen] = useState(false);
 
   const load = useCallback(async () => {
-    setLoading(true);
+    if (!isBackgroundRefresh()) setLoading(true);
     setError("");
     try {
       const list = await vyapar.getBankAccounts(projectId);
@@ -94,6 +95,7 @@ export default function BankAccountsPage() {
       setLoading(false);
     }
   }, [projectId]);
+  useAutoRefresh(load);
 
   useEffect(() => {
     load();

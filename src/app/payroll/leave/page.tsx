@@ -9,6 +9,7 @@ import { allLeave, decideLeave, ApiError } from "@/lib/api";
 import type { LeaveRequestApi, LeaveStatus } from "@/lib/api";
 import { Select } from "@/components/Select";
 import { CalendarDays, Check, ClipboardList, Search, UserRound, X } from "lucide-react";
+import { isBackgroundRefresh, useAutoRefresh } from "@/lib/autoRefresh";
 
 /**
  * Leave — one list, one detail pane.
@@ -48,7 +49,7 @@ export default function LeavePage() {
   const [actionError, setActionError] = useState("");
 
   const load = useCallback(async () => {
-    setLoading(true);
+    if (!isBackgroundRefresh()) setLoading(true);
     try {
       setRows(await allLeave());
       setError("");
@@ -58,6 +59,7 @@ export default function LeavePage() {
       setLoading(false);
     }
   }, []);
+  useAutoRefresh(load);
 
   useEffect(() => {
     void load();

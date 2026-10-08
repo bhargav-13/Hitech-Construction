@@ -30,6 +30,7 @@ import { paymentInImportConfig, paymentOutImportConfig } from "@/lib/vyaparImpor
 import * as vyapar from "@/lib/vyaparApi";
 import type { Party, Payment, PaymentLink } from "@/lib/vyaparApi";
 import { Download, FileText, Link2, Plus, Search, Upload, Wallet } from "lucide-react";
+import { isBackgroundRefresh, useAutoRefresh } from "@/lib/autoRefresh";
 
 /**
  * Payment-In / Payment-Out workspace. Unlike an invoice, a payment moves money directly: a
@@ -70,7 +71,7 @@ export function PaymentWorkspace({
   const { projects } = useProjects();
 
   const load = useCallback(async () => {
-    setLoading(true);
+    if (!isBackgroundRefresh()) setLoading(true);
     setError("");
     try {
       const [pays, pty] = await Promise.all([
@@ -85,6 +86,7 @@ export function PaymentWorkspace({
       setLoading(false);
     }
   }, [direction, projectId]);
+  useAutoRefresh(load);
 
   useEffect(() => {
     load();

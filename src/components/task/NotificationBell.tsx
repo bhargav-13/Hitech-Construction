@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { useNotifications } from "@/lib/notifications";
 import { relativeTime } from "@/lib/taskNotifications";
+import { OPEN_EVENT, requestBrowserNotify, setBrowserNotifyOn, useBrowserNotify } from "@/lib/browserNotify";
 
 const KIND_META: Record<string, { icon: React.ComponentType<{ size?: number }>; tone: string }> = {
   OVERDUE: { icon: AlarmClock, tone: "bg-rose-50 text-rose-600" },
@@ -61,6 +62,18 @@ export function NotificationBell() {
     if (link) router.push(link);
   }
 
+  // A desktop (Chrome / Edge) notification was clicked: open what it is about.
+  const desktop = useBrowserNotify();
+  useEffect(() => {
+    const onOpen = (e: Event) => {
+      const { id, link } = (e as CustomEvent<{ id: number | null; link: string | null }>).detail ?? {};
+      if (id != null) void markRead(id);
+      router.push(link || "/taskopad");
+    };
+    window.addEventListener(OPEN_EVENT, onOpen);
+    return () => window.removeEventListener(OPEN_EVENT, onOpen);
+  }, [markRead, router]);
+
   return (
     <div ref={ref} className="relative">
       <button
@@ -92,6 +105,30 @@ export function NotificationBell() {
               </button>
             )}
           </div>
+
+          {/* Desktop notifications — the pop-ups Chrome / Edge show even when this tab isn't open. */}
+          {desktop.state !== "unsupported" && (
+            <div className="flex items-center justify-between gap-2 border-b border-gray-100 bg-gray-50/60 px-4 py-2 text-[11px] text-gray-500">
+              {desktop.state === "denied" ? (
+                <span>Desktop alerts are blocked — allow notifications for this site in the browser&apos;s settings.</span>
+              ) : desktop.on ? (
+                <>
+                  <span className="flex items-center gap-1.5"><BellRing size={12} className="text-emerald-600" /> Desktop alerts are on</span>
+                  <button onClick={() => setBrowserNotifyOn(false)} className="font-medium hover:text-gray-700">Turn off</button>
+                </>
+              ) : (
+                <>
+                  <span>Get desktop alerts for tasks, even when this tab isn&apos;t open.</span>
+                  <button
+                    onClick={() => (desktop.state === "granted" ? setBrowserNotifyOn(true) : void requestBrowserNotify())}
+                    className="shrink-0 rounded-md bg-brand-accent px-2 py-1 font-medium text-white hover:opacity-90"
+                  >
+                    Turn on
+                  </button>
+                </>
+              )}
+            </div>
+          )}
 
           <div className="max-h-[28rem] overflow-y-auto">
             {items.length === 0 ? (

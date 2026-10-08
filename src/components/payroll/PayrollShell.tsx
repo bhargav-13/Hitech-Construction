@@ -35,6 +35,8 @@ import {
   Users,
   Wallet,
 } from "lucide-react";
+import { AutoRefreshBadge } from "@/components/AutoRefreshBadge";
+import { useAutoRefreshClock } from "@/lib/autoRefresh";
 
 const ICONS: Record<string, React.ComponentType<{ size?: number; className?: string }>> = {
   home: Home,
@@ -76,6 +78,8 @@ export function PayrollShell({
    */
   requireApprove?: boolean;
 }) {
+  // Every Payroll screen refreshes itself every 3 minutes — never while someone is editing.
+  useAutoRefreshClock();
   const pathname = usePathname();
   const router = useRouter();
   const { isAdmin, canApprove } = usePayrollAccess();
@@ -155,6 +159,9 @@ export function PayrollShell({
         </aside>
 
         <div className="min-w-0 flex-1">
+          <div className="-mt-1 mb-1 flex justify-end">
+            <AutoRefreshBadge />
+          </div>
           {showContent ? (
             <Suspense fallback={null}>{children}</Suspense>
           ) : (

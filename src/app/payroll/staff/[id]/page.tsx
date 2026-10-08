@@ -22,6 +22,7 @@ import { heldAssets } from "@/lib/assetApi";
 import type { HeldAsset } from "@/lib/assetApi";
 import { useCan } from "@/lib/permissions";
 import { inr } from "@/lib/format";
+import { useRefreshTick } from "@/lib/autoRefresh";
 
 const TABS = [
   { key: "profile", label: "Profile" },
@@ -57,6 +58,7 @@ export default function StaffProfilePage() {
   const [local, setLocal] = useState<PayrollProfileResponse | undefined>(undefined);
   const profile = local ?? profiles[userId];
 
+  const tick = useRefreshTick(); // silent re-load on the module auto-refresh
   useEffect(() => {
     let cancelled = false;
     getPayrollPeople()
@@ -64,7 +66,7 @@ export default function StaffProfilePage() {
       .catch((err) => { if (!cancelled) setError(err instanceof ApiError ? err.message : "Unable to load the member."); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, []);
+  }, [tick]);
 
   // Read the tab from the URL hash so a link can open "#attendance" directly.
   useEffect(() => {

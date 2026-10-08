@@ -15,6 +15,7 @@ import { Banknote, FileSpreadsheet, Plus, Printer, RefreshCw, Search, Trash2 } f
 import { downloadPaymentVoucher } from "@/lib/payslipExport";
 import { useTableSort } from "@/lib/useTableSort";
 import { SortTh } from "@/components/vyapar/SortTh";
+import { isBackgroundRefresh, useAutoRefresh } from "@/lib/autoRefresh";
 
 /**
  * Payments — every payment recorded to staff (PagarBook's Payment Logs): salary, advances,
@@ -48,6 +49,7 @@ export default function PaymentsPage() {
     try { setRows(await getPaymentsApi({ month: month === "all" ? undefined : month })); setError(""); }
     catch (err) { setError(err instanceof ApiError ? err.message : "Unable to load payments."); setRows([]); }
   }, [month]);
+  useAutoRefresh(load);
   useEffect(() => { load(); }, [load]);
   useEffect(() => { getPayrollPeople().then((r) => setMembers(r.content.filter((u) => u.onPayroll))).catch(() => {}); }, []);
 

@@ -18,6 +18,7 @@ import { exportRowsToXlsx } from "@/lib/vyaparExport";
 import { ChevronLeft, ChevronRight, FileSpreadsheet, Hammer, Pencil, Plus, Trash2 } from "lucide-react";
 import { useTableSort } from "@/lib/useTableSort";
 import { SortTh } from "@/components/vyapar/SortTh";
+import { isBackgroundRefresh, useAutoRefresh } from "@/lib/autoRefresh";
 
 type Tab = "logs" | "summary" | "catalogue";
 const pad = (n: number) => String(n).padStart(2, "0");
@@ -43,11 +44,13 @@ export default function WorkPage() {
   const [y, m] = month.split("-").map(Number);
   const monthEnd = `${month}-${pad(new Date(y, m, 0).getDate())}`;
   const loadItems = useCallback(async () => { try { setItems(await getWorkItemsApi()); } catch { /* shown via logs */ } }, []);
+  useAutoRefresh(loadItems);
   const loadLogs = useCallback(async () => {
     setLogs(null);
     try { setLogs(await getWorkLogsApi(`${month}-01`, monthEnd)); setError(""); }
     catch (err) { setError(err instanceof ApiError ? err.message : "Unable to load work logs."); setLogs([]); }
   }, [month, monthEnd]);
+  useAutoRefresh(loadLogs);
   useEffect(() => { loadItems(); }, [loadItems]);
   useEffect(() => { loadLogs(); }, [loadLogs]);
   useEffect(() => { getPayrollPeople().then((r) => setMembers(r.content.filter((u) => u.onPayroll))).catch(() => {}); }, []);

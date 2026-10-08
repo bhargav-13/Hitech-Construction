@@ -37,6 +37,7 @@ import * as vyapar from "@/lib/vyaparApi";
 import type { Invoice, InvoiceLine, Party } from "@/lib/vyaparApi";
 import { Download, FileText, Plus, Receipt, Search, Upload, X } from "lucide-react";
 import { previewFile } from "@/lib/filePreview";
+import { isBackgroundRefresh, useAutoRefresh } from "@/lib/autoRefresh";
 const UNCATEGORISED = "Uncategorised";
 
 /**
@@ -73,7 +74,7 @@ export function ExpenseWorkspace() {
   const [items, setItems] = useState<vyapar.Item[]>([]);
 
   const load = useCallback(async () => {
-    setLoading(true);
+    if (!isBackgroundRefresh()) setLoading(true);
     setError("");
     try {
       const [inv, pty] = await Promise.all([
@@ -89,6 +90,7 @@ export function ExpenseWorkspace() {
       setLoading(false);
     }
   }, [projectId]);
+  useAutoRefresh(load);
 
   useEffect(() => {
     load();

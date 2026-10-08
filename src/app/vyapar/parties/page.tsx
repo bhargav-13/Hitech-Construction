@@ -45,6 +45,7 @@ import {
   Upload,
   Users,
 } from "lucide-react";
+import { isBackgroundRefresh, useAutoRefresh } from "@/lib/autoRefresh";
 
 type Tab = "details" | "groups";
 
@@ -91,7 +92,7 @@ export default function PartiesPage() {
   );
 
   const load = useCallback(async () => {
-    setLoading(true);
+    if (!isBackgroundRefresh()) setLoading(true);
     setError("");
     try {
       const [list, users, loanList, reimbList] = await Promise.all([
@@ -114,6 +115,7 @@ export default function PartiesPage() {
       setLoading(false);
     }
   }, [projectId]);
+  useAutoRefresh(load);
 
   useEffect(() => {
     load();

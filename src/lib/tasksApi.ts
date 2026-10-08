@@ -97,6 +97,8 @@ export interface SubtaskInput {
 }
 
 export interface TaskUpsertRequest {
+  /** Update only: refuse (409) if the task changed since this stamp; null skips the check. */
+  expectedUpdatedAt?: string | null;
   title: string;
   description?: string | null;
   projectId?: number | null;

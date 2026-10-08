@@ -38,6 +38,7 @@ import {
   Upload,
   Share2,
 } from "lucide-react";
+import { isBackgroundRefresh, useAutoRefresh } from "@/lib/autoRefresh";
 
 const TABS = ["PRODUCTS", "SERVICES", "CATEGORY", "UNITS"] as const;
 type Tab = (typeof TABS)[number];
@@ -78,7 +79,7 @@ export default function ItemsPage() {
   const [editingUnit, setEditingUnit] = useState<ManagedUnit | null>(null);
 
   const load = useCallback(async () => {
-    setLoading(true);
+    if (!isBackgroundRefresh()) setLoading(true);
     setError("");
     try {
       setItems(await vyapar.getItems(projectId));
@@ -88,6 +89,7 @@ export default function ItemsPage() {
       setLoading(false);
     }
   }, [projectId]);
+  useAutoRefresh(load);
 
   useEffect(() => {
     load();

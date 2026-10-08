@@ -30,6 +30,7 @@ import {
   RefreshCw, Search, ShieldCheck, Trash2, Undo2, Unlock, Users, Wallet, X,
 } from "lucide-react";
 import { useOwnRecordLock } from "@/lib/permissions";
+import { isBackgroundRefresh, useAutoRefresh } from "@/lib/autoRefresh";
 
 /** Payable days to two places at most — a short day makes 1.3333, which reads better as 1.33. */
 const days = (n: number | string) => String(Math.round(Number(n) * 100) / 100);
@@ -470,7 +471,11 @@ const SUMMARY_SORT = {
   tax: (p: PayslipApi) => n(p.tds),
   net: (p: PayslipApi) => n(p.net),
   status: (p: PayslipApi) => slipStatusOf(p),
+  hours: (p: PayslipApi) => n(p.workedHours),
+  hourAmount: (p: PayslipApi) => n(p.hourBasedAmount),
 };
+
+const HOUR_VIEW_KEY = "hitech.payroll.hourView.v1";
 
 function SummaryTable({ grouped, editable, onEdit, profiles }: {
   grouped: { group: string; list: PayslipApi[] }[];
@@ -490,9 +495,27 @@ function SummaryTable({ grouped, editable, onEdit, profiles }: {
     <SortTh label={label} sortKey={key} activeKey={sortKey} dir={sortDir} onSort={toggle} align={align} className={align === "right" ? "px-3" : ""} />
   );
   const total = (f: (p: PayslipApi) => number) => flat.filter((p) => p.holdStatus !== "STOP").reduce((a, p) => a + f(p), 0);
+  // Hour-based view: extra columns beside the real salary, for comparison only — nothing paid
+  // changes. Remembered per browser.
+  const [hourView, setHourView] = useState(false);
+  useEffect(() => {
+    try { setHourView(localStorage.getItem(HOUR_VIEW_KEY) === "1"); } catch { /* ignore */ }
+  }, []);
+  const toggleHourView = (on: boolean) => {
+    setHourView(on);
+    try { localStorage.setItem(HOUR_VIEW_KEY, on ? "1" : "0"); } catch { /* ignore */ }
+  };
+  const hrs = (v: number | null | undefined) => (v == null ? "—" : `${Number(v).toLocaleString("en-IN", { maximumFractionDigits: 2 })} h`);
   return (
+    <div>
+    <div className="mb-2 flex items-center justify-end gap-2 text-xs text-gray-600">
+      <label className="flex cursor-pointer items-center gap-1.5" title="Adds Hours worked, Hourly rate and Hour-based amount beside the real salary. For comparison only — salaries are still paid as calculated.">
+        <input type="checkbox" checked={hourView} onChange={(e) => toggleHourView(e.target.checked)} />
+        Show hour-based salary
+      </label>
+    </div>
     <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white">
-      <table className="w-full min-w-[1060px] border-collapse text-sm">
+      <table className={`w-full ${hourView ? "min-w-[1400px]" : "min-w-[1060px]"} border-collapse text-sm`}>
         <thead>
           <tr className="border-b border-gray-100 bg-gray-50 text-left text-gray-500">
             {th("Name", "name", "left")}
@@ -502,13 +525,16 @@ function SummaryTable({ grouped, editable, onEdit, profiles }: {
             {th("Adjustments", "adjustments")}
             {th("Income Tax", "tax")}
             {th("Net Salary", "net")}
+            {hourView && th("Hours Worked", "hours")}
+            {hourView && <th className="px-3 py-2 text-right text-xs font-medium">Hourly Rate</th>}
+            {hourView && th("Hour-based Amount", "hourAmount")}
             {th("Status", "status", "left")}
             <th className="px-2 py-2" />
           </tr>
         </thead>
         <tbody>
           {groups.map(({ group, list }) => [
-            <tr key={`g-${group}`} className="bg-gray-50/70"><td colSpan={9} className="px-4 py-1.5 text-xs font-semibold text-gray-600">{group} <span className="ml-1 text-gray-400">{list.length}</span></td></tr>,
+            <tr key={`g-${group}`} className="bg-gray-50/70"><td colSpan={hourView ? 12 : 9} className="px-4 py-1.5 text-xs font-semibold text-gray-600">{group} <span className="ml-1 text-gray-400">{list.length}</span></td></tr>,
             ...list.map((p) => {
               const adj = n(p.reimbursements) - n(p.variableDeductions);
               return (
@@ -530,6 +556,20 @@ function SummaryTable({ grouped, editable, onEdit, profiles }: {
                   <td className="px-3 py-2.5 text-right text-gray-500">{adj === 0 ? "—" : adj > 0 ? `+${inr(adj)}` : `−${inr(-adj)}`}</td>
                   <td className="px-3 py-2.5 text-right text-gray-500">{n(p.tds) ? `−${inr(n(p.tds))}` : "—"}</td>
                   <td className="px-3 py-2.5 text-right font-semibold text-gray-900">{inr(p.net)}</td>
+                  {hourView && <td className="bg-cyan-50/40 px-3 py-2.5 text-right text-gray-700">{hrs(p.workedHours)}</td>}
+                  {hourView && (
+                    <td className="bg-cyan-50/40 px-3 py-2.5 text-right text-gray-500" title={p.hourBasis ?? undefined}>
+                      {p.hourRate == null ? "—" : `${inr(n(p.hourRate))}/h`}
+                    </td>
+                  )}
+                  {hourView && (
+                    <td
+                      className="bg-cyan-50/40 px-3 py-2.5 text-right font-medium text-brand-accent"
+                      title={p.hourBasedAmount == null ? "Not applicable (piece rate or no salary set)" : `${hrs(p.workedHours)} × ${inr(n(p.hourRate))}/h · ${p.hourBasis ?? ""}`}
+                    >
+                      {p.hourBasedAmount == null ? "—" : inr(n(p.hourBasedAmount))}
+                    </td>
+                  )}
                   <td className="px-3 py-2.5"><SlipStatus p={p} /></td>
                   <td className="px-2 py-2.5">
                     <div className="flex items-center justify-end gap-1">
@@ -554,11 +594,15 @@ function SummaryTable({ grouped, editable, onEdit, profiles }: {
               <td className="px-3 py-2 text-right">{inr(total(adjustmentOf))}</td>
               <td className="px-3 py-2 text-right">{inr(total((p) => n(p.tds)))}</td>
               <td className="px-3 py-2 text-right">{inr(total((p) => n(p.net)))}</td>
+              {hourView && <td className="px-3 py-2 text-right">{hrs(total((p) => n(p.workedHours)))}</td>}
+              {hourView && <td />}
+              {hourView && <td className="px-3 py-2 text-right text-brand-accent">{inr(total((p) => n(p.hourBasedAmount)))}</td>}
               <td colSpan={2} className="px-3 py-2 text-xs font-normal text-gray-500">Stopped salaries excluded</td>
             </tr>
           </tfoot>
         )}
       </table>
+    </div>
     </div>
   );
 }
@@ -598,6 +642,7 @@ function InputsPanel({ monthKey, slips, editable, status, onChanged }: {
   const loadVars = useCallback(async () => {
     try { setVars(await getVariablesApi({ month: monthKey })); } catch { setVars([]); }
   }, [monthKey]);
+  useAutoRefresh(loadVars);
   useEffect(() => { loadVars(); }, [loadVars]);
 
   async function input(userId: number, body: Parameters<typeof setPayslipInputs>[2]) {

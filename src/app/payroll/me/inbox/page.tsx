@@ -8,6 +8,7 @@ import type { BroadcastApi, OrgDocumentApi } from "@/lib/api";
 import { formatDateIST, formatDateTimeIST } from "@/lib/datetime";
 import { Download, FileText, Megaphone, Paperclip } from "lucide-react";
 import { previewFile } from "@/lib/filePreview";
+import { useRefreshTick } from "@/lib/autoRefresh";
 
 /** Self-service: messages HR has sent me, and the organisation's documents. */
 export default function MyInboxPage() {
@@ -16,6 +17,7 @@ export default function MyInboxPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
+  const tick = useRefreshTick(); // silent re-load on the module auto-refresh
   useEffect(() => {
     let cancelled = false;
     Promise.all([myBroadcasts(), getOrgDocuments()])
@@ -23,7 +25,7 @@ export default function MyInboxPage() {
       .catch((err) => { if (!cancelled) setError(err instanceof ApiError ? err.message : "Unable to load."); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, []);
+  }, [tick]);
 
   return (
     <PayrollShell>

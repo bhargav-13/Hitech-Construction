@@ -13,6 +13,7 @@ import { useVyaparProjectId } from "@/lib/projectScope";
 import * as vyapar from "@/lib/vyaparApi";
 import type { Party, Payment } from "@/lib/vyaparApi";
 import { ArrowDownLeft, ArrowUpRight, Plus, Search, Trash2, Wallet } from "lucide-react";
+import { isBackgroundRefresh, useAutoRefresh } from "@/lib/autoRefresh";
 
 export default function VyaparPaymentsPage() {
   const [payments, setPayments] = useState<Payment[]>([]);
@@ -25,7 +26,7 @@ export default function VyaparPaymentsPage() {
   const projectId = useVyaparProjectId();
 
   const load = useCallback(async () => {
-    setLoading(true);
+    if (!isBackgroundRefresh()) setLoading(true);
     setError("");
     try {
       const [pays, pts] = await Promise.all([
@@ -40,6 +41,7 @@ export default function VyaparPaymentsPage() {
       setLoading(false);
     }
   }, [projectId]);
+  useAutoRefresh(load);
 
   useEffect(() => {
     load();
