@@ -5,6 +5,7 @@ import { useDiscardGuard } from "@/lib/formDirty";
 import { useRouter } from "next/navigation";
 import { AppShell } from "@/components/AppShell";
 import { useCan } from "@/lib/permissions";
+import { useAuthStore } from "@/lib/authStore";
 import * as api from "@/lib/api";
 import type { ProjectResponse, ProjectStatus } from "@/lib/api";
 import { projectInitials } from "@/lib/projectHelpers";
@@ -75,6 +76,12 @@ export default function ProjectsPage() {
     }
     // Real money per project, in one pass over the books rather than a call per card. Best-effort:
     // a user without Vyapar access still gets the full list, just without the billed/spent line.
+    // Don't even ask without Vyapar view — the server refuses it and logs an Access Denied each time.
+    const perms = useAuthStore.getState().user?.permissions;
+    if (perms && !perms.includes("VYAPAR:VIEW")) {
+      setFinance({});
+      return;
+    }
     try {
       setFinance(await api.getProjectsFinance());
     } catch {

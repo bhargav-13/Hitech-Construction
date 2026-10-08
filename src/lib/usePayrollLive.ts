@@ -268,7 +268,7 @@ export function useMyLeave() {
     refresh();
   }, [refresh]);
 
-  const apply = async (body: { leaveTypeName: string; fromDate: string; toDate: string; reason?: string }) => {
+  const apply = async (body: Parameters<typeof api.applyLeave>[0]) => {
     const created = await api.applyLeave(body);
     await refresh();
     return created;
@@ -470,8 +470,13 @@ export function usePayrollRuns() {
     refresh();
   }, [refresh]);
 
-  const generate = async (month: string, unmarked: api.UnmarkedDayPolicy = "PRESENT") => {
-    const run = await api.generatePayrollRun(month, unmarked);
+  const generate = async (
+    month: string,
+    unmarked: api.UnmarkedDayPolicy = "PRESENT",
+    cutoff?: string | null,
+    assumption?: api.RunAssumption | null,
+  ) => {
+    const run = await api.generatePayrollRun(month, unmarked, cutoff, assumption);
     await refresh();
     return run;
   };
@@ -485,8 +490,8 @@ export function usePayrollRuns() {
     await refresh();
     return run;
   };
-  const pay = async (month: string) => {
-    const run = await api.markPayrollRunPaid(month);
+  const pay = async (month: string, bankAccountId?: number | null) => {
+    const run = await api.markPayrollRunPaid(month, bankAccountId);
     await refresh();
     return run;
   };

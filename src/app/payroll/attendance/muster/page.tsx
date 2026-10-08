@@ -1,3 +1,6 @@
+import { redirect } from "next/navigation";
+
+/** Old address — the muster is the Muster view of the Attendance page. */
 export default function MusterPage() {
-  return null;
+  redirect("/payroll/attendance");
 }

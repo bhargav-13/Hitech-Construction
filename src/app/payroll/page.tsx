@@ -22,8 +22,10 @@ import { MyPayrollHome } from "@/components/payroll/self/MyPayrollHome";
 import { DatePicker } from "@/components/DatePicker";
 import { Spinner } from "@/components/Spinner";
 import { usePayrollAccess } from "@/lib/payrollApi";
+import { useCan } from "@/lib/permissions";
 import { useMuster } from "@/lib/usePayrollLive";
-import { getTeam } from "@/lib/api";
+import { getTeam, getPayrollPeople, getPayrollProfiles, pendingLeave, getReimbursementsApi } from "@/lib/api";
+import { todayIST } from "@/lib/datetime";
 import type { AttendanceApiResponse, TeamMemberResponse } from "@/lib/api";
 import { ATTENDANCE_META } from "@/lib/payrollConfig";
 import type { AttendanceCode } from "@/lib/payrollConfig";
@@ -53,13 +55,20 @@ const CODE_COLOR: Record<AttendanceCode, string> = {
   PL: "#3b82f6",
   WO: "#94a3b8",
   NM: "#d1d5db",
+  OD: "#14b8a6",
+  H: "#8b5cf6",
+  OH: "#d946ef",
+  L: "#f97316",
 };
 
 /** The Payroll landing routes by access: HR admins get the full attendance dashboard, everyone
  * else (project managers, team members, workers) gets their own self-service payroll home. */
 export default function PayrollLanding() {
   const { isAdmin } = usePayrollAccess();
-  return isAdmin ? <AdminAttendanceDashboard /> : <MyPayrollHome />;
+  const can = useCan();
+  // The team dashboard is everyone's attendance — only for Team Attendance. Other payroll roles
+  // (leave approver, loans, setup) land on their own payroll home instead of a page of 403s.
+  return isAdmin && can("PAYROLL_ATTENDANCE") ? <AdminAttendanceDashboard /> : <MyPayrollHome />;
 }
 
 /**
@@ -284,6 +293,8 @@ function AdminAttendanceDashboard() {
           <StatCard label="Fine Hrs" value={totals.fine.toFixed(1)} accent="rose" icon={TriangleAlert} />
         </div>
 
+        <ThingsToDo />
+
         {loading ? (
           <div className="flex items-center justify-center gap-2 rounded-xl border border-dashed border-gray-300 bg-white py-16 text-sm text-gray-400">
             <Spinner size={16} className="text-brand-accent" /> Loading…
@@ -445,6 +456,67 @@ const TOOLTIP_STYLE = {
   fontSize: 12,
   boxShadow: "0 4px 12px rgba(0,0,0,0.06)",
 } as const;
+
+/**
+ * PagarBook's "Things to do": celebrations in the next 7 days (birthdays from the staff profile,
+ * work anniversaries from the joining date), this month's new joinees and approvals waiting.
+ */
+function ThingsToDo() {
+  const [items, setItems] = useState<{ celebrations: string[]; joinees: string[]; leave: number; claims: number } | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const [users, profiles, leave, claims] = await Promise.all([
+        getPayrollPeople().then((r) => r.content.filter((u) => u.onPayroll)).catch(() => []),
+        getPayrollProfiles().catch(() => []),
+        pendingLeave().catch(() => []),
+        getReimbursementsApi().catch(() => []),
+      ]);
+      const name = new Map(users.map((u) => [u.id, u.fullName]));
+      const today = todayIST();
+      const soon = new Set<string>();
+      for (let i = 0; i < 7; i++) {
+        const d = new Date(`${today}T00:00:00`); d.setDate(d.getDate() + i);
+        soon.add(`${pad(d.getMonth() + 1)}-${pad(d.getDate())}`);
+      }
+      const celebrations: string[] = [];
+      const joinees: string[] = [];
+      for (const p of profiles) {
+        const n = name.get(p.userId);
+        if (!n) continue;
+        const dob = p.details?.dateOfBirth;
+        if (dob && soon.has(dob.slice(5))) celebrations.push(`🎂 ${n} · birthday ${dob.slice(8)}/${dob.slice(5, 7)}`);
+        const j = p.joiningDate;
+        if (j && soon.has(j.slice(5)) && j.slice(0, 4) < today.slice(0, 4)) celebrations.push(`🎉 ${n} · ${Number(today.slice(0, 4)) - Number(j.slice(0, 4))} yr work anniversary`);
+        if (j && j.slice(0, 7) === today.slice(0, 7)) joinees.push(`${n} · joined ${j.slice(8)}/${j.slice(5, 7)}`);
+      }
+      if (!cancelled) setItems({ celebrations, joinees, leave: leave.length, claims: claims.filter((c) => c.status === "PENDING").length });
+    })();
+    return () => { cancelled = true; };
+  }, []);
+  if (!items) return null;
+  return (
+    <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+      <Panel title="Celebrations · next 7 days">
+        {items.celebrations.length === 0 ? <p className="text-sm text-gray-400">No celebrations in upcoming days.</p> : (
+          <ul className="space-y-1 text-sm text-gray-700">{items.celebrations.map((c) => <li key={c}>{c}</li>)}</ul>
+        )}
+      </Panel>
+      <Panel title="New Joinees · this month">
+        {items.joinees.length === 0 ? <p className="text-sm text-gray-400">No new joinees this month.</p> : (
+          <ul className="space-y-1 text-sm text-gray-700">{items.joinees.map((c) => <li key={c}>{c}</li>)}</ul>
+        )}
+      </Panel>
+      <Panel title="Waiting for you">
+        <div className="space-y-1.5 text-sm">
+          <Link href="/payroll/leave" className="flex justify-between rounded-lg bg-gray-50 px-3 py-1.5 hover:bg-cyan-50"><span>Leave requests</span><b>{items.leave}</b></Link>
+          <Link href="/payroll/reimbursements" className="flex justify-between rounded-lg bg-gray-50 px-3 py-1.5 hover:bg-cyan-50"><span>Expense claims</span><b>{items.claims}</b></Link>
+          <Link href="/payroll/run" className="flex justify-between rounded-lg bg-gray-50 px-3 py-1.5 hover:bg-cyan-50"><span>Process this month&apos;s payroll</span><span className="text-brand-accent">Open →</span></Link>
+        </div>
+      </Panel>
+    </div>
+  );
+}
 
 function Panel({ title, children, className = "" }: { title: string; children: React.ReactNode; className?: string }) {
   return (

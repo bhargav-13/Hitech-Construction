@@ -1,3 +1,6 @@
+import { redirect } from "next/navigation";
+
+/** Old address — attendance rules (shift timings, fines, overtime) are set on Setup -> Shifts. */
 export default function AttendanceSettingsPage() {
-  return null;
+  redirect("/payroll/setup/shifts");
 }

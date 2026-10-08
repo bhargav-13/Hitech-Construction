@@ -11,6 +11,9 @@ import { ApiError } from "@/lib/api";
 import type { ReimbStatus } from "@/lib/api";
 import { inr } from "@/lib/format";
 import { CircleCheck, Clock, Plus, Receipt, Wallet } from "lucide-react";
+import { useTableSort } from "@/lib/useTableSort";
+import { SortTh } from "@/components/vyapar/SortTh";
+import type { ReimbursementApi } from "@/lib/api";
 
 const STATUS_STYLE: Record<ReimbStatus, string> = {
   PENDING: "bg-amber-50 text-amber-700",
@@ -21,8 +24,17 @@ const STATUS_STYLE: Record<ReimbStatus, string> = {
 const EXPENSE_TYPES = ["Travel", "Fuel", "Site Supplies", "Food & Lodging", "Tools", "Medical", "Other"];
 
 /** My Reimbursements — self-service, backed by the real reimbursements API. */
+const MY_CLAIM_SORT = {
+  type: (r: ReimbursementApi) => r.expenseType,
+  date: (r: ReimbursementApi) => r.expenseDate,
+  requested: (r: ReimbursementApi) => Number(r.requestedAmount),
+  approved: (r: ReimbursementApi) => (r.approvedAmount == null ? null : Number(r.approvedAmount)),
+  status: (r: ReimbursementApi) => r.status,
+};
+
 export default function MyReimbursementsPage() {
   const { rows, loading, error, create } = useMyReimbursements();
+  const { sorted: sortedRows, sortKey, sortDir, toggle } = useTableSort(rows, MY_CLAIM_SORT, { key: "date", dir: "desc" });
   const [applying, setApplying] = useState(false);
   const [actionError, setActionError] = useState("");
 
@@ -65,15 +77,15 @@ export default function MyReimbursementsPage() {
             <table className="w-full min-w-[640px] border-collapse text-sm">
               <thead>
                 <tr className="border-b border-gray-100 bg-gray-50 text-left text-gray-500">
-                  <th className="px-4 py-2 font-medium">Claim</th>
-                  <th className="px-4 py-2 font-medium">Expense Date</th>
-                  <th className="px-4 py-2 text-right font-medium">Requested</th>
-                  <th className="px-4 py-2 text-right font-medium">Approved</th>
-                  <th className="px-4 py-2 font-medium">Status</th>
+                  <SortTh label="Claim" sortKey="type" activeKey={sortKey} dir={sortDir} onSort={toggle} />
+                  <SortTh label="Expense Date" sortKey="date" activeKey={sortKey} dir={sortDir} onSort={toggle} />
+                  <SortTh label="Requested" sortKey="requested" activeKey={sortKey} dir={sortDir} onSort={toggle} align="right" />
+                  <SortTh label="Approved" sortKey="approved" activeKey={sortKey} dir={sortDir} onSort={toggle} align="right" />
+                  <SortTh label="Status" sortKey="status" activeKey={sortKey} dir={sortDir} onSort={toggle} />
                 </tr>
               </thead>
               <tbody>
-                {rows.map((r) => (
+                {sortedRows.map((r) => (
                   <tr key={r.id} className="border-b border-gray-50 last:border-b-0 even:bg-gray-50/40">
                     <td className="px-4 py-2.5">
                       <div className="font-medium text-gray-800">{r.expenseType}</div>

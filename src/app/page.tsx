@@ -11,7 +11,7 @@ import { useAppStore } from "@/lib/store";
 import { useProjectScope } from "@/lib/projectScope";
 import * as api from "@/lib/api";
 import * as vyapar from "@/lib/vyaparApi";
-import { usePayrollStore, getAttendance } from "@/lib/payrollApi";
+import { useCan } from "@/lib/permissions";
 import type { Invoice as VyaparInvoice, Payment as VyaparPayment } from "@/lib/vyaparApi";
 import { formatLakh, inrAxis } from "@/lib/format";
 import type { Project, ProjectHealth, ProjectStatus } from "@/lib/types";
@@ -82,27 +82,43 @@ export default function DashboardPage() {
   const materials = useAppStore((s) => s.materials);
   const [tab, setTab] = useState<"Operational" | "Financial">("Operational");
 
-  // Real workforce attendance from the Payroll module: how many staff were present each of the
-  // last 7 days (present + half-day), plus how many are present today.
-  const payrollEmployees = usePayrollStore((s) => s.employees);
-  const attendanceOverrides = usePayrollStore((s) => s.attendanceOverrides);
-  const workforce = useMemo(() => {
-    const active = payrollEmployees.filter((e) => e.active);
-    const days: { date: string; workers: number }[] = [];
+  // Workforce: real attendance for the last 7 days — present, on duty or half day — from Payroll.
+  // It used to read the old seeded demo store, so every dashboard showed invented staff to anyone.
+  // Only for people with Team Attendance; everyone else gets a short note instead of a chart.
+  const can = useCan();
+  const canSeeAttendance = can("PAYROLL_ATTENDANCE");
+  const workforceScope = useProjectScope((s) => s.projectId);
+  const [workforce, setWorkforce] = useState<{ series: { date: string; workers: number }[]; total: number; presentToday: number } | null>(null);
+  useEffect(() => {
+    if (!canSeeAttendance) return;
+    let cancelled = false;
+    const days: string[] = [];
     for (let i = 6; i >= 0; i--) {
       const d = new Date();
       d.setDate(d.getDate() - i);
-      // Local calendar date (not UTC) so the key matches daysInMonth / muster / punch.
-      const iso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-      let workers = 0;
-      for (const e of active) {
-        const a = getAttendance(attendanceOverrides, e, iso);
-        if (a.code === "P" || a.code === "HD") workers++;
-      }
-      days.push({ date: `${d.getDate()}/${d.getMonth() + 1}`, workers });
+      days.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`);
     }
-    return { series: days, total: active.length, presentToday: days[days.length - 1]?.workers ?? 0 };
-  }, [payrollEmployees, attendanceOverrides]);
+    const from = days[0], to = days[6];
+    const pid = workforceScope !== "all" ? Number(workforceScope) : null;
+    Promise.all([
+      pid ? api.getProjectAttendance(pid, from, to) : api.getMuster(from, to),
+      api.getPayrollPeople().catch(() => null),
+    ])
+      .then(([rows, people]) => {
+        if (cancelled) return;
+        const present = (code: string) => code === "P" || code === "OD" || code === "HD";
+        const series = days.map((d) => ({
+          date: `${Number(d.slice(8))}/${Number(d.slice(5, 7))}`,
+          workers: rows.filter((r) => r.date === d && present(r.code)).length,
+        }));
+        const total = pid
+          ? new Set(rows.map((r) => r.userId)).size
+          : (people?.content ?? []).filter((u) => u.onPayroll && u.isActive !== false).length;
+        setWorkforce({ series, total, presentToday: series[6].workers });
+      })
+      .catch(() => { if (!cancelled) setWorkforce({ series: [], total: 0, presentToday: 0 }); });
+    return () => { cancelled = true; };
+  }, [canSeeAttendance, workforceScope]);
 
   // Financials are real: they come from the Vyapar books (sales, expenses, payments).
   const [finInvoices, setFinInvoices] = useState<VyaparInvoice[]>([]);
@@ -484,10 +500,19 @@ export default function DashboardPage() {
               <div className="rounded-xl border border-gray-200 bg-white p-4">
                 <div className="mb-2 flex items-center justify-between">
                   <h3 className="text-sm font-semibold text-gray-700">Last 7 Days Attendance</h3>
-                  <span className="text-xs text-gray-500">
-                    <span className="font-semibold text-emerald-600">{workforce.presentToday}</span> present today · {workforce.total} staff
-                  </span>
+                  {workforce && (
+                    <span className="text-xs text-gray-500">
+                      <span className="font-semibold text-emerald-600">{workforce.presentToday}</span> present today · {workforce.total} staff
+                    </span>
+                  )}
                 </div>
+                {!canSeeAttendance ? (
+                  <div className="flex h-64 items-center justify-center px-6 text-center text-sm text-gray-400">
+                    Team attendance is visible to roles with Payroll → Team Attendance.
+                  </div>
+                ) : !workforce ? (
+                  <div className="flex h-64 items-center justify-center"><Spinner size={18} className="text-brand-accent" /></div>
+                ) : (
                 <div className="h-64">
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart data={workforce.series} margin={{ bottom: 24 }}>
@@ -500,8 +525,8 @@ export default function DashboardPage() {
                         label={{ value: "Attendance date", position: "insideBottom", dy: 30, fontSize: 12 }}
                       />
                       <YAxis
-                        domain={[0, 25]}
-                        ticks={[0, 5, 10, 15, 20, 25]}
+                        allowDecimals={false}
+                        domain={[0, "auto"]}
                         tick={{ fontSize: 12 }}
                         label={{ value: "No of Workers", angle: -90, position: "insideLeft", fontSize: 12 }}
                       />
@@ -510,6 +535,7 @@ export default function DashboardPage() {
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
+                )}
               </div>
 
               <div className="rounded-xl border border-gray-200 bg-white p-4">

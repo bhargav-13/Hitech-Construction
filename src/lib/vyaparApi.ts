@@ -61,6 +61,8 @@ export interface Party {
   projectId: number | null;
   /** Opening balance + every posted document and payment. Positive = receivable. */
   balance: number;
+  /** The staff member this party is the payroll ledger of (group "Staff"); null otherwise. */
+  userId?: number | null;
 }
 
 /** A single line in a party's ledger — documents and payments interleaved by date. */

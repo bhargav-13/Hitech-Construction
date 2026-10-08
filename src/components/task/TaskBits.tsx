@@ -4,7 +4,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Check, ChevronDown, Plus, Search, UserRound, X } from "lucide-react";
 import { projectAvatarColor } from "@/lib/projectHelpers";
 import { ASSIGNABLE_TASK_STATUSES, PRIORITY_STYLE, STATUS_STYLE, TASK_PRIORITIES } from "@/lib/taskTypes";
-import type { TaskPriority, TaskStatus } from "@/lib/taskTypes";
+import type { Task, TaskPriority, TaskStatus } from "@/lib/taskTypes";
+import { useTaskStatuses } from "@/lib/useTaskStatuses";
+import type { StatusRow } from "@/lib/useTaskStatuses";
 
 /**
  * Inline pill picker: the coloured chip is the trigger, and choosing opens a themed, animated menu
@@ -16,6 +18,7 @@ function ChipMenu({
   onChange,
   disabled,
   chipClassName,
+  chipStyle,
   trigger,
 }: {
   value: string;
@@ -23,6 +26,7 @@ function ChipMenu({
   onChange: (value: string) => void;
   disabled?: boolean;
   chipClassName: string;
+  chipStyle?: React.CSSProperties;
   trigger: React.ReactNode;
 }) {
   const [open, setOpen] = useState(false);
@@ -52,6 +56,7 @@ function ChipMenu({
           if (!disabled) setOpen((o) => !o);
         }}
         className={chipClassName}
+        style={chipStyle}
       >
         {trigger}
         <ChevronDown size={11} className={`opacity-70 transition-transform duration-200 ${open ? "rotate-180" : ""}`} />
@@ -91,6 +96,74 @@ export function StatusChip({ status }: { status: TaskStatus }) {
       <span className={`h-1.5 w-1.5 rounded-full ${s.dot}`} />
       {status}
     </span>
+  );
+}
+
+/** A company status row as a chip, in its own colour. */
+export function StatusRowChip({ row, className = "" }: { row: StatusRow; className?: string }) {
+  return (
+    <span
+      className={`inline-flex shrink-0 items-center gap-1.5 rounded-md px-2 py-0.5 text-xs font-medium ${className}`}
+      style={{ backgroundColor: `${row.color}1a`, color: row.color }}
+    >
+      <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: row.color }} />
+      {row.name}
+    </span>
+  );
+}
+
+/** The task's own status label — company-defined name and colour. */
+export function TaskStatusChip({ task }: { task: Pick<Task, "status" | "statusId"> }) {
+  const { rowFor } = useTaskStatuses();
+  return <StatusRowChip row={rowFor(task)} />;
+}
+
+/**
+ * Inline status picker over the company's statuses. Hands back the chosen row: its base is what the
+ * server reasons on, its id is the label. Awaiting Approval rows are never offered — that state is
+ * reached by completing, not chosen — but a task already in it still shows it.
+ */
+export function TaskStatusSelect({
+  task,
+  onChange,
+  disabled,
+}: {
+  task: Pick<Task, "status" | "statusId">;
+  onChange: (row: StatusRow) => void;
+  disabled?: boolean;
+}) {
+  const { active, rowFor } = useTaskStatuses();
+  const current = rowFor(task);
+  const choices = active.filter((r) => r.base !== "Awaiting Approval");
+  const options = choices.some((r) => r.id === current.id) ? choices : [current, ...choices];
+  return (
+    <ChipMenu
+      value={current.id}
+      disabled={disabled}
+      onChange={(id) => {
+        const row = options.find((r) => r.id === id);
+        if (row && row.id !== current.id) onChange(row);
+      }}
+      chipClassName={`inline-flex shrink-0 items-center gap-1.5 rounded-md py-0.5 pl-2 pr-1.5 text-xs font-medium ${
+        disabled ? "opacity-60" : "cursor-pointer hover:brightness-95"
+      }`}
+      chipStyle={{ backgroundColor: `${current.color}1a`, color: current.color }}
+      trigger={
+        <span className="flex items-center gap-1.5">
+          <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: current.color }} />
+          {current.name}
+        </span>
+      }
+      options={options.map((r) => ({
+        value: r.id,
+        node: (
+          <>
+            <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: r.color }} />
+            {r.name}
+          </>
+        ),
+      }))}
+    />
   );
 }
 

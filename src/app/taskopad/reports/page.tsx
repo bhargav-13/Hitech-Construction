@@ -28,7 +28,12 @@ import {
   YAxis,
 } from "recharts";
 import { TaskopadShell } from "@/components/task/TaskopadShell";
-import { PriorityChip, StatusChip, UserAvatar, ProgressBar } from "@/components/task/TaskBits";
+import { PriorityChip, StatusRowChip, TaskStatusChip, UserAvatar, ProgressBar } from "@/components/task/TaskBits";
+import { CheckList, DateTypeButton } from "@/components/task/workspace/Toolbar";
+import { EMPTY_DATE_FILTER, VARIANCE_LABEL, dateFilterActive, varianceOf } from "@/components/task/workspace/taskFilters";
+import type { DateTypeFilter } from "@/components/task/workspace/taskFilters";
+import { useTaskStatuses } from "@/lib/useTaskStatuses";
+import { todayIST } from "@/lib/datetime";
 import { Select as UiSelect } from "@/components/Select";
 import { recurrenceLabel } from "@/components/DatePicker";
 import type { RecurrenceRule } from "@/components/DatePicker";
@@ -39,6 +44,46 @@ import { useProjectScope } from "@/lib/projectScope";
 import { useTaskStore } from "@/lib/taskStore";
 import { TASK_STATUSES, formatTaskDate, formatTaskDateTime, isDueToday, isOverdue } from "@/lib/taskTypes";
 import type { Task, TaskStatus } from "@/lib/taskTypes";
+import { useAuthStore } from "@/lib/authStore";
+import { getAccessSelf } from "@/lib/api";
+import type { AccessSelfApi } from "@/lib/api";
+
+type UserType = "owner" | "assignee" | "follower";
+type ProjectMode = "with" | "without";
+
+/** One saved set of report filters (Save Report) — kept in this browser, per report. */
+interface SavedPreset {
+  name: string;
+  report: ReportId;
+  projectModes: ProjectMode[];
+  projectIds: string[];
+  userTypes: UserType[];
+  userIds: string[];
+  statusIds: string[];
+  date: DateTypeFilter;
+  activityKinds: string[];
+}
+const PRESETS_KEY = "taskopad.reportPresets.v1";
+
+/** Activity log lines, sorted into the kinds Taskopad's Activity Report filters by. */
+const ACTIVITY_KINDS: { value: string; label: string; test: RegExp }[] = [
+  { value: "added", label: "Added", test: /created|added|imported/i },
+  { value: "assignee", label: "Assignee Added / Removed", test: /assign/i },
+  { value: "attachment", label: "Attachments", test: /attach/i },
+  { value: "closed", label: "Closed Task", test: /approved completion|status changed to completed|moved to completed/i },
+  { value: "comment", label: "Comments", test: /comment/i },
+  { value: "due", label: "Edit Due date", test: /due date/i },
+  { value: "status", label: "Status Changed", test: /status|moved it to|awaiting/i },
+  { value: "priority", label: "Priority Changed", test: /priority/i },
+  { value: "subtask", label: "Sub-tasks", test: /sub-task|sub task/i },
+  { value: "reminder", label: "Reminder", test: /reminder/i },
+  { value: "recurring", label: "Recurring", test: /recurring|series/i },
+  { value: "updated", label: "Task Updated", test: /task updated|pinned|unpinned|progress/i },
+  { value: "bin", label: "Deleted / Restored", test: /recycle bin|restored/i },
+];
+function activityKind(text: string): string {
+  return ACTIVITY_KINDS.find((k) => k.test.test(text))?.value ?? "updated";
+}
 
 type ReportId =
   | "user-wise"
@@ -93,8 +138,24 @@ function ReportDetail({
 }) {
   const tasks = useTaskStore((s) => s.tasks);
   const load = useTaskStore((s) => s.load);
-  const { users } = useUsers();
+  const { users: allUsers } = useUsers();
   const { departments } = useDepartments();
+  // Per-person rows only for people you manage: you + everyone below you in the role ladder
+  // (Super Admin: everyone). It listed the whole company before, with numbers built from just the
+  // tasks you can see — partial, misleading figures about people outside your team.
+  const meId = useAuthStore((s) => s.user?.id ?? null);
+  const [scope, setScope] = useState<AccessSelfApi | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    getAccessSelf().then((a) => { if (!cancelled) setScope(a); }).catch(() => { if (!cancelled) setScope(null); });
+    return () => { cancelled = true; };
+  }, []);
+  const users = useMemo(() => {
+    if (!scope) return allUsers.filter((u) => u.id === String(meId));
+    if (scope.superAdmin) return allUsers;
+    const mine = new Set([String(meId), ...(scope.teamUserIds ?? []).map(String)]);
+    return allUsers.filter((u) => mine.has(u.id));
+  }, [allUsers, scope, meId]);
   const { projects } = useProjects();
   const projectScope = useProjectScope((s) => s.projectId);
 
@@ -102,42 +163,129 @@ function ReportDetail({
     load();
   }, [load]);
 
-  const [userFilter, setUserFilter] = useState("All");
-  const [projectFilter, setProjectFilter] = useState("All");
-  const [statusFilter, setStatusFilter] = useState<TaskStatus | "All">("All");
-  const [from, setFrom] = useState("");
-  const [to, setTo] = useState("");
-  const [ran, setRan] = useState(true);
-  const [saved, setSaved] = useState(false);
+  const { rows: statusRows, rowFor } = useTaskStatuses();
+  const [projectModes, setProjectModes] = useState<ProjectMode[]>([]);
+  const [projectIds, setProjectIds] = useState<string[]>([]);
+  const [userTypes, setUserTypes] = useState<UserType[]>([]);
+  const [userIds, setUserIds] = useState<string[]>([]);
+  const [statusIds, setStatusIds] = useState<string[]>([]);
+  const [date, setDate] = useState<DateTypeFilter>(EMPTY_DATE_FILTER);
+  const [activityKinds, setActivityKinds] = useState<string[]>([]);
+  const [presets, setPresets] = useState<SavedPreset[]>([]);
+  const [showPresets, setShowPresets] = useState(false);
 
-  const userName = (id: string) => users.find((u) => u.id === id)?.name ?? "Unknown";
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(PRESETS_KEY);
+      if (raw) setPresets(JSON.parse(raw) as SavedPreset[]);
+    } catch {
+      /* no saved presets */
+    }
+  }, []);
+
+  const userName = (id: string) => allUsers.find((u) => u.id === id)?.name ?? "Unknown";
   const projectName = (id: string | null) => (id ? projects.find((p) => p.id === id)?.name ?? "—" : "No project");
 
   const filtered = useMemo(() => {
     let list = tasks.filter((t) => !t.isDraft);
     // Header project dropdown scopes the whole report.
     if (projectScope !== "all") list = list.filter((t) => t.projectId === projectScope);
-    if (userFilter !== "All") list = list.filter((t) => t.assigneeId === userFilter);
-    if (projectFilter !== "All") list = list.filter((t) => t.projectId === projectFilter);
-    if (statusFilter !== "All") list = list.filter((t) => t.status === statusFilter);
-    if (from) list = list.filter((t) => t.dueDate >= from);
-    if (to) list = list.filter((t) => t.dueDate <= to);
+    // Project Wise: with / without a project, or particular projects.
+    if (projectModes.length === 1) list = list.filter((t) => (projectModes[0] === "with" ? !!t.projectId : !t.projectId));
+    if (projectIds.length) list = list.filter((t) => !!t.projectId && projectIds.includes(t.projectId));
+    // Users, read through the chosen User Type (owner / assignee / follower). No type = any role.
+    if (userIds.length) {
+      const types: UserType[] = userTypes.length ? userTypes : ["owner", "assignee", "follower"];
+      list = list.filter((t) =>
+        userIds.some(
+          (u) =>
+            (types.includes("assignee") && t.assigneeId === u) ||
+            (types.includes("owner") && t.createdBy === u) ||
+            (types.includes("follower") && t.followerIds.includes(u))
+        )
+      );
+    }
+    if (statusIds.length) list = list.filter((t) => statusIds.includes(rowFor(t).id));
+    if (dateFilterActive(date)) {
+      const to = date.mode === "on" ? date.from : date.to || date.from;
+      list = list.filter((t) =>
+        date.fields.some((f) => {
+          const d = f === "due" ? t.dueDate : f === "created" ? t.createdAt?.slice(0, 10) : t.closedAt?.slice(0, 10);
+          return !!d && d >= date.from && d <= to;
+        })
+      );
+    }
     return list;
-  }, [tasks, projectScope, userFilter, projectFilter, statusFilter, from, to]);
+    // rowFor reads statusRows.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tasks, projectScope, projectModes, projectIds, userTypes, userIds, statusIds, statusRows, date]);
+
+  function savePreset() {
+    const name = prompt("Name this report", `${report.title} – ${new Date().toLocaleDateString()}`);
+    if (!name) return;
+    const next = [
+      ...presets.filter((p) => !(p.name === name && p.report === report.id)),
+      { name, report: report.id, projectModes, projectIds, userTypes, userIds, statusIds, date, activityKinds },
+    ];
+    setPresets(next);
+    try {
+      localStorage.setItem(PRESETS_KEY, JSON.stringify(next));
+    } catch {
+      /* storage unavailable */
+    }
+  }
+  function loadPreset(p: SavedPreset) {
+    onSelect(p.report);
+    setProjectModes(p.projectModes);
+    setProjectIds(p.projectIds);
+    setUserTypes(p.userTypes);
+    setUserIds(p.userIds);
+    setStatusIds(p.statusIds);
+    setDate(p.date);
+    setActivityKinds(p.activityKinds ?? []);
+    setShowPresets(false);
+  }
+  function deletePreset(p: SavedPreset) {
+    const next = presets.filter((x) => x !== p);
+    setPresets(next);
+    try {
+      localStorage.setItem(PRESETS_KEY, JSON.stringify(next));
+    } catch {
+      /* storage unavailable */
+    }
+  }
+  function clearFilters() {
+    setProjectModes([]);
+    setProjectIds([]);
+    setUserTypes([]);
+    setUserIds([]);
+    setStatusIds([]);
+    setDate(EMPTY_DATE_FILTER);
+    setActivityKinds([]);
+  }
+  const anyFilter =
+    projectModes.length + projectIds.length + userTypes.length + userIds.length + statusIds.length + activityKinds.length > 0 ||
+    dateFilterActive(date);
 
   function download() {
     const rows = [
-      ["Code", "Task", "Project", "Assignee", "Due Date", "Priority", "Status", "Progress"],
-      ...filtered.map((t) => [
-        t.code,
-        t.title,
-        projectName(t.projectId),
-        userName(t.assigneeId),
-        t.dueDate,
-        t.priority,
-        t.status,
-        `${t.progress}%`,
-      ]),
+      ["Code", "Task", "Project", "Assignee", "Owner", "Due Date", "Closed", "Priority", "Status", "Progress", "Variance"],
+      ...filtered.map((t) => {
+        const v = varianceOf(t);
+        return [
+          t.code,
+          t.title,
+          projectName(t.projectId),
+          userName(t.assigneeId),
+          t.createdBy ? userName(t.createdBy) : "",
+          t.dueDate,
+          t.closedAt?.slice(0, 10) ?? "",
+          t.priority,
+          rowFor(t).name,
+          `${t.progress}%`,
+          v ? VARIANCE_LABEL[v.kind] : "",
+        ];
+      }),
     ];
     const csv = rows.map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\n");
     const url = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
@@ -147,6 +295,8 @@ function ReportDetail({
     a.click();
     URL.revokeObjectURL(url);
   }
+
+  const mine = presets.filter((p) => p.report === report.id);
 
   return (
     <div className="animate-fade-in space-y-4">
@@ -165,19 +315,40 @@ function ReportDetail({
             <div className="mt-1 pl-1 text-xs text-gray-400">{report.desc}</div>
           </div>
         </div>
-        <div className="flex gap-2">
+        <div className="relative flex gap-2">
           <button
-            onClick={() => {
-              setSaved(true);
-              setTimeout(() => setSaved(false), 1400);
-            }}
+            onClick={savePreset}
             className="flex items-center gap-1.5 rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-600 transition-all duration-150 hover:bg-gray-50 active:scale-95"
           >
-            <Save size={14} /> {saved ? "Saved ✓" : "Save Report"}
+            <Save size={14} /> Save Report
           </button>
-          <button className="flex items-center gap-1.5 rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-600 transition-all duration-150 hover:bg-gray-50 active:scale-95">
-            <History size={14} /> History
+          <button
+            onClick={() => setShowPresets((s) => !s)}
+            className="flex items-center gap-1.5 rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-600 transition-all duration-150 hover:bg-gray-50 active:scale-95"
+          >
+            <History size={14} /> Saved ({mine.length})
           </button>
+          {showPresets && (
+            <>
+              <div className="fixed inset-0 z-20" onClick={() => setShowPresets(false)} />
+              <div className="animate-menu-pop absolute right-0 top-11 z-30 w-72 overflow-hidden rounded-xl border border-gray-100 bg-white py-1 shadow-xl">
+                {mine.length === 0 ? (
+                  <p className="px-4 py-3 text-xs text-gray-400">No saved reports yet. Set filters and press Save Report.</p>
+                ) : (
+                  mine.map((p) => (
+                    <div key={p.name} className="flex items-center gap-2 px-3 py-1.5 hover:bg-gray-50">
+                      <button onClick={() => loadPreset(p)} className="flex-1 truncate text-left text-sm text-gray-700">
+                        {p.name}
+                      </button>
+                      <button onClick={() => deletePreset(p)} className="text-xs text-gray-400 hover:text-rose-600">
+                        Remove
+                      </button>
+                    </div>
+                  ))
+                )}
+              </div>
+            </>
+          )}
           <button
             onClick={download}
             className="flex items-center gap-1.5 rounded-lg bg-brand-accent px-3 py-2 text-sm font-medium text-white transition-all duration-150 hover:opacity-90 active:scale-95"
@@ -187,52 +358,75 @@ function ReportDetail({
         </div>
       </div>
 
-      {/* Filter bar */}
-      <div className="flex flex-wrap items-end gap-3 rounded-xl border border-gray-200 bg-white p-3">
-        <FilterSelect
-          label="Project"
-          value={projectFilter}
-          onChange={setProjectFilter}
+      {/* Filter bar — the same set Taskopad's reports take */}
+      <div className="flex flex-wrap items-center gap-2 rounded-xl border border-gray-200 bg-white p-3">
+        <Pick
+          label="Project Wise"
+          count={projectModes.length + projectIds.length}
           options={[
-            { value: "All", label: "All projects" },
-            ...projects.map((p) => ({ value: p.id, label: p.name })),
+            { value: "mode:with", label: "With Project", text: "With Project" },
+            { value: "mode:without", label: "Without Project", text: "Without Project" },
+            ...projects.map((p) => ({ value: p.id, label: p.name, text: p.name })),
           ]}
+          values={[...projectModes.map((m) => `mode:${m}`), ...projectIds]}
+          onChange={(vals) => {
+            setProjectModes(vals.filter((v) => v.startsWith("mode:")).map((v) => v.slice(5) as ProjectMode));
+            setProjectIds(vals.filter((v) => !v.startsWith("mode:")));
+          }}
         />
-        <FilterSelect
-          label="User"
-          value={userFilter}
-          onChange={setUserFilter}
+        <Pick
+          label="User Type"
+          count={userTypes.length}
+          searchable={false}
           options={[
-            { value: "All", label: "All users" },
-            ...users.map((u) => ({ value: u.id, label: u.name })),
+            { value: "owner", label: "Owner", text: "Owner" },
+            { value: "assignee", label: "Assignees", text: "Assignees" },
+            { value: "follower", label: "Followers", text: "Followers" },
           ]}
+          values={userTypes}
+          onChange={(v) => setUserTypes(v as UserType[])}
         />
-        <FilterSelect
-          label="Status"
-          value={statusFilter}
-          onChange={(v) => setStatusFilter(v as TaskStatus | "All")}
-          options={[
-            { value: "All", label: "All statuses" },
-            ...TASK_STATUSES.map((s) => ({ value: s, label: s })),
-          ]}
+        <Pick
+          label="Select User"
+          count={userIds.length}
+          options={users.map((u) => ({ value: u.id, label: u.name, text: u.name }))}
+          values={userIds}
+          onChange={setUserIds}
         />
-        <label className="block">
-          <span className="mb-1 block text-[11px] font-medium tracking-wide text-gray-400 uppercase">From</span>
-          <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="input" />
-        </label>
-        <label className="block">
-          <span className="mb-1 block text-[11px] font-medium tracking-wide text-gray-400 uppercase">To</span>
-          <input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="input" />
-        </label>
-        <button
-          onClick={() => setRan(true)}
-          className="rounded-lg bg-brand-accent px-5 py-2 text-sm font-medium text-white transition-all duration-150 hover:opacity-90 active:scale-95"
-        >
-          Search
-        </button>
+        <Pick
+          label="Select Status"
+          count={statusIds.length}
+          options={statusRows.map((r) => ({
+            value: r.id,
+            text: r.name,
+            label: (
+              <>
+                <span className="h-2 w-2 rounded-sm" style={{ backgroundColor: r.color }} />
+                {r.name}
+              </>
+            ),
+          }))}
+          values={statusIds}
+          onChange={setStatusIds}
+        />
+        {report.id === "user-activity" && (
+          <Pick
+            label="Select Activity"
+            count={activityKinds.length}
+            options={ACTIVITY_KINDS.map((k) => ({ value: k.value, label: k.label, text: k.label }))}
+            values={activityKinds}
+            onChange={setActivityKinds}
+          />
+        )}
+        <DateTypeButton value={date} onApply={setDate} />
+        {anyFilter && (
+          <button onClick={clearFilters} className="ml-auto text-xs font-medium text-gray-400 hover:text-rose-600">
+            Clear filters
+          </button>
+        )}
       </div>
 
-      {!ran || filtered.length === 0 ? (
+      {filtered.length === 0 ? (
         <div className="flex min-h-[300px] flex-col items-center justify-center rounded-xl border border-dashed border-gray-300 bg-white text-center">
           <div className="mb-3 flex h-14 w-14 items-center justify-center rounded-full bg-cyan-50 text-brand-accent">
             <BarChart3 size={24} />
@@ -254,6 +448,7 @@ function ReportDetail({
           />
           <ReportBody
             id={report.id}
+            activityKinds={activityKinds}
             tasks={filtered}
             users={users}
             userName={userName}
@@ -267,22 +462,43 @@ function ReportDetail({
   );
 }
 
-function FilterSelect({
+/** A filter button that opens a searchable multi-pick list. */
+function Pick({
   label,
-  value,
-  onChange,
+  count,
   options,
+  values,
+  onChange,
+  searchable = true,
 }: {
   label: string;
-  value: string;
-  onChange: (v: string) => void;
-  options: { value: string; label: string }[];
+  count: number;
+  options: { value: string; label: React.ReactNode; text: string }[];
+  values: string[];
+  onChange: (v: string[]) => void;
+  searchable?: boolean;
 }) {
+  const [open, setOpen] = useState(false);
   return (
-    <label className="block">
-      <span className="mb-1 block text-[11px] font-medium tracking-wide text-gray-400 uppercase">{label}</span>
-      <UiSelect value={value} onChange={onChange} options={options} className="min-w-[150px]" />
-    </label>
+    <div className="relative">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className={`rounded-lg border px-3 py-2 text-sm transition-colors ${
+          count || open ? "border-brand-accent bg-cyan-50 text-brand-accent" : "border-gray-200 bg-white text-gray-600 hover:bg-gray-50"
+        }`}
+      >
+        {label}
+        {count > 0 && ` · ${count}`}
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-20" onClick={() => setOpen(false)} />
+          <div className="animate-menu-pop absolute left-0 top-11 z-30 w-64 overflow-hidden rounded-xl border border-gray-100 bg-white shadow-xl">
+            <CheckList options={options} values={values} onChange={onChange} searchable={searchable} />
+          </div>
+        </>
+      )}
+    </div>
   );
 }
 
@@ -387,7 +603,7 @@ function ReportChart({
     );
   } else if (id === "recurring") {
     const recurring = tasks.filter((t) => t.recurrenceRule && t.recurrenceRule !== "NONE");
-    const byRule = ["CUSTOM", "WEEKLY", "MONTHLY", "QUARTERLY", "HALF_YEARLY"].map((r) => ({
+    const byRule = ["CUSTOM", "WEEKLY", "MONTHLY", "QUARTERLY", "HALF_YEARLY", "YEARLY"].map((r) => ({
       name: recurrenceLabel(r as RecurrenceRule),
       value: recurring.filter((t) => t.recurrenceRule === r).length,
     })).filter((d) => d.value > 0);
@@ -470,6 +686,7 @@ const STATUS_HEX: Record<TaskStatus, string> = {
 
 function ReportBody({
   id,
+  activityKinds,
   tasks,
   users,
   userName,
@@ -478,6 +695,7 @@ function ReportBody({
   departments,
 }: {
   id: ReportId;
+  activityKinds: string[];
   tasks: Task[];
   users: { id: string; name: string; role: string }[];
   userName: (id: string) => string;
@@ -638,13 +856,23 @@ function ReportBody({
         const done = mine.filter((t) => t.status === "Completed").length;
         const overdue = mine.filter((t) => isOverdue(t)).length;
         const rate = mine.length ? Math.round((done / mine.length) * 100) : 0;
-        return { ...u, total: mine.length, done, overdue, rate };
+        const v = mine.map(varianceOf);
+        return {
+          ...u,
+          total: mine.length,
+          done,
+          overdue,
+          rate,
+          ontrack: v.filter((x) => x?.kind === "ontrack").length,
+          before: v.filter((x) => x?.kind === "before").length,
+          delayed: v.filter((x) => x?.kind === "delayed").length,
+        };
       })
       .filter((r) => r.total > 0)
       .sort((a, b) => b.rate - a.rate);
 
     return (
-      <Table head={["User", "Total", "Completed", "Overdue", "Completion rate"]}>
+      <Table head={["User", "Total", "Completed", "On Track", "Before Time", "Delayed", "Overdue", "Completion rate"]}>
         {rows.map((r) => (
           <tr key={r.id} className="border-b border-gray-50 last:border-b-0 even:bg-gray-50/40">
             <td className="px-4 py-2.5">
@@ -658,6 +886,9 @@ function ReportBody({
             </td>
             <td className="px-4 py-2.5 text-gray-600">{r.total}</td>
             <td className="px-4 py-2.5 text-green-600">{r.done}</td>
+            <td className="px-4 py-2.5 text-emerald-600">{r.ontrack}</td>
+            <td className="px-4 py-2.5 text-amber-600">{r.before}</td>
+            <td className={`px-4 py-2.5 ${r.delayed > 0 ? "text-rose-600" : "text-gray-400"}`}>{r.delayed}</td>
             <td className={`px-4 py-2.5 ${r.overdue > 0 ? "text-rose-600" : "text-gray-400"}`}>{r.overdue}</td>
             <td className="px-4 py-2.5">
               <div className="flex items-center gap-2">
@@ -672,29 +903,15 @@ function ReportBody({
   }
 
   if (id === "status-wise") {
-    return (
-      <div className="space-y-4">
-        <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
-          {TASK_STATUSES.map((s) => {
-            const n = tasks.filter((t) => t.status === s).length;
-            return (
-              <div key={s} className="rounded-xl border border-gray-200 bg-white p-4">
-                <StatusChip status={s} />
-                <div className="mt-2 text-2xl font-semibold text-gray-800">{n}</div>
-              </div>
-            );
-          })}
-        </div>
-        <TaskTable tasks={tasks} userName={userName} projectName={projectName} />
-      </div>
-    );
+    return <StatusWise tasks={tasks} userName={userName} projectName={projectName} />;
   }
 
   if (id === "user-activity") {
     const rows = tasks
       .flatMap((t) => t.activity.map((a) => ({ ...a, task: t.title, code: t.code })))
+      .filter((a) => !activityKinds.length || activityKinds.includes(activityKind(a.text)))
       .sort((a, b) => b.at.localeCompare(a.at))
-      .slice(0, 40);
+      .slice(0, 200);
     return (
       <Table head={["User", "Activity", "Task", "Date"]}>
         {rows.map((a) => (
@@ -719,8 +936,34 @@ function ReportBody({
       .map((p) => ({ ...p, list: tasks.filter((t) => t.projectId === p.id) }))
       .filter((g) => g.list.length > 0);
     const orphan = tasks.filter((t) => !t.projectId);
+    const done = tasks.filter((t) => t.status === "Completed").length;
     return (
       <div className="space-y-4">
+        <div className="grid gap-3 sm:grid-cols-3">
+          <SummaryTile label="Total Projects" value={groups.length} tone="bg-cyan-50 text-brand-accent" />
+          <SummaryTile label="Tasks Incomplete" value={tasks.length - done} tone="bg-rose-50 text-rose-600" />
+          <SummaryTile label="Tasks Completed" value={done} tone="bg-emerald-50 text-emerald-600" />
+        </div>
+        <Table head={["Project", "Progress", "Tasks", "Completed", "Overdue"]}>
+          {groups.map((g) => {
+            const d = g.list.filter((t) => t.status === "Completed").length;
+            const pct = g.list.length ? Math.round((d / g.list.length) * 100) : 0;
+            return (
+              <tr key={g.id} className="border-b border-gray-50 last:border-b-0 even:bg-gray-50/40">
+                <td className="px-4 py-2.5 font-medium text-gray-800">{g.name}</td>
+                <td className="px-4 py-2.5">
+                  <div className="flex items-center gap-2">
+                    <ProgressBar value={pct} className="w-28" />
+                    <span className="text-xs text-gray-500">{pct}%</span>
+                  </div>
+                </td>
+                <td className="px-4 py-2.5 text-gray-600">{g.list.length}</td>
+                <td className="px-4 py-2.5 text-green-600">{d}</td>
+                <td className="px-4 py-2.5 text-rose-600">{g.list.filter((t) => isOverdue(t)).length}</td>
+              </tr>
+            );
+          })}
+        </Table>
         {groups.map((g) => (
           <GroupCard key={g.id} title={g.name} count={g.list.length}>
             <TaskTable tasks={g.list} userName={userName} projectName={projectName} hideProject />
@@ -750,29 +993,7 @@ function ReportBody({
     );
   }
 
-  // daily
-  const today = new Date();
-  const iso = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
-  const due = tasks.filter((t) => t.dueDate === iso);
-  const overdue = tasks.filter((t) => isOverdue(t));
-  return (
-    <div className="space-y-4">
-      <GroupCard title="Due today" count={due.length}>
-        {due.length === 0 ? (
-          <p className="py-6 text-center text-sm text-gray-400">Nothing due today.</p>
-        ) : (
-          <TaskTable tasks={due} userName={userName} projectName={projectName} />
-        )}
-      </GroupCard>
-      <GroupCard title="Overdue" count={overdue.length}>
-        {overdue.length === 0 ? (
-          <p className="py-6 text-center text-sm text-gray-400">Nothing overdue. </p>
-        ) : (
-          <TaskTable tasks={overdue} userName={userName} projectName={projectName} />
-        )}
-      </GroupCard>
-    </div>
-  );
+  return <DailyReport tasks={tasks} users={users} userName={userName} projectName={projectName} />;
 }
 
 function GroupCard({
@@ -859,12 +1080,190 @@ function TaskTable({
                 <PriorityChip priority={t.priority} />
               </td>
               <td className="px-4 py-2">
-                <StatusChip status={t.status} />
+                <TaskStatusChip task={t} />
               </td>
             </tr>
           ))}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+function SummaryTile({ label, value, tone }: { label: string; value: number; tone: string }) {
+  return (
+    <div className="flex items-center gap-4 rounded-xl border border-gray-200 bg-white p-4">
+      <div className={`flex h-14 w-14 items-center justify-center rounded-full text-xl font-semibold ${tone}`}>{value}</div>
+      <div className="text-sm font-medium text-gray-600">{label}</div>
+    </div>
+  );
+}
+
+/** Status Wise — one tile per company status, then the tasks. */
+function StatusWise({
+  tasks,
+  userName,
+  projectName,
+}: {
+  tasks: Task[];
+  userName: (id: string) => string;
+  projectName: (id: string | null) => string;
+}) {
+  const { rows, rowFor } = useTaskStatuses();
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-6">
+        {rows
+          .filter((r) => r.active)
+          .map((r) => (
+            <div key={r.id} className="rounded-xl border border-gray-200 bg-white p-4" style={{ borderTop: `3px solid ${r.color}` }}>
+              <StatusRowChip row={r} />
+              <div className="mt-2 text-2xl font-semibold text-gray-800">{tasks.filter((t) => rowFor(t).id === r.id).length}</div>
+            </div>
+          ))}
+      </div>
+      <TaskTable tasks={tasks} userName={userName} projectName={projectName} />
+    </div>
+  );
+}
+
+type DailyTab = "pending" | "completed" | "morning" | "evening";
+
+/**
+ * Daily Report — Taskopad's four tabs, one row per member:
+ *  - Today's Pending: what each person still has open (today / overdue / upcoming).
+ *  - Today's Completed: what each person closed today.
+ *  - Morning Report: the day's plan — everything due today, whatever its state.
+ *  - Evening Report: how the day went — due today done vs left, plus anything else closed today.
+ */
+function DailyReport({
+  tasks,
+  users,
+  userName,
+  projectName,
+}: {
+  tasks: Task[];
+  users: { id: string; name: string; role: string }[];
+  userName: (id: string) => string;
+  projectName: (id: string | null) => string;
+}) {
+  const [tab, setTab] = useState<DailyTab>("pending");
+  const [open, setOpen] = useState<string | null>(null);
+  const today = todayIST();
+  const isOpen = (t: Task) => t.status !== "Completed";
+  const closedToday = (t: Task) => !!t.closedAt && t.closedAt.slice(0, 10) === today;
+
+  const rows = users
+    .map((u) => {
+      const mine = tasks.filter((t) => t.assigneeId === u.id);
+      const dueToday = mine.filter((t) => t.dueDate === today);
+      const openToday = dueToday.filter(isOpen);
+      const overdue = mine.filter((t) => isOpen(t) && !!t.dueDate && t.dueDate < today);
+      const upcoming = mine.filter((t) => isOpen(t) && !!t.dueDate && t.dueDate > today);
+      const doneToday = mine.filter(closedToday);
+      const doneDueToday = dueToday.filter((t) => !isOpen(t));
+      let cells: { label: string; value: number }[] = [];
+      let list: Task[] = [];
+      if (tab === "pending") {
+        cells = [
+          { label: "Today", value: openToday.length },
+          { label: "Overdue", value: overdue.length },
+          { label: "Upcoming", value: upcoming.length },
+          { label: "Total", value: openToday.length + overdue.length + upcoming.length },
+        ];
+        list = [...overdue, ...openToday, ...upcoming];
+      } else if (tab === "completed") {
+        cells = [
+          { label: "Completed today", value: doneToday.length },
+          { label: "Of which were due today", value: doneToday.filter((t) => t.dueDate === today).length },
+          { label: "Late", value: doneToday.filter((t) => !!t.dueDate && t.dueDate < today).length },
+          { label: "Early", value: doneToday.filter((t) => !!t.dueDate && t.dueDate > today).length },
+        ];
+        list = doneToday;
+      } else if (tab === "morning") {
+        cells = [
+          { label: "Planned today", value: dueToday.length },
+          { label: "Carried over (overdue)", value: overdue.length },
+          { label: "High priority", value: [...dueToday, ...overdue].filter((t) => t.priority === "High").length },
+          { label: "Total to do", value: dueToday.length + overdue.length },
+        ];
+        list = [...overdue, ...dueToday];
+      } else {
+        cells = [
+          { label: "Due today", value: dueToday.length },
+          { label: "Done", value: doneDueToday.length },
+          { label: "Left", value: openToday.length },
+          { label: "Closed today (all)", value: doneToday.length },
+        ];
+        list = [...openToday, ...doneToday];
+      }
+      return { user: u, cells, list };
+    })
+    .filter((r) => r.cells.some((c) => c.value > 0));
+
+  const TABS: { key: DailyTab; label: string }[] = [
+    { key: "pending", label: "Today's Pending Tasks Report" },
+    { key: "completed", label: "Today's Completed Tasks Report" },
+    { key: "morning", label: "Morning Reports" },
+    { key: "evening", label: "Evening Reports" },
+  ];
+
+  return (
+    <div className="overflow-hidden rounded-xl border border-gray-200 bg-white">
+      <div className="flex flex-wrap gap-5 border-b border-gray-100 px-4">
+        {TABS.map((t) => (
+          <button
+            key={t.key}
+            onClick={() => setTab(t.key)}
+            className={`-mb-px border-b-2 py-3 text-sm font-medium ${tab === t.key ? "border-brand-accent text-brand-accent" : "border-transparent text-gray-500 hover:text-gray-800"}`}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+      {rows.length === 0 ? (
+        <p className="py-12 text-center text-sm text-gray-400">Nothing for this report today.</p>
+      ) : (
+        <div className="divide-y divide-gray-100">
+          <div className="grid grid-cols-[1.6fr_repeat(4,1fr)] gap-2 bg-gray-50 px-4 py-2 text-xs font-medium text-gray-500">
+            <span>Member Name</span>
+            {rows[0].cells.map((c) => (
+              <span key={c.label} className="text-center">
+                {c.label}
+              </span>
+            ))}
+          </div>
+          {rows.map((r) => (
+            <div key={r.user.id}>
+              <button
+                onClick={() => setOpen(open === r.user.id ? null : r.user.id)}
+                className="grid w-full grid-cols-[1.6fr_repeat(4,1fr)] items-center gap-2 px-4 py-3 text-left hover:bg-gray-50"
+              >
+                <span className="flex items-center gap-2 text-sm font-medium text-gray-800">
+                  <UserAvatar id={r.user.id} name={r.user.name} size={24} /> {r.user.name}
+                </span>
+                {r.cells.map((c) => (
+                  <span key={c.label} className="text-center text-sm text-gray-700">
+                    {c.value}
+                  </span>
+                ))}
+              </button>
+              {open === r.user.id && (
+                <div className="border-t border-gray-100 bg-gray-50/40 px-2 pb-3">
+                  <div className="px-2 py-2 text-center text-xs font-medium text-brand-accent underline">
+                    {TABS.find((t) => t.key === tab)?.label}: {userName(r.user.id)}
+                  </div>
+                  {r.list.length ? (
+                    <TaskTable tasks={r.list} userName={userName} projectName={projectName} />
+                  ) : (
+                    <p className="py-4 text-center text-xs text-gray-400">No tasks.</p>
+                  )}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

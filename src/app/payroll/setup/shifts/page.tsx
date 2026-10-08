@@ -12,6 +12,23 @@ import type { ShiftResponse } from "@/lib/api";
 import { ArrowLeft, Clock, Pencil, Plus, Trash2 } from "lucide-react";
 
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const WEEKS = [1, 2, 3, 4, 5];
+type FineMode = "NONE" | "FIXED" | "MULTIPLIER";
+
+/** "6:2,4;0:1" → {6: [2,4], 0: [1]} — alternate weekly offs by week of the month. */
+function parseAlt(text: string | undefined): Record<number, number[]> {
+  const out: Record<number, number[]> = {};
+  for (const part of (text ?? "").split(";")) {
+    const [d, w] = part.split(":");
+    if (d === undefined || !w) continue;
+    out[Number(d)] = w.split(",").map(Number).filter((x) => x >= 1 && x <= 5);
+  }
+  return out;
+}
+function encodeAlt(map: Record<number, number[]>): string {
+  return Object.entries(map).filter(([, w]) => w.length).map(([d, w]) => `${d}:${[...w].sort().join(",")}`).join(";");
+}
+const ordinal = (n: number) => ["", "1st", "2nd", "3rd", "4th", "5th"][n];
 
 export default function ShiftsPage() {
   const { shifts, loading, error, create, update, remove } = useShifts();
@@ -100,7 +117,13 @@ export default function ShiftsPage() {
                   ) : (
                     <span className="text-[11px] text-gray-400">No weekly-off</span>
                   )}
+                  {Object.entries(parseAlt(s.alternateOffs)).map(([d, w]) => (
+                    <span key={`alt-${d}`} className="rounded-md bg-rose-50 px-1.5 py-0.5 text-[11px] font-medium text-rose-600">{w.map(ordinal).join(" & ")} {DAYS[Number(d)]} off</span>
+                  ))}
                   <span className="rounded-md bg-gray-100 px-1.5 py-0.5 text-[11px] text-gray-500">{s.graceMinutes}m grace</span>
+                  {s.lateFineMode && s.lateFineMode !== "NONE" && <span className="rounded-md bg-amber-50 px-1.5 py-0.5 text-[11px] font-medium text-amber-700">Late fine</span>}
+                  {s.earlyFineMode && s.earlyFineMode !== "NONE" && <span className="rounded-md bg-amber-50 px-1.5 py-0.5 text-[11px] font-medium text-amber-700">Early-exit fine</span>}
+                  {Number(s.otMultiplier ?? 0) > 0 && <span className="rounded-md bg-emerald-50 px-1.5 py-0.5 text-[11px] font-medium text-emerald-700">OT {Number(s.otMultiplier)}x</span>}
                   {s.overtimeEnabled && <span className="rounded-md bg-emerald-50 px-1.5 py-0.5 text-[11px] font-medium text-emerald-700">OT on</span>}
                 </div>
               </div>
@@ -118,6 +141,26 @@ export default function ShiftsPage() {
         />
       )}
     </PayrollShell>
+  );
+}
+
+function FineRule({ label, mode, value, onMode, onValue }: {
+  label: string; mode: FineMode; value: number; onMode: (m: FineMode) => void; onValue: (v: number) => void;
+}) {
+  return (
+    <div className="rounded-lg border border-gray-200 p-2.5">
+      <div className="mb-1.5 text-xs font-medium text-gray-700">{label}</div>
+      <div className="flex gap-2">
+        <select value={mode} onChange={(e) => onMode(e.target.value as FineMode)} className="input flex-1">
+          <option value="NONE">No fine</option>
+          <option value="FIXED">Fixed amount per day (₹)</option>
+          <option value="MULTIPLIER">Hours × hourly salary × multiplier</option>
+        </select>
+        {mode !== "NONE" && (
+          <input type="number" min={0} step={mode === "MULTIPLIER" ? 0.5 : 10} value={value} onChange={(e) => onValue(Number(e.target.value))} className="input w-24" placeholder={mode === "FIXED" ? "₹" : "1"} />
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -140,6 +183,12 @@ function ShiftDrawer({
   const [halfDayHours, setHalfDayHours] = useState(existing?.halfDayHours ?? 4);
   const [fullDayHours, setFullDayHours] = useState(existing?.fullDayHours ?? 8);
   const [overtimeEnabled, setOvertimeEnabled] = useState(existing?.overtimeEnabled ?? true);
+  const [alt, setAlt] = useState<Record<number, number[]>>(() => parseAlt(existing?.alternateOffs));
+  const [lateMode, setLateMode] = useState<FineMode>(existing?.lateFineMode ?? "NONE");
+  const [lateValue, setLateValue] = useState(Number(existing?.lateFineValue ?? 0));
+  const [earlyMode, setEarlyMode] = useState<FineMode>(existing?.earlyFineMode ?? "NONE");
+  const [earlyValue, setEarlyValue] = useState(Number(existing?.earlyFineValue ?? 0));
+  const [otMultiplier, setOtMultiplier] = useState(Number(existing?.otMultiplier ?? 0));
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -159,6 +208,12 @@ function ShiftDrawer({
       halfDayHours: Number(halfDayHours) || 0,
       fullDayHours: Number(fullDayHours) || 0,
       overtimeEnabled,
+      alternateOffs: encodeAlt(alt),
+      lateFineMode: lateMode,
+      lateFineValue: Number(lateValue) || 0,
+      earlyFineMode: earlyMode,
+      earlyFineValue: Number(earlyValue) || 0,
+      otMultiplier: overtimeEnabled ? Number(otMultiplier) || 0 : 0,
     };
     try {
       if (existing) await onUpdate(existing.id, body);
@@ -220,6 +275,53 @@ function ShiftDrawer({
           </button>
           Pay hours beyond full-day as overtime
         </label>
+        {overtimeEnabled && (
+          <DrawerField label="Overtime pay">
+            <select value={otMultiplier} onChange={(e) => setOtMultiplier(Number(e.target.value))} className="input">
+              <option value={0}>Count overtime as extra days (current)</option>
+              <option value={1}>1x hourly salary</option>
+              <option value={1.5}>1.5x hourly salary</option>
+              <option value={2}>2x hourly salary</option>
+            </select>
+          </DrawerField>
+        )}
+
+        <DrawerField group label="Alternate weekly offs (by week of the month)">
+          <div className="overflow-hidden rounded-lg border border-gray-200">
+            <table className="w-full text-xs">
+              <thead><tr className="bg-gray-50 text-gray-500"><th className="px-2 py-1.5 text-left font-medium">Day</th>{WEEKS.map((w) => <th key={w} className="px-1 py-1.5 font-medium">{ordinal(w)}</th>)}</tr></thead>
+              <tbody>
+                {DAYS.map((d, i) => (
+                  <tr key={d} className="border-t border-gray-100">
+                    <td className="px-2 py-1 text-gray-700">{d}{weeklyOffs.includes(i) && <span className="ml-1 text-[10px] text-gray-400">(every week)</span>}</td>
+                    {WEEKS.map((w) => (
+                      <td key={w} className="px-1 py-1 text-center">
+                        <input
+                          type="checkbox"
+                          disabled={weeklyOffs.includes(i)}
+                          checked={(alt[i] ?? []).includes(w)}
+                          onChange={() => setAlt((a) => {
+                            const cur = a[i] ?? [];
+                            return { ...a, [i]: cur.includes(w) ? cur.filter((x) => x !== w) : [...cur, w] };
+                          })}
+                        />
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p className="mt-1 text-[11px] text-gray-400">e.g. tick Sat · 2nd and 4th for &ldquo;2nd &amp; 4th Saturday off&rdquo;.</p>
+        </DrawerField>
+
+        <DrawerField group label="Automation rules (fines)">
+          <div className="space-y-2">
+            <FineRule label="Late entry (after shift start + grace)" mode={lateMode} value={lateValue} onMode={setLateMode} onValue={setLateValue} />
+            <FineRule label="Early exit (before shift end)" mode={earlyMode} value={earlyValue} onMode={setEarlyMode} onValue={setEarlyValue} />
+          </div>
+          <p className="mt-1 text-[11px] text-gray-400">Fines are raised automatically from punch times and show on the attendance board; an admin can edit them per day.</p>
+        </DrawerField>
       </div>
     </Drawer>
   );

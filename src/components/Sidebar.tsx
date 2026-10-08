@@ -32,7 +32,7 @@ import { NAV_ITEMS, NAV_BREAK_AFTER, NAV_MODULE } from "@/lib/nav";
 import { useAppStore } from "@/lib/store";
 import { useAuthStore } from "@/lib/authStore";
 import { useUiStore } from "@/lib/uiStore";
-import { useTaskNotifications } from "@/lib/taskNotifications";
+import { useNotifications } from "@/lib/notifications";
 import { useApprovalInboxCount } from "@/lib/approvals";
 import { projectAvatarColor, projectInitials } from "@/lib/projectHelpers";
 import { CompanySwitcher } from "@/components/CompanySwitcher";
@@ -86,7 +86,7 @@ export function Sidebar() {
       })
     : NAV_ITEMS;
   // Unread task-notification count, surfaced as a live badge on the Taskopad nav item.
-  const { unread: taskUnread } = useTaskNotifications();
+  const { unread: taskUnread } = useNotifications();
   // Requests waiting on this user, across every approval chain.
   const approvalCount = useApprovalInboxCount((s) => s.count);
   const refreshApprovals = useApprovalInboxCount((s) => s.refresh);

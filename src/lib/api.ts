@@ -338,6 +338,14 @@ export interface TeamMemberResponse {
   staffType: "OFFICE" | "SITE" | null;
 }
 
+/**
+ * Everyone Payroll works with (same shape as getUsers, never paged). Payroll screens use this, not
+ * getUsers — that one needs User Management access and pages at a few hundred people.
+ */
+export function getPayrollPeople() {
+  return request<UserPageResponse>("/api/v1/payroll/people");
+}
+
 export function getTeam() {
   return request<TeamMemberResponse[]>("/api/v1/team");
 }
@@ -618,6 +626,15 @@ export interface ShiftResponse {
   halfDayHours: number;
   fullDayHours: number;
   overtimeEnabled: boolean;
+  /** Alternate weekly offs by week of month — "6:2,4" = 2nd & 4th Saturday; ";" separates days. */
+  alternateOffs?: string;
+  /** Late-entry fine: NONE, FIXED (₹ per late day) or MULTIPLIER (late hours × hourly rate × value). */
+  lateFineMode?: "NONE" | "FIXED" | "MULTIPLIER";
+  lateFineValue?: number;
+  earlyFineMode?: "NONE" | "FIXED" | "MULTIPLIER";
+  earlyFineValue?: number;
+  /** OT pay = hours × hourly rate × this. 0 = OT converts into extra days (legacy). */
+  otMultiplier?: number;
 }
 export type ShiftRequest = Omit<ShiftResponse, "id">;
 
@@ -634,17 +651,39 @@ export interface HolidayPolicyResponse {
 }
 export type HolidayPolicyRequest = Omit<HolidayPolicyResponse, "id">;
 
+export type LeaveAccrual = "ALL_AT_ONCE" | "MONTHLY" | "QUARTERLY" | "HALF_YEARLY";
 export interface LeaveTypeResponse {
   name: string;
   annualCount: number;
-  accrual: "ALL_AT_ONCE" | "MONTHLY";
+  accrual: LeaveAccrual;
   paid: boolean;
+  // ---- Rules (PagarBook Leave Configuration). Optional so older callers keep the defaults. ----
+  halfDayAllowed?: boolean;
+  /** Balance never grows above this; null = no cap. */
+  maxBalance?: number | null;
+  /** Unused balance moves to the next cycle (up to the cap). */
+  carryForward?: boolean;
+  /** How far back / ahead a leave may be applied for, in days; null = any. */
+  pastDaysLimit?: number | null;
+  futureDaysLimit?: number | null;
+  minNoticeDays?: number | null;
+  /** May staff on probation use it? */
+  probationAllowed?: boolean;
+  /** Days after joining before it can be used. */
+  waitingDays?: number | null;
+  /** Leave earning: `earnCount` days for every `earnAfterDays` days present. */
+  earnAfterDays?: number | null;
+  earnCount?: number | null;
+  /** Unused balance paid out at exit. */
+  encashable?: boolean;
 }
 export interface LeavePolicyResponse {
   id: number;
   name: string;
   cycle: "YEARLY" | "MONTHLY";
   types: LeaveTypeResponse[];
+  /** Weekly offs / holidays inside a leave count as leave too. */
+  sandwich?: boolean;
 }
 export type LeavePolicyRequest = Omit<LeavePolicyResponse, "id">;
 
@@ -681,8 +720,48 @@ export interface PayrollProfileResponse {
   shiftId: number | null;
   holidayPolicyId: number | null;
   leavePolicyId: number | null;
+  /** PagarBook-style staff details. Omit (or null) to leave what is stored untouched. */
+  details?: StaffDetailsApi | null;
 }
 export type PayrollProfileRequest = PayrollProfileResponse;
+
+export interface StaffDetailsApi {
+  staffCode: string | null;
+  reportingManagerId: number | null;
+  probationDays: number | null;
+  uan: string | null;
+  pfNumber: string | null;
+  esiNumber: string | null;
+  upiId: string | null;
+  accountHolder: string | null;
+  gender: string | null;
+  dateOfBirth: string | null;
+  bloodGroup: string | null;
+  maritalStatus: string | null;
+  emergencyContact: string | null;
+  fatherName: string | null;
+  currentAddress: string | null;
+  permanentAddress: string | null;
+  /** Whether the member sees their own payslips / payments in self-service. */
+  salaryAccess: boolean | null;
+  /** ACTIVE or DEACTIVATED — deactivated staff are left out of new runs. */
+  staffStatus: "ACTIVE" | "DEACTIVATED" | null;
+  /** Opening leave balances "type|days;…". */
+  openingLeave: string | null;
+  /** JSON object {fieldId: value} of the org's custom staff fields. Omit to leave untouched. */
+  customFields?: string | null;
+  taxProfileId?: string | null;
+  taxRegime?: "OLD" | "NEW" | null;
+  /** TDS deducted every month. */
+  monthlyTds?: number | null;
+  /** Read-only — set through exitStaff(). */
+  exitDate?: string | null;
+  exitReason?: string | null;
+}
+
+export function setStaffStatus(userIds: number[], status: "ACTIVE" | "DEACTIVATED") {
+  return request<{ updated: number }>("/api/v1/payroll/profiles/status", { method: "POST", body: { userIds, status } });
+}
 
 /** Org-wide default salary components (delimited text; null when never set up). */
 export interface SalaryTemplateApi {
@@ -749,7 +828,8 @@ export function deletePayrollProfile(userId: number) {
 }
 
 // ---- Payroll: attendance (real backend, replaces the localStorage attendanceOverrides) ----
-export type AttendanceCodeApi = "P" | "A" | "HD" | "PL" | "WO" | "NM";
+/** OD on duty · H holiday · OH optional holiday · L unpaid leave, on top of the original six. */
+export type AttendanceCodeApi = "P" | "A" | "HD" | "PL" | "WO" | "NM" | "OD" | "H" | "OH" | "L";
 
 export interface AttendanceApiResponse {
   /** Hours the punch pair came to, derived against the member's shift. Null = never punched out. */
@@ -779,6 +859,21 @@ export interface AttendanceApiResponse {
    * in and out for less than the half-day mark) its hours ÷ the shift's full day.
    */
   payableDays?: number | null;
+  note?: string | null;
+  /** Half day: 1 = first half worked, 2 = second half worked. */
+  halfDaySession?: number | null;
+  /** What the other half of a half day was: UNPAID, OTHER or a paid leave type's name. */
+  halfDayLeave?: string | null;
+  otAmount?: number;
+  /** "kind|hours|rateType|value|amount;…" — kind AFTER / BEFORE / WEEKLY_OFF. */
+  otDetail?: string | null;
+  fineAmount?: number;
+  /** "kind|hours|rateType|value|amount;…" — kind LATE / EARLY / BREAK. */
+  fineDetail?: string | null;
+  /** PENDING / APPROVED / REJECTED for a punch made outside every site; null otherwise. */
+  punchStatus?: "PENDING" | "APPROVED" | "REJECTED" | null;
+  /** Site photos taken at the punches (thumbnails). Wide date ranges leave the selfies out. */
+  sitePhotos?: SitePhotoMetaApi[];
 }
 
 export interface PunchRequestBody {
@@ -788,8 +883,23 @@ export interface PunchRequestBody {
   faceScore: number | null;
   projectId?: number | null;
   photo?: string | null;
-  /** Back-camera photo of the site — compulsory on punch-in for Site staff. */
+  /** Legacy single back-camera site photo (older clients). */
   backPhoto?: string | null;
+  /** Site photos for this punch — camera or gallery, up to 5; full JPEG + small thumbnail. */
+  sitePhotos?: { photo: string; thumb: string }[];
+}
+
+/** A site photo as lists carry it — the thumbnail; fetch the full one with getSitePhoto. */
+export interface SitePhotoMetaApi {
+  id: number;
+  direction: "IN" | "OUT";
+  thumb: string | null;
+  takenAt: string | null;
+}
+export function getSitePhoto(id: number) {
+  return request<{ id: number; userId: number; date: string; direction: "IN" | "OUT"; photo: string; takenAt: string | null }>(
+    `/api/v1/payroll/attendance/site-photos/${id}`,
+  );
 }
 
 // ---- Payroll: face enrolment (self-service, for the punch page) ----
@@ -817,8 +927,19 @@ export interface LocationApi {
   memberIds: number[];
   projectId: number | null;
   projectName: string | null;
+  /** A punch outside every site goes for approval instead of being refused. */
+  approvalRequired?: boolean;
 }
-export type LocationRequestApi = { name: string; points: GeoPointApi[]; memberIds: number[]; projectId: number | null };
+export type LocationRequestApi = {
+  name: string; points: GeoPointApi[]; memberIds: number[]; projectId: number | null; approvalRequired?: boolean;
+};
+/** Punches made outside every site, waiting for an admin. */
+export function getPendingPunches() {
+  return request<AttendanceApiResponse[]>("/api/v1/payroll/attendance/pending-punches");
+}
+export function decidePunch(userId: number, date: string, approve: boolean) {
+  return request<AttendanceApiResponse>("/api/v1/payroll/attendance/punch-decision", { method: "POST", body: { userId, date, approve } });
+}
 
 export function getLocations() {
   return request<LocationApi[]>("/api/v1/payroll/locations");
@@ -849,6 +970,22 @@ export interface AttendanceEditRequestBody {
   overtimeHours?: number;
   fineHours?: number;
   projectId?: number | null;
+  note?: string;
+  halfDaySession?: number;
+  halfDayLeave?: string;
+  otAmount?: number;
+  otDetail?: string;
+  fineAmount?: number;
+  fineDetail?: string;
+}
+
+export interface AttendanceLogApi {
+  id: number;
+  userId: number;
+  date: string;
+  action: string;
+  actorName: string | null;
+  at: string | null;
 }
 
 export function punchAttendance(body: PunchRequestBody) {
@@ -868,6 +1005,20 @@ export function getProjectAttendance(projectId: number, from: string, to: string
 }
 export function editAttendance(body: AttendanceEditRequestBody) {
   return request<AttendanceApiResponse>("/api/v1/payroll/attendance/edit", { method: "POST", body });
+}
+/** Mark many rows in one round trip (bulk mark, XLSX import). */
+export function bulkEditAttendance(rows: AttendanceEditRequestBody[]) {
+  return request<AttendanceApiResponse[]>("/api/v1/payroll/attendance/bulk", { method: "POST", body: { rows } });
+}
+export function getAttendanceLogs(userId: number, date: string) {
+  return request<AttendanceLogApi[]>(`/api/v1/payroll/attendance/logs?userId=${userId}&date=${date}`);
+}
+export function getAttendanceLogsBetween(from: string, to: string) {
+  return request<AttendanceLogApi[]>(`/api/v1/payroll/attendance/logs?from=${from}&to=${to}`);
+}
+/** One hour of a member's pay on a date — prices fine and overtime lines. */
+export function getHourlyRate(userId: number, date: string) {
+  return request<{ hourlyRate: number }>(`/api/v1/payroll/attendance/hourly-rate?userId=${userId}&date=${date}`);
 }
 
 // ---- Payroll: leave ----
@@ -892,6 +1043,9 @@ export interface LeaveRequestApi {
   approval: ApprovalState | null;
   /** True when the signed-in user can decide this request right now. Drives the action buttons. */
   canActNow: boolean;
+  halfDay?: boolean;
+  /** 1 = first half, 2 = second half. */
+  halfSession?: number | null;
 }
 
 // ---- Multi-level approval framework (user-management-service, com.hitech.erp.approval) ----
@@ -1007,6 +1161,10 @@ export interface LeaveBalanceApi {
   taken: number;
   remaining: number;
   paid: boolean;
+  /** Accrued so far + earned + opening + carried forward (capped). */
+  entitled?: number;
+  earned?: number;
+  halfDayAllowed?: boolean;
 }
 
 export function myLeave() {
@@ -1028,7 +1186,9 @@ export function pendingLeave() {
 export function allLeave() {
   return request<LeaveRequestApi[]>("/api/v1/payroll/leave/all");
 }
-export function applyLeave(body: { leaveTypeName: string; fromDate: string; toDate: string; reason?: string }) {
+export function applyLeave(body: {
+  leaveTypeName: string; fromDate: string; toDate: string; reason?: string; halfDay?: boolean; halfSession?: number;
+}) {
   return request<LeaveRequestApi>("/api/v1/payroll/leave/apply", { method: "POST", body });
 }
 export function decideLeave(id: number, body: { action: "APPROVE" | "REJECT"; note?: string }) {
@@ -1053,8 +1213,14 @@ export interface LoanApi {
   startMonth: string;
   emi: number;
   outstanding: number;
+  /** ACTIVE, PAUSED, CLOSED or WRITTEN_OFF — only ACTIVE loans deduct an EMI. */
+  status?: "ACTIVE" | "PAUSED" | "CLOSED" | "WRITTEN_OFF";
 }
-export type LoanRequestApi = Omit<LoanApi, "id" | "memberName">;
+export type LoanRequestApi = Omit<LoanApi, "id" | "memberName" | "status">;
+
+export function loanActionApi(id: number, action: "PAUSE" | "RESUME" | "CLOSE" | "WRITE_OFF") {
+  return request<LoanApi>(`/api/v1/payroll/loans/${id}/action`, { method: "POST", body: { action } });
+}
 
 export function getLoansApi() {
   return request<LoanApi[]>("/api/v1/payroll/loans");
@@ -1089,6 +1255,8 @@ export interface ReimbursementApi {
   approverId: number | null;
   approverName: string | null;
   status: ReimbStatus;
+  /** The cycle (yyyy-MM) whose salary paid it; null when unpaid or paid on its own. */
+  paidMonth?: string | null;
 }
 export interface ReimbursementCreateBody {
   userId?: number | null;
@@ -1132,6 +1300,35 @@ export interface PayslipApi {
   payableDays: number;
   totalDays: number;
   month: string | null;
+  /** Overtime pay — part of gross. */
+  otAmount?: number;
+  /** Fines — deducted. */
+  fineAmount?: number;
+  /** One-off earnings (allowance, bonus) — part of gross. */
+  variableEarnings?: number;
+  variableDeductions?: number;
+  /** Advance salary paid in the month, recovered here. */
+  advanceDeduction?: number;
+  /** Piece-rate work — part of gross. */
+  workAmount?: number;
+  earningsDetail?: string | null;
+  lopDays?: number;
+  lopOverride?: number | null;
+  lopReason?: string | null;
+  /** HOLD (pay later) or STOP (not paid this cycle). */
+  holdStatus?: "HOLD" | "STOP" | null;
+  holdReason?: string | null;
+  payStatus?: "UNPAID" | "PAID";
+  paidAmount?: number;
+  paidAt?: string | null;
+  /** Income tax deducted at source. */
+  tds?: number;
+  /** Leave in the month: paid (PL + leave half-days), unpaid (L), and approved leave by type. */
+  paidLeaveDays?: number;
+  unpaidLeaveDays?: number;
+  leaveDetail?: string | null;
+  /** The expense claims this slip reimbursed — "Travel ₹500 (CLM-12); Food ₹200 (CLM-14)". */
+  claimDetail?: string | null;
 }
 export interface PayrollRunApi {
   id: number;
@@ -1147,7 +1344,13 @@ export interface PayrollRunApi {
   paidAt: string | null;
   paidByName: string | null;
   payslips: PayslipApi[];
+  /** Attendance taken as actual up to this date; later days follow `assumption`. */
+  cutoffDate?: string | null;
+  assumption?: RunAssumption | null;
+  unmarkedPolicy?: UnmarkedDayPolicy | null;
 }
+/** How days after the cut-off are projected. */
+export type RunAssumption = "PRESENT" | "ABSENT" | "EXTRAPOLATE";
 export interface PayrollRunSummaryApi {
   id: number;
   month: string;
@@ -1169,8 +1372,149 @@ export function getPayrollRun(month: string) {
 /** ABSENT = pay marked days only; ABSENT_PAY_OFFS = also blank weekly offs / holidays in weeks worked. */
 export type UnmarkedDayPolicy = "PRESENT" | "ABSENT" | "ABSENT_PAY_OFFS";
 
-export function generatePayrollRun(month: string, unmarked: UnmarkedDayPolicy = "ABSENT") {
-  return request<PayrollRunApi>(`/api/v1/payroll/runs/${month}/generate?unmarked=${unmarked}`, { method: "POST" });
+export function generatePayrollRun(
+  month: string,
+  unmarked: UnmarkedDayPolicy = "ABSENT",
+  cutoff?: string | null,
+  assumption?: RunAssumption | null,
+) {
+  const extra = cutoff ? `&cutoff=${cutoff}&assumption=${assumption ?? "PRESENT"}` : "";
+  return request<PayrollRunApi>(`/api/v1/payroll/runs/${month}/generate?unmarked=${unmarked}${extra}`, { method: "POST" });
+}
+/** Payroll inputs for one member: LOP override (draft only) and salary hold / stop. */
+export function setPayslipInputs(
+  month: string,
+  userId: number,
+  body: { lopOverride?: number | null; clearLopOverride?: boolean; lopReason?: string; holdStatus?: "HOLD" | "STOP" | "NONE"; holdReason?: string },
+) {
+  return request<PayrollRunApi>(`/api/v1/payroll/runs/${month}/inputs/${userId}`, { method: "PUT", body });
+}
+/** Record that members were paid offline — no money moves. */
+export function payRunMembers(month: string, body: { userIds: number[]; mode?: string; date?: string; note?: string; bankAccountId?: number | null }) {
+  return request<PayrollRunApi>(`/api/v1/payroll/runs/${month}/pay-members`, { method: "POST", body });
+}
+export function unpayRunMember(month: string, userId: number) {
+  return request<PayrollRunApi>(`/api/v1/payroll/runs/${month}/unpay/${userId}`, { method: "POST" });
+}
+
+// ---- Payroll: payments ledger ----
+export type PaymentCategoryApi = "SALARY" | "ADVANCE" | "GENERAL" | "BONUS" | "ADJUSTMENT" | "FNF";
+export type PaymentModeApi = "CASH" | "BANK" | "UPI" | "CHEQUE" | "OTHER";
+export interface PaymentApi {
+  id: number;
+  userId: number;
+  memberName: string;
+  month: string;
+  category: PaymentCategoryApi;
+  mode: PaymentModeApi;
+  amount: number;
+  recordDate: string;
+  description: string | null;
+  createdByName: string | null;
+  createdAt: string | null;
+}
+export function getPaymentsApi(params: { month?: string; userId?: number } = {}) {
+  const q = new URLSearchParams();
+  if (params.month) q.set("month", params.month);
+  if (params.userId) q.set("userId", String(params.userId));
+  const qs = q.toString();
+  return request<PaymentApi[]>(`/api/v1/payroll/payments${qs ? `?${qs}` : ""}`);
+}
+export function myPaymentsApi() {
+  return request<PaymentApi[]>("/api/v1/payroll/payments/mine");
+}
+export function addPaymentApi(body: {
+  userId: number; month?: string; category: PaymentCategoryApi; mode?: PaymentModeApi;
+  amount: number; recordDate?: string; description?: string;
+  /** The Vyapar cash / bank account it was paid from; null = cash in hand. */
+  bankAccountId?: number | null;
+}) {
+  return request<PaymentApi>("/api/v1/payroll/payments", { method: "POST", body });
+}
+
+/**
+ * Re-post every payroll entry onto the staff members' Vyapar party ledgers. Idempotent — also the
+ * one-off backfill for entries recorded before payroll and Vyapar were connected.
+ */
+export function syncPayrollToVyapar() {
+  return request<Record<string, number>>("/api/v1/payroll/vyapar-sync", { method: "POST" });
+}
+export function deletePaymentApi(id: number) {
+  return request<void>(`/api/v1/payroll/payments/${id}`, { method: "DELETE" });
+}
+
+// ---- Payroll: variable earnings / deductions ----
+export interface VariableApi {
+  id: number;
+  userId: number;
+  memberName: string;
+  month: string;
+  kind: "EARNING" | "DEDUCTION";
+  name: string;
+  amount: number;
+  entryDate: string;
+  description: string | null;
+}
+export function getVariablesApi(params: { month?: string; userId?: number }) {
+  const q = new URLSearchParams();
+  if (params.month) q.set("month", params.month);
+  if (params.userId) q.set("userId", String(params.userId));
+  return request<VariableApi[]>(`/api/v1/payroll/variables?${q.toString()}`);
+}
+export function addVariablesApi(body: {
+  userIds: number[]; month: string; kind: "EARNING" | "DEDUCTION"; name: string;
+  amount: number; entryDate?: string; description?: string;
+}) {
+  return request<VariableApi[]>("/api/v1/payroll/variables", { method: "POST", body });
+}
+export function deleteVariableApi(id: number) {
+  return request<void>(`/api/v1/payroll/variables/${id}`, { method: "DELETE" });
+}
+
+// ---- Payroll: piece-rate work ----
+export interface WorkItemApi {
+  id: number;
+  name: string;
+  unit: string | null;
+  rate: number;
+  active: boolean;
+}
+export interface WorkLogApi {
+  id: number;
+  userId: number;
+  memberName: string;
+  date: string;
+  itemId: number | null;
+  itemName: string;
+  units: number;
+  rate: number;
+  amount: number;
+  note: string | null;
+  projectId: number | null;
+  loggedByName: string | null;
+}
+export function getWorkItemsApi() {
+  return request<WorkItemApi[]>("/api/v1/payroll/work/items");
+}
+export function saveWorkItemApi(id: number | null, body: { name: string; unit?: string; rate: number; active?: boolean }) {
+  return id
+    ? request<WorkItemApi>(`/api/v1/payroll/work/items/${id}`, { method: "PUT", body })
+    : request<WorkItemApi>("/api/v1/payroll/work/items", { method: "POST", body });
+}
+export function deleteWorkItemApi(id: number) {
+  return request<void>(`/api/v1/payroll/work/items/${id}`, { method: "DELETE" });
+}
+export function getWorkLogsApi(from: string, to: string, userId?: number) {
+  return request<WorkLogApi[]>(`/api/v1/payroll/work/logs?from=${from}&to=${to}${userId ? `&userId=${userId}` : ""}`);
+}
+export function addWorkLogApi(body: {
+  userId: number; date: string; itemId?: number | null; itemName?: string; units: number;
+  rate?: number; note?: string; projectId?: number | null;
+}) {
+  return request<WorkLogApi>("/api/v1/payroll/work/logs", { method: "POST", body });
+}
+export function deleteWorkLogApi(id: number) {
+  return request<void>(`/api/v1/payroll/work/logs/${id}`, { method: "DELETE" });
 }
 export function editPayslip(month: string, userId: number, body: { gross: number; otherDeductions: number }) {
   return request<PayslipApi>(`/api/v1/payroll/runs/${month}/payslips/${userId}`, { method: "PUT", body });
@@ -1181,11 +1525,16 @@ export function lockPayrollRun(month: string) {
 export function unlockPayrollRun(month: string) {
   return request<PayrollRunApi>(`/api/v1/payroll/runs/${month}/unlock`, { method: "POST" });
 }
-export function markPayrollRunPaid(month: string) {
-  return request<PayrollRunApi>(`/api/v1/payroll/runs/${month}/pay`, { method: "POST" });
+export function markPayrollRunPaid(month: string, bankAccountId?: number | null) {
+  const qs = bankAccountId ? `?bankAccountId=${bankAccountId}` : "";
+  return request<PayrollRunApi>(`/api/v1/payroll/runs/${month}/pay${qs}`, { method: "POST" });
 }
 export function myPayslips() {
   return request<PayslipApi[]>("/api/v1/payroll/payslips/mine");
+}
+/** One member's payslips across every run (managers; self-service reads its own). */
+export function getMemberPayslips(userId: number) {
+  return request<PayslipApi[]>(`/api/v1/payroll/payslips/member/${userId}`);
 }
 
 // ---- Access introspection ----
@@ -1198,4 +1547,96 @@ export interface AccessSelfApi {
 
 export function getAccessSelf() {
   return request<AccessSelfApi>("/api/v1/access/me");
+}
+
+// ---- Payroll: org settings (payslip template, custom staff fields, tax profiles) ----
+export type PayrollSettingKey = "PAYSLIP_TEMPLATE" | "CUSTOM_FIELDS" | "TAX_PROFILES";
+export function getPayrollSetting(key: PayrollSettingKey) {
+  return request<{ key: string; value: string | null }>(`/api/v1/payroll/settings/${key}`);
+}
+export function savePayrollSetting(key: PayrollSettingKey, value: string | null) {
+  return request<{ key: string; value: string | null }>(`/api/v1/payroll/settings/${key}`, { method: "PUT", body: { value } });
+}
+
+// ---- Payroll: broadcasts ----
+export interface BroadcastApi {
+  id: number;
+  title: string | null;
+  message: string;
+  all: boolean;
+  userIds: number[];
+  recipientCount: number;
+  status: string;
+  sentAt: string | null;
+  attachmentName: string | null;
+  hasAttachment: boolean;
+  createdBy: number | null;
+  createdByName: string | null;
+}
+export function getBroadcasts() {
+  return request<BroadcastApi[]>("/api/v1/payroll/broadcasts");
+}
+export function myBroadcasts() {
+  return request<BroadcastApi[]>("/api/v1/payroll/broadcasts/mine");
+}
+export function getBroadcastAttachment(id: number) {
+  return request<{ dataUrl: string }>(`/api/v1/payroll/broadcasts/${id}/attachment`);
+}
+export function sendBroadcast(body: {
+  title?: string; message: string; all?: boolean; userIds?: number[]; attachmentName?: string | null; attachment?: string | null;
+}) {
+  return request<BroadcastApi>("/api/v1/payroll/broadcasts", { method: "POST", body });
+}
+export function deleteBroadcast(id: number) {
+  return request<void>(`/api/v1/payroll/broadcasts/${id}`, { method: "DELETE" });
+}
+
+// ---- Payroll: organisation documents ----
+export interface OrgDocumentApi {
+  id: number;
+  title: string;
+  fileName: string;
+  createdAt: string | null;
+  createdByName: string | null;
+  /** Only filled by getOrgDocument(). */
+  dataUrl: string | null;
+}
+export function getOrgDocuments() {
+  return request<OrgDocumentApi[]>("/api/v1/payroll/org-documents");
+}
+export function getOrgDocument(id: number) {
+  return request<OrgDocumentApi>(`/api/v1/payroll/org-documents/${id}`);
+}
+export function addOrgDocument(body: { title: string; fileName: string; dataUrl: string }) {
+  return request<OrgDocumentApi>("/api/v1/payroll/org-documents", { method: "POST", body });
+}
+export function deleteOrgDocument(id: number) {
+  return request<void>(`/api/v1/payroll/org-documents/${id}`, { method: "DELETE" });
+}
+
+// ---- Payroll: staff exit & full-and-final ----
+export interface SettlementApi {
+  userId: number;
+  joiningDate: string | null;
+  exitDate: string;
+  exitReason: string | null;
+  yearsOfService: number;
+  monthlyCtc: number;
+  basic: number;
+  dailyRate: number;
+  /** Unused balance of encashable leave types. */
+  encashDays: number;
+  encashAmount: number;
+  gratuityEligible: boolean;
+  gratuity: number;
+  loanOutstanding: number;
+}
+export function getSettlement(userId: number, exitDate?: string) {
+  return request<SettlementApi>(`/api/v1/payroll/profiles/${userId}/settlement${exitDate ? `?exitDate=${exitDate}` : ""}`);
+}
+export function exitStaff(userId: number, body: { exitDate: string; reason?: string }) {
+  return request<SettlementApi>(`/api/v1/payroll/profiles/${userId}/exit`, { method: "POST", body });
+}
+export function cancelStaffExit(userId: number) {
+  return request<void>(`/api/v1/payroll/profiles/${userId}/exit`, { method: "DELETE" });
 }

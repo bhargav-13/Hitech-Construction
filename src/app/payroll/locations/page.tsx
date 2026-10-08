@@ -7,15 +7,34 @@ import { Drawer } from "@/components/Drawer";
 import { Select } from "@/components/Select";
 import { RowMenu, RowMenuDivider, RowMenuItem } from "@/components/RowMenu";
 import { MapPolygonPicker } from "@/components/payroll/MapPolygonPicker";
+import { MapPolygonPreview } from "@/components/payroll/MapPolygonPreview";
 import { useLocations } from "@/lib/usePayrollLive";
 import { getTeam, getProjects, ApiError } from "@/lib/api";
 import type { GeoPointApi, LocationApi, ProjectResponse, TeamMemberResponse } from "@/lib/api";
-import { Building2, MapPin, Pencil, Plus, Search, Trash2, UserCheck, Users } from "lucide-react";
+import { Building2, LayoutGrid, Map as MapIcon, MapPin, Navigation, Pencil, Plus, Search, Trash2, UserCheck, Users } from "lucide-react";
 
 function center(points: GeoPointApi[]): { lat: number; lng: number } {
   if (!points.length) return { lat: 0, lng: 0 };
   const s = points.reduce((a, p) => ({ lat: a.lat + p.lat, lng: a.lng + p.lng }), { lat: 0, lng: 0 });
   return { lat: s.lat / points.length, lng: s.lng / points.length };
+}
+
+/** Area inside a boundary in square metres (shoelace over a local flat projection — fine at site scale). */
+function areaSqM(points: GeoPointApi[]): number {
+  if (points.length < 3) return 0;
+  const R = 6371000;
+  const lat0 = (center(points).lat * Math.PI) / 180;
+  const xy = points.map((p) => [((p.lng * Math.PI) / 180) * R * Math.cos(lat0), ((p.lat * Math.PI) / 180) * R]);
+  let a = 0;
+  for (let i = 0, j = xy.length - 1; i < xy.length; j = i++) a += xy[j][0] * xy[i][1] - xy[i][0] * xy[j][1];
+  return Math.abs(a / 2);
+}
+
+function areaLabel(points: GeoPointApi[]): string {
+  const m2 = areaSqM(points);
+  if (!m2) return "—";
+  if (m2 >= 10000) return `${(m2 / 10000).toFixed(2)} ha`;
+  return `${Math.round(m2).toLocaleString("en-IN")} m² · ${Math.round(m2 * 10.7639).toLocaleString("en-IN")} sq ft`;
 }
 
 /** Payroll Locations — geofenced sites (drawn as free-form polygons) that staff can punch from. Real backend. */
@@ -24,6 +43,17 @@ export default function LocationsPage() {
   const [editing, setEditing] = useState<LocationApi | null | "new">(null);
   const [assigning, setAssigning] = useState<LocationApi | null>(null);
   const [actionError, setActionError] = useState("");
+  const [view, setView] = useState<"cards" | "map">("cards");
+  const [q, setQ] = useState("");
+  const shown = useMemo(() => {
+    const t = q.trim().toLowerCase();
+    return t ? locations.filter((l) => l.name.toLowerCase().includes(t) || (l.projectName ?? "").toLowerCase().includes(t)) : locations;
+  }, [locations, q]);
+
+  const mapShapes = useMemo(
+    () => shown.map((l) => ({ id: l.id, name: l.name, points: l.points, tone: (l.approvalRequired ? "amber" : "cyan") as "amber" | "cyan" })),
+    [shown],
+  );
 
   async function del(loc: LocationApi) {
     if (!confirm(`Delete "${loc.name}"? Staff assigned to it will be unassigned.`)) return;
@@ -46,6 +76,24 @@ export default function LocationsPage() {
         {actionError && <div className="rounded-lg bg-rose-50 px-4 py-2 text-sm text-rose-600">{actionError}</div>}
         {error && <div className="rounded-lg bg-rose-50 px-4 py-2 text-sm text-rose-600">{error}</div>}
 
+        {locations.length > 0 && (
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="inline-flex overflow-hidden rounded-lg border border-gray-200 bg-white">
+              <button onClick={() => setView("cards")} className={`flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium ${view === "cards" ? "bg-brand-accent text-white" : "text-gray-600 hover:bg-gray-50"}`}>
+                <LayoutGrid size={14} /> Sites
+              </button>
+              <button onClick={() => setView("map")} className={`flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium ${view === "map" ? "bg-brand-accent text-white" : "text-gray-600 hover:bg-gray-50"}`}>
+                <MapIcon size={14} /> All on map
+              </button>
+            </div>
+            <div className="relative w-64">
+              <Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+              <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search site or project" className="input w-full pl-8" />
+            </div>
+            <span className="text-xs text-gray-500">{shown.length} of {locations.length} sites</span>
+          </div>
+        )}
+
         {loading ? (
           <div className="flex items-center justify-center gap-2 rounded-xl border border-dashed border-gray-300 bg-white py-16 text-sm text-gray-400">
             <Spinner size={16} className="text-brand-accent" /> Loading…
@@ -58,43 +106,84 @@ export default function LocationsPage() {
             action={<button onClick={() => setEditing("new")} className="rounded-lg bg-brand-accent px-4 py-2 text-sm font-medium text-white hover:opacity-90">+ Add Location</button>}
           />
         ) : (
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {locations.map((loc) => {
+          view === "map" ? (
+            <div className="overflow-hidden rounded-xl border border-gray-200 bg-white">
+              <MapPolygonPreview
+                interactive
+                className="h-[520px]"
+                shapes={mapShapes}
+                onSelect={(id) => { const l = locations.find((x) => x.id === id); if (l) setEditing(l); }}
+              />
+              <div className="flex flex-wrap gap-x-4 gap-y-1 border-t border-gray-100 px-4 py-2 text-xs text-gray-500">
+                <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-sm bg-cyan-600" /> Punch inside only</span>
+                <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-sm bg-amber-600" /> Punch outside goes for approval</span>
+                <span>Click a site to edit it.</span>
+              </div>
+            </div>
+          ) : (
+          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+            {shown.map((loc) => {
               const c = center(loc.points);
               return (
-                <div key={loc.id} className="rounded-xl border border-gray-200 bg-white p-4 transition-shadow hover:shadow-sm">
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="flex items-center gap-2">
-                      <div className="flex h-9 w-9 items-center justify-center rounded-full bg-cyan-50 text-brand-accent"><MapPin size={17} /></div>
-                      <div>
-                        <h3 className="text-sm font-semibold text-gray-800">{loc.name}</h3>
-                        <p className="text-[11px] text-gray-400">{c.lat.toFixed(4)}, {c.lng.toFixed(4)}</p>
-                      </div>
-                    </div>
-                    <RowMenu align="right" buttonLabel={`Actions for ${loc.name}`}>
-                      {(close) => (
-                        <>
-                          <RowMenuItem icon={UserCheck} label="Assign staff" onClick={() => { close(); setAssigning(loc); }} />
-                          <RowMenuItem icon={Pencil} label="Edit boundary" onClick={() => { close(); setEditing(loc); }} />
-                          <RowMenuDivider />
-                          <RowMenuItem icon={Trash2} label="Delete" tone="danger" onClick={() => { close(); del(loc); }} />
-                        </>
-                      )}
-                    </RowMenu>
-                  </div>
-                  {loc.projectName && (
-                    <div className="mt-3 flex items-center gap-1.5 rounded-lg bg-cyan-50/70 px-3 py-2 text-xs font-medium text-brand-accent">
-                      <Building2 size={13} /> Linked to project · {loc.projectName}
-                    </div>
-                  )}
-                  <button onClick={() => setAssigning(loc)} className="mt-3 flex w-full items-center justify-between rounded-lg bg-gray-50 px-3 py-2 text-sm transition-colors hover:bg-cyan-50/60">
-                    <span className="flex items-center gap-1.5 text-gray-600"><Users size={14} /> Directly-assigned staff</span>
-                    <span className="font-semibold text-gray-800">{loc.memberIds.length}</span>
+                <div key={loc.id} className="flex flex-col overflow-hidden rounded-xl border border-gray-200 bg-white transition-shadow hover:shadow-md">
+                  <button onClick={() => setEditing(loc)} title="Edit boundary" className="relative block border-b border-gray-100">
+                    <MapPolygonPreview
+                      className="pointer-events-none h-44"
+                      shapes={[{ id: loc.id, name: loc.name, points: loc.points, tone: loc.approvalRequired ? "amber" : "cyan" }]}
+                    />
+                    {loc.approvalRequired && (
+                      <span className="absolute left-2 top-2 z-[400] rounded-md bg-amber-500/95 px-2 py-0.5 text-[11px] font-semibold text-white shadow">Punch outside → approval</span>
+                    )}
                   </button>
+                  <div className="flex flex-1 flex-col p-4">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <h3 className="truncate text-sm font-semibold text-gray-800">{loc.name}</h3>
+                        <a
+                          href={`https://www.google.com/maps?q=${c.lat},${c.lng}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="mt-0.5 inline-flex items-center gap-1 text-[11px] text-gray-400 hover:text-brand-accent"
+                        >
+                          <Navigation size={11} /> {c.lat.toFixed(5)}, {c.lng.toFixed(5)}
+                        </a>
+                      </div>
+                      <RowMenu align="right" buttonLabel={`Actions for ${loc.name}`}>
+                        {(close) => (
+                          <>
+                            <RowMenuItem icon={UserCheck} label="Assign staff" onClick={() => { close(); setAssigning(loc); }} />
+                            <RowMenuItem icon={Pencil} label="Edit boundary" onClick={() => { close(); setEditing(loc); }} />
+                            <RowMenuDivider />
+                            <RowMenuItem icon={Trash2} label="Delete" tone="danger" onClick={() => { close(); del(loc); }} />
+                          </>
+                        )}
+                      </RowMenu>
+                    </div>
+                    <dl className="mt-3 grid grid-cols-2 gap-2 text-xs">
+                      <div className="rounded-lg bg-gray-50 px-2.5 py-1.5">
+                        <dt className="text-gray-400">Area</dt>
+                        <dd className="font-medium text-gray-700">{areaLabel(loc.points)}</dd>
+                      </div>
+                      <div className="rounded-lg bg-gray-50 px-2.5 py-1.5">
+                        <dt className="text-gray-400">Corners</dt>
+                        <dd className="font-medium text-gray-700">{loc.points.length}</dd>
+                      </div>
+                    </dl>
+                    {loc.projectName && (
+                      <div className="mt-2 flex items-center gap-1.5 rounded-lg bg-cyan-50/70 px-3 py-2 text-xs font-medium text-brand-accent">
+                        <Building2 size={13} /> <span className="truncate">Project · {loc.projectName}</span>
+                      </div>
+                    )}
+                    <button onClick={() => setAssigning(loc)} className="mt-auto flex w-full items-center justify-between rounded-lg border border-gray-100 px-3 py-2 pt-2 text-sm transition-colors hover:bg-cyan-50/60">
+                      <span className="flex items-center gap-1.5 text-gray-600"><Users size={14} /> Assigned staff</span>
+                      <span className="font-semibold text-gray-800">{loc.memberIds.length}{loc.projectName ? " + project team" : ""}</span>
+                    </button>
+                  </div>
                 </div>
               );
             })}
           </div>
+          )
         )}
       </div>
 
@@ -119,7 +208,7 @@ export default function LocationsPage() {
           onClose={() => setAssigning(null)}
           onSave={async (memberIds) => {
             try {
-              await update(assigning.id, { name: assigning.name, points: assigning.points, memberIds, projectId: assigning.projectId });
+              await update(assigning.id, { name: assigning.name, points: assigning.points, memberIds, projectId: assigning.projectId, approvalRequired: assigning.approvalRequired });
               setAssigning(null);
             } catch (err) {
               setActionError(err instanceof ApiError ? err.message : "Unable to save assignment.");
@@ -138,9 +227,10 @@ function LocationDialog({
 }: {
   location: LocationApi | null;
   onClose: () => void;
-  onSave: (body: { name: string; points: GeoPointApi[]; memberIds: number[]; projectId: number | null }) => Promise<void>;
+  onSave: (body: { name: string; points: GeoPointApi[]; memberIds: number[]; projectId: number | null; approvalRequired: boolean }) => Promise<void>;
 }) {
   const [name, setName] = useState(location?.name ?? "");
+  const [approvalRequired, setApprovalRequired] = useState(location?.approvalRequired ?? false);
   const [points, setPoints] = useState<GeoPointApi[]>(location?.points ?? []);
   const [projectId, setProjectId] = useState<string>(location?.projectId != null ? String(location.projectId) : "");
   const [projects, setProjects] = useState<ProjectResponse[]>([]);
@@ -166,6 +256,7 @@ function LocationDialog({
       points,
       memberIds: location?.memberIds ?? [],
       projectId: projectId ? Number(projectId) : null,
+      approvalRequired,
     });
     setSaving(false);
   }
@@ -186,6 +277,15 @@ function LocationDialog({
             options={[{ value: "", label: "Not linked — assign staff manually" }, ...projects.map((p) => ({ value: String(p.id), label: p.name }))]}
           />
           <span className="mt-1 block text-[11px] text-gray-400">When linked, everyone on that project can punch here — no need to tick each person.</span>
+        </label>
+        <label className="flex cursor-pointer items-start gap-2.5 rounded-lg border border-gray-200 px-3 py-2.5">
+          <input type="checkbox" checked={approvalRequired} onChange={(e) => setApprovalRequired(e.target.checked)} className="mt-0.5 h-4 w-4 accent-brand-accent" />
+          <span>
+            <span className="text-sm font-medium text-gray-800">Allow punch outside, with approval</span>
+            <span className="block text-xs text-gray-500">
+              Off: punches outside the boundary are refused. On: they are saved as pending and an admin approves or rejects them on the Attendance page.
+            </span>
+          </span>
         </label>
         <div>
           <span className="mb-1 block text-[11px] font-medium tracking-wide text-gray-400 uppercase">Site Boundary</span>

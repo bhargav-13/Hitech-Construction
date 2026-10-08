@@ -7,6 +7,7 @@ import { LeaveStatusPill } from "@/components/payroll/LeaveStatusPill";
 import { ApprovalTrail, ApprovalProgressPill } from "@/components/approval/ApprovalTrail";
 import { allLeave, decideLeave, ApiError } from "@/lib/api";
 import type { LeaveRequestApi, LeaveStatus } from "@/lib/api";
+import { Select } from "@/components/Select";
 import { CalendarDays, Check, ClipboardList, Search, UserRound, X } from "lucide-react";
 
 /**
@@ -39,6 +40,8 @@ export default function LeavePage() {
   const [error, setError] = useState("");
   const [filter, setFilter] = useState<Filter>("AWAITING_ME");
   const [q, setQ] = useState("");
+  const [type, setType] = useState("all");
+  const [order, setOrder] = useState("newest");
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
@@ -62,9 +65,18 @@ export default function LeavePage() {
 
   const awaitingMe = useMemo(() => rows.filter((r) => r.canActNow).length, [rows]);
 
+  const types = useMemo(() => [...new Set(rows.map((r) => r.leaveTypeName))].sort(), [rows]);
   const visible = useMemo(() => {
     const query = q.trim().toLowerCase();
+    const by: Record<string, (a: LeaveRequestApi, b: LeaveRequestApi) => number> = {
+      newest: (a, b) => b.id - a.id,
+      oldest: (a, b) => a.id - b.id,
+      from: (a, b) => a.fromDate.localeCompare(b.fromDate),
+      days: (a, b) => Number(b.days) - Number(a.days),
+      member: (a, b) => a.memberName.localeCompare(b.memberName),
+    };
     return rows.filter((r) => {
+      if (type !== "all" && r.leaveTypeName !== type) return false;
       if (filter === "AWAITING_ME" && !r.canActNow) return false;
       if (filter !== "AWAITING_ME" && filter !== "ALL" && r.status !== filter) return false;
       if (!query) return true;
@@ -73,8 +85,8 @@ export default function LeavePage() {
         r.leaveTypeName.toLowerCase().includes(query) ||
         (r.reason ?? "").toLowerCase().includes(query)
       );
-    });
-  }, [rows, filter, q]);
+    }).sort(by[order]);
+  }, [rows, filter, q, type, order]);
 
   // Keep a selection alive across refreshes, and fall back to the first visible row.
   const selected = useMemo(
@@ -120,6 +132,10 @@ export default function LeavePage() {
         </div>
 
         <div className="flex flex-wrap items-center gap-1.5">
+          <div className="order-last ml-auto flex flex-wrap gap-2">
+            <div className="w-40"><Select value={type} onChange={setType} options={[{ value: "all", label: "All leave types" }, ...types.map((t) => ({ value: t, label: t }))]} /></div>
+            <div className="w-44"><Select value={order} onChange={setOrder} options={[{ value: "newest", label: "Sort: Newest first" }, { value: "oldest", label: "Sort: Oldest first" }, { value: "from", label: "Sort: Leave date" }, { value: "days", label: "Sort: Most days" }, { value: "member", label: "Sort: Member A–Z" }]} /></div>
+          </div>
           {FILTERS.map((f) => {
             const count =
               f.key === "AWAITING_ME"

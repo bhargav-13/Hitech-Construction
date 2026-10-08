@@ -5,7 +5,7 @@ import { createPortal } from "react-dom";
 import { CalendarDays, ChevronDown, ChevronLeft, ChevronRight, Repeat } from "lucide-react";
 import { notifyFormTouched } from "@/lib/formDirty";
 
-export type RecurrenceRule = "NONE" | "CUSTOM" | "WEEKLY" | "MONTHLY" | "QUARTERLY" | "HALF_YEARLY";
+export type RecurrenceRule = "NONE" | "CUSTOM" | "WEEKLY" | "MONTHLY" | "QUARTERLY" | "HALF_YEARLY" | "YEARLY";
 
 export const RECURRENCE_OPTIONS: { value: RecurrenceRule; label: string }[] = [
   { value: "CUSTOM", label: "Custom" },
@@ -13,7 +13,65 @@ export const RECURRENCE_OPTIONS: { value: RecurrenceRule; label: string }[] = [
   { value: "MONTHLY", label: "Monthly" },
   { value: "QUARTERLY", label: "Quarterly" },
   { value: "HALF_YEARLY", label: "Half Yearly" },
+  { value: "YEARLY", label: "Yearly" },
 ];
+
+/** Weekday codes as the server stores them ("MON,THU"), Sunday first like the calendar. */
+export const DAY_CODES = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"] as const;
+const DAY_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+export function parseDayCodes(csv: string | null | undefined): string[] {
+  return (csv ?? "")
+    .split(",")
+    .map((d) => d.trim().toUpperCase().slice(0, 3))
+    .filter((d) => (DAY_CODES as readonly string[]).includes(d));
+}
+
+export function daysLabel(csv: string | null | undefined): string {
+  return parseDayCodes(csv)
+    .map((c) => DAY_SHORT[(DAY_CODES as readonly string[]).indexOf(c)])
+    .join(", ");
+}
+
+/** S M T W T F S toggles over a "MON,THU" string. */
+export function WeekdayPicker({
+  value,
+  onChange,
+  tone = "accent",
+}: {
+  value: string | null | undefined;
+  onChange: (csv: string) => void;
+  tone?: "accent" | "danger";
+}) {
+  const on = parseDayCodes(value);
+  return (
+    <div className="flex gap-1">
+      {DAY_CODES.map((code, i) => {
+        const active = on.includes(code);
+        return (
+          <button
+            key={code}
+            type="button"
+            title={DAY_SHORT[i]}
+            onClick={() => {
+              const next = active ? on.filter((c) => c !== code) : [...on, code];
+              onChange(DAY_CODES.filter((c) => next.includes(c)).join(","));
+            }}
+            className={`h-7 w-7 rounded-full text-xs font-medium transition-colors duration-150 ${
+              active
+                ? tone === "danger"
+                  ? "bg-rose-500 text-white"
+                  : "bg-brand-accent text-white"
+                : "border border-gray-200 text-gray-500 hover:border-brand-accent hover:text-brand-accent"
+            }`}
+          >
+            {WEEKDAYS[i]}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
 
 export function recurrenceLabel(rule: RecurrenceRule | null | undefined, interval = 1): string {
   if (!rule || rule === "NONE") return "Does not repeat";
@@ -61,6 +119,12 @@ export function DatePicker({
   onRecurrenceChange,
   recurrenceInterval = 1,
   onRecurrenceIntervalChange,
+  recurrenceDays,
+  onRecurrenceDaysChange,
+  recurrenceExcludeDays,
+  onRecurrenceExcludeDaysChange,
+  recurrenceUntil,
+  onRecurrenceUntilChange,
 }: {
   value: string;
   onChange: (v: string) => void;
@@ -73,6 +137,15 @@ export function DatePicker({
   onRecurrenceChange?: (r: RecurrenceRule) => void;
   recurrenceInterval?: number;
   onRecurrenceIntervalChange?: (n: number) => void;
+  /** Weekly: the weekdays it falls on ("MON,THU"). */
+  recurrenceDays?: string | null;
+  onRecurrenceDaysChange?: (csv: string) => void;
+  /** Custom: weekdays an occurrence must never land on. */
+  recurrenceExcludeDays?: string | null;
+  onRecurrenceExcludeDaysChange?: (csv: string) => void;
+  /** Last date of the series (yyyy-MM-dd); empty = no end. */
+  recurrenceUntil?: string | null;
+  onRecurrenceUntilChange?: (v: string) => void;
 }) {
   const supportsRecurrence = typeof onRecurrenceChange === "function";
   const rule: RecurrenceRule = recurrence ?? "NONE";
@@ -229,7 +302,8 @@ export function DatePicker({
                     type="button"
                     onClick={() => {
                       onRecurrenceChange?.(o.value);
-                      setShowRules(false);
+                      // Weekly and Custom have more to set (weekdays, interval, exclusions) — stay here.
+                      if (o.value !== "WEEKLY" && o.value !== "CUSTOM" && !onRecurrenceUntilChange) setShowRules(false);
                     }}
                     className={`flex w-full items-center justify-between px-4 py-2.5 text-left text-sm transition-colors duration-150 hover:bg-gray-50 ${
                       rule === o.value ? "font-medium text-brand-accent" : "text-gray-700"
@@ -240,16 +314,45 @@ export function DatePicker({
                   </button>
                 ))}
                 {rule === "CUSTOM" && (
+                  <div className="space-y-2 border-t border-gray-100 px-4 py-2.5">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-gray-500">Every</span>
+                      <input
+                        type="number"
+                        min={1}
+                        value={recurrenceInterval}
+                        onChange={(e) => onRecurrenceIntervalChange?.(Math.max(1, Number(e.target.value) || 1))}
+                        className="w-16 rounded-lg border border-gray-200 px-2 py-1 text-sm outline-none focus:border-cyan-500"
+                      />
+                      <span className="text-xs text-gray-500">day(s)</span>
+                    </div>
+                    {onRecurrenceExcludeDaysChange && (
+                      <div>
+                        <div className="mb-1 text-[11px] font-medium text-gray-500">Exclude weekdays</div>
+                        <WeekdayPicker value={recurrenceExcludeDays} onChange={onRecurrenceExcludeDaysChange} tone="danger" />
+                      </div>
+                    )}
+                  </div>
+                )}
+                {rule === "WEEKLY" && onRecurrenceDaysChange && (
+                  <div className="border-t border-gray-100 px-4 py-2.5">
+                    <div className="mb-1 text-[11px] font-medium text-gray-500">Repeat on</div>
+                    <WeekdayPicker value={recurrenceDays} onChange={onRecurrenceDaysChange} />
+                    {!parseDayCodes(recurrenceDays).length && (
+                      <div className="mt-1 text-[10px] text-gray-400">None picked: repeats on the due date&apos;s weekday.</div>
+                    )}
+                  </div>
+                )}
+                {rule !== "NONE" && onRecurrenceUntilChange && (
                   <div className="flex items-center gap-2 border-t border-gray-100 px-4 py-2.5">
-                    <span className="text-xs text-gray-500">Every</span>
+                    <span className="text-xs text-gray-500">Recurring end date</span>
                     <input
-                      type="number"
-                      min={1}
-                      value={recurrenceInterval}
-                      onChange={(e) => onRecurrenceIntervalChange?.(Math.max(1, Number(e.target.value) || 1))}
-                      className="w-16 rounded-lg border border-gray-200 px-2 py-1 text-sm outline-none focus:border-cyan-500"
+                      type="date"
+                      value={recurrenceUntil ?? ""}
+                      min={value || undefined}
+                      onChange={(e) => onRecurrenceUntilChange(e.target.value)}
+                      className="flex-1 rounded-lg border border-gray-200 px-2 py-1 text-sm outline-none focus:border-cyan-500"
                     />
-                    <span className="text-xs text-gray-500">day(s)</span>
                   </div>
                 )}
                 <button
@@ -262,6 +365,22 @@ export function DatePicker({
               </div>
             ) : (
               <div className="p-4">
+                {supportsRecurrence && rule !== "NONE" && (
+                  <button
+                    type="button"
+                    onClick={() => setShowRules(true)}
+                    className="mb-3 flex w-full items-center justify-between rounded-lg bg-cyan-50 px-3 py-2 text-left text-xs text-brand-accent hover:bg-cyan-100/70"
+                  >
+                    <span className="flex items-center gap-1.5 font-medium">
+                      <Repeat size={12} />
+                      {recurrenceLabel(rule, recurrenceInterval)}
+                      {rule === "WEEKLY" && parseDayCodes(recurrenceDays).length > 0 && ` · ${daysLabel(recurrenceDays)}`}
+                      {rule === "CUSTOM" && parseDayCodes(recurrenceExcludeDays).length > 0 && ` · not ${daysLabel(recurrenceExcludeDays)}`}
+                      {recurrenceUntil ? ` · until ${recurrenceUntil}` : ""}
+                    </span>
+                    <span className="font-medium">Edit</span>
+                  </button>
+                )}
                 <div className="mb-3 text-sm font-semibold text-gray-800">Select Due Date</div>
 
                 {/* Month header */}

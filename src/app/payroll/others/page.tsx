@@ -8,12 +8,13 @@ import { Select } from "@/components/Select";
 import { OTHERS_TILES } from "@/lib/payrollConfig";
 import { loadRows, saveRows, type RegisterRow } from "@/lib/localRegister";
 import { loadReportContext, buildReport } from "@/lib/payrollReports";
-import { getUsers, getPayrollProfiles } from "@/lib/api";
+import { getPayrollPeople, getPayrollProfiles } from "@/lib/api";
 import type { UserResponse } from "@/lib/api";
 import { inr } from "@/lib/format";
 import {
   CheckSquare, FileText, Gift, LayoutGrid, Plus, Shield, Trophy, Trash2, Users, Wallet, X,
 } from "lucide-react";
+import { ReportTable } from "@/components/payroll/ReportTable";
 
 const ICON: Record<string, React.ComponentType<{ size?: number; className?: string }>> = {
   file: FileText, shield: Shield, grid: LayoutGrid, wallet: Wallet, trophy: Trophy, check: CheckSquare, users: Users, gift: Gift,
@@ -198,25 +199,12 @@ function Scorecard() {
   const [error, setError] = useState("");
   useEffect(() => {
     loadReportContext()
-      .then((ctx) => { const r = buildReport("Scorecards & Leaderboards", ctx); setData({ head: r.head, rows: r.rows }); })
+      .then((ctx) => { const r = buildReport("Scorecard Report", ctx); setData({ head: r.head, rows: r.rows }); })
       .catch(() => setError("Couldn't load attendance data."));
   }, []);
   if (error) return <p className="py-8 text-center text-sm text-rose-600">{error}</p>;
   if (!data) return <div className="flex items-center justify-center gap-2 py-10 text-sm text-gray-400"><Spinner size={16} className="text-brand-accent" /> Loading…</div>;
-  return (
-    <div className="overflow-x-auto rounded-xl border border-gray-200">
-      <table className="w-full border-collapse text-sm">
-        <thead>
-          <tr className="border-b border-gray-100 bg-gray-50 text-left text-gray-500">{data.head.map((h) => <th key={h} className="px-3 py-2 font-medium">{h}</th>)}</tr>
-        </thead>
-        <tbody>
-          {data.rows.map((r, i) => (
-            <tr key={i} className="border-b border-gray-50 last:border-b-0">{r.map((c, j) => <td key={j} className="px-3 py-2 text-gray-700">{c}</td>)}</tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
+  return <ReportTable report={data} />;
 }
 
 /** Upcoming work anniversaries from members' joining dates. */
@@ -225,7 +213,7 @@ function Celebrations() {
   useEffect(() => {
     (async () => {
       try {
-        const users = (await getUsers(0, 500)).content.filter((u) => u.onPayroll);
+        const users = (await getPayrollPeople()).content.filter((u) => u.onPayroll);
         const profiles = users.length ? await getPayrollProfiles(users.map((u) => u.id)).catch(() => []) : [];
         const byId = new Map(users.map((u) => [u.id, u.fullName]));
         const today = new Date();
@@ -273,7 +261,7 @@ function Letters() {
   const [users, setUsers] = useState<UserResponse[]>([]);
   const [userId, setUserId] = useState("");
   const [type, setType] = useState(LETTER_TYPES[0]);
-  useEffect(() => { getUsers(0, 500).then((r) => setUsers(r.content)).catch(() => setUsers([])); }, []);
+  useEffect(() => { getPayrollPeople().then((r) => setUsers(r.content)).catch(() => setUsers([])); }, []);
   const member = useMemo(() => users.find((u) => String(u.id) === userId), [users, userId]);
 
   function generate() {

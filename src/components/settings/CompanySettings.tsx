@@ -155,10 +155,10 @@ function NewCompanyModal({ onClose }: { onClose: () => void }) {
           />
         </label>
 
-        {/* Said plainly rather than discovered later: three modules still pool their data. */}
+        {/* Said plainly rather than discovered later: two modules still pool their data. */}
         <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2.5 text-xs text-amber-800">
-          Vyapar, projects and tasks are kept per company. Payroll, tenders and procurement are still
-          shared across every firm — work filed there will be visible to the whole group.
+          Vyapar, projects, tasks, payroll and warehouse are kept per company. Tenders and procurement
+          are still shared across every firm — work filed there will be visible to the whole group.
         </p>
 
         <div className="mt-5 flex justify-end gap-2">

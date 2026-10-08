@@ -1,49 +1,17 @@
 "use client";
 
-import { useEffect, useMemo } from "react";
+import { useMemo } from "react";
 import { create } from "zustand";
-import { useTaskStore } from "@/lib/taskStore";
 import { useAuthStore } from "@/lib/authStore";
-import { isOverdue, isDueToday } from "@/lib/taskTypes";
 import { formatDateIST, msIST } from "@/lib/datetime";
 import type { Task } from "@/lib/taskTypes";
 
-const SEEN_KEY = "taskopad:notifSeen";
+// The notification feed itself now lives on the server (lib/notifications.ts). What stays here is
+// the per-task "new comments / files since you last opened it" badge on list rows, and the shared
+// time helpers.
+
 const TASK_SEEN_KEY = "taskopad:taskSeen";
 const RECENT_DAYS = 7;
-
-export type NotifKind = "overdue" | "due" | "assigned" | "activity";
-
-export interface Notif {
-  id: string;
-  kind: NotifKind;
-  title: string;
-  detail: string;
-  at: string; // ISO timestamp used for sorting + unread
-  taskId: string;
-}
-
-// Shared "last seen" timestamp so the header bell, module bell, and sidebar badge all agree on
-// what's unread. Persisted to localStorage; marking read anywhere updates every consumer at once.
-interface SeenState {
-  lastSeen: number;
-  markAllRead: () => void;
-}
-
-function initialSeen(): number {
-  if (typeof window === "undefined") return 0;
-  const raw = window.localStorage.getItem(SEEN_KEY);
-  return raw ? Number(raw) || 0 : 0;
-}
-
-export const useNotifSeen = create<SeenState>((set) => ({
-  lastSeen: initialSeen(),
-  markAllRead: () => {
-    const now = Date.now();
-    if (typeof window !== "undefined") window.localStorage.setItem(SEEN_KEY, String(now));
-    set({ lastSeen: now });
-  },
-}));
 
 // Backend timestamps carry no timezone, so a plain `new Date(iso)` read them in the runtime's own
 // zone — which made a comment posted seconds ago come back as "5h ago" and threw off the unread
@@ -65,43 +33,6 @@ export function relativeTime(iso: string): string {
   return formatDateIST(iso);
 }
 
-/** Build the notification feed for a user out of their tasks. */
-function buildNotifs(tasks: Task[], myId: string): Notif[] {
-  if (!myId) return [];
-  const out: Notif[] = [];
-  const cutoff = Date.now() - RECENT_DAYS * 24 * 60 * 60 * 1000;
-
-  for (const t of tasks) {
-    if (t.isDraft) continue;
-    const mine = t.assigneeId === myId;
-    const following = t.followerIds.includes(myId);
-    if (!mine && !following) continue;
-
-    if (isOverdue(t)) {
-      out.push({ id: `overdue-${t.id}`, kind: "overdue", title: t.title, detail: `Overdue — was due ${t.dueDate}`, at: t.dueDate, taskId: t.id });
-    } else if (isDueToday(t)) {
-      out.push({ id: `due-${t.id}`, kind: "due", title: t.title, detail: "Due today", at: t.dueDate, taskId: t.id });
-    }
-
-    if (mine && ms(t.createdAt) >= cutoff) {
-      out.push({ id: `assigned-${t.id}`, kind: "assigned", title: t.title, detail: "Assigned to you", at: t.createdAt, taskId: t.id });
-    }
-
-    for (const a of t.activity) {
-      if (a.userId === myId) continue;
-      if (ms(a.at) < cutoff) continue;
-      out.push({ id: `activity-${t.id}-${a.id}`, kind: "activity", title: t.title, detail: a.text, at: a.at, taskId: t.id });
-    }
-  }
-
-  return out.sort((x, y) => ms(y.at) - ms(x.at)).slice(0, 25);
-}
-
-/**
- * Task-derived notifications for the signed-in user, plus the unread count against the shared
- * "last seen" marker. Loads the task store on first use so the header bell/sidebar badge work
- * even before the Taskopad module is opened.
- */
 // ---- Per-task "seen" markers for the in-list unread badge ----
 interface TaskSeenState {
   seenAt: Record<string, number>;
@@ -122,10 +53,24 @@ export const useTaskSeen = create<TaskSeenState>((set, get) => ({
   seenAt: initialTaskSeen(),
   markTaskSeen: (taskId) => {
     const next = { ...get().seenAt, [taskId]: Date.now() };
-    if (typeof window !== "undefined") window.localStorage.setItem(TASK_SEEN_KEY, JSON.stringify(next));
+    try {
+      if (typeof window !== "undefined") window.localStorage.setItem(TASK_SEEN_KEY, JSON.stringify(next));
+    } catch {
+      /* storage unavailable — keep the in-memory marker */
+    }
     set({ seenAt: next });
   },
 }));
+
+/** Unread comments/attachments on a task, as a plain function — used by the "Unread Tasks" view. */
+export function unreadOn(task: Task, myId: string, seenAt: number): number {
+  if (!myId) return 0;
+  const since = seenAt > 0 ? seenAt : Date.now() - RECENT_DAYS * 24 * 60 * 60 * 1000;
+  return (
+    task.comments.filter((c) => c.userId !== myId && ms(c.at) > since).length +
+    task.attachments.filter((a) => a.userId !== myId && ms(a.at) > since).length
+  );
+}
 
 /** Count of comments + attachments on this task newer than the caller's last visit, ignoring items the caller authored. */
 export function useTaskUnread(task: Task): { comments: number; attachments: number; total: number } {
@@ -141,21 +86,4 @@ export function useTaskUnread(task: Task): { comments: number; attachments: numb
     const attachments = task.attachments.filter((a) => a.userId !== myId && ms(a.at) > since).length;
     return { comments, attachments, total: comments + attachments };
   }, [task.comments, task.attachments, myId, rawSeen]);
-}
-
-export function useTaskNotifications() {
-  const tasks = useTaskStore((s) => s.tasks);
-  const load = useTaskStore((s) => s.load);
-  const myId = useAuthStore((s) => (s.user ? String(s.user.id) : ""));
-  const lastSeen = useNotifSeen((s) => s.lastSeen);
-  const markAllRead = useNotifSeen((s) => s.markAllRead);
-
-  useEffect(() => {
-    if (myId) load();
-  }, [load, myId]);
-
-  const notifs = useMemo(() => buildNotifs(tasks, myId), [tasks, myId]);
-  const unread = useMemo(() => notifs.filter((n) => ms(n.at) > lastSeen).length, [notifs, lastSeen]);
-
-  return { notifs, unread, lastSeen, markAllRead };
 }

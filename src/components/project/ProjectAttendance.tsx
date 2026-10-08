@@ -9,6 +9,7 @@ import { editAttendance, getProjectStaff, getTeam, ApiError } from "@/lib/api";
 import type { TeamMemberResponse, AttendanceApiResponse, AttendanceCodeApi } from "@/lib/api";
 import { ATTENDANCE_META } from "@/lib/payrollConfig";
 import { ChevronLeft, ChevronRight, Clock, MapPin, Search, UserPlus, Users } from "lucide-react";
+import { PunchPhotoThumbs } from "@/components/payroll/PunchPhotos";
 
 // Local calendar date (not UTC) so keys match the muster / punch / calendar.
 const iso = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -220,19 +221,7 @@ export function ProjectAttendance({ projectId }: { projectId: string }) {
                           {r.punchInLat != null && (
                             <span title={`GPS: ${r.punchInLat}, ${r.punchInLng}`}><MapPin size={11} className="text-cyan-500" /></span>
                           )}
-                          {r.punchInPhoto && (
-                            // eslint-disable-next-line @next/next/no-img-element
-                            <img src={r.punchInPhoto} alt="Punch-in selfie" title="Punch-in selfie (face verified)" className="h-6 w-6 rounded object-cover ring-1 ring-emerald-200" />
-                          )}
-                          {r.punchInBackPhoto && (
-                            // Back-camera site photo — hover to enlarge so the site is actually visible.
-                            // eslint-disable-next-line @next/next/no-img-element
-                            <img src={r.punchInBackPhoto} alt="Punch-in site photo" title="Punch-in site photo (back camera)" className="relative h-6 w-6 rounded object-cover ring-1 ring-emerald-200 transition-transform hover:z-20 hover:scale-[6]" />
-                          )}
-                          {r.punchOutPhoto && (
-                            // eslint-disable-next-line @next/next/no-img-element
-                            <img src={r.punchOutPhoto} alt="Punch-out selfie" title="Punch-out selfie (face verified)" className="h-6 w-6 rounded object-cover ring-1 ring-rose-200" />
-                          )}
+                          <PunchPhotoThumbs row={r} name={r.memberName} size={24} />
                         </span>
                       ) : (
                         <span className="text-xs text-gray-300">—</span>

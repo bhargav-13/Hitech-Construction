@@ -7,15 +7,25 @@ import { Spinner } from "@/components/Spinner";
 import { DatePicker } from "@/components/DatePicker";
 import { Select } from "@/components/Select";
 import { useMuster } from "@/lib/usePayrollLive";
-import { editAttendance, getUsers, ApiError } from "@/lib/api";
-import type { AttendanceApiResponse, AttendanceCodeApi, UserResponse } from "@/lib/api";
+import { bulkEditAttendance, editAttendance, getPayrollPeople, ApiError } from "@/lib/api";
+import type { AttendanceApiResponse, AttendanceCodeApi, AttendanceEditRequestBody, PayrollProfileResponse, UserResponse } from "@/lib/api";
 import { ATTENDANCE_META, DEPARTMENTS } from "@/lib/payrollConfig";
-import { exportRowsToCsv } from "@/lib/vyaparExport";
+import { exportRowsToCsv, exportRowsToXlsx, printRows } from "@/lib/vyaparExport";
+import { DayActions, hoursLabel } from "@/components/payroll/AttendanceActions";
+import type { LeaveChoice } from "@/components/payroll/AttendanceActions";
+import { AttendanceImportDialog } from "@/components/payroll/AttendanceImportDialog";
+import { PendingPunches } from "@/components/payroll/PendingPunches";
+import { useLeavePolicies, usePayrollProfiles } from "@/lib/usePayrollSetup";
+import { payGroupOf, PAY_GROUP_ORDER } from "@/lib/payrollGroups";
+import { inr } from "@/lib/format";
 import { AlertTriangle,
-  CalendarDays, CheckCheck, ChevronLeft, ChevronRight, CircleCheck, CircleX, Clock, FileSpreadsheet, Plane, Search, Users,
+  CalendarDays, CheckCheck, ChevronLeft, ChevronRight, CircleCheck, CircleX, Clock, FileSpreadsheet, FileText, LogIn, LogOut, Plane, Printer, Search, Upload, Users,
 } from "lucide-react";
+import { useTableSort } from "@/lib/useTableSort";
+import { SortTh } from "@/components/vyapar/SortTh";
+import { PunchPhotoThumbs, punchShots } from "@/components/payroll/PunchPhotos";
+import { useOwnRecordLock } from "@/lib/permissions";
 
-const MARK_CODES: AttendanceCodeApi[] = ["P", "A", "HD", "PL"];
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 type View = "DAY" | "MONTH";
@@ -45,6 +55,7 @@ export default function AttendancePage() {
   const [monthIdx, setMonthIdx] = useState(new Date().getMonth());
   const [search, setSearch] = useState("");
   const [dept, setDept] = useState("all");
+  const [payType, setPayType] = useState("all");
   const [members, setMembers] = useState<UserResponse[]>([]);
   const [membersLoading, setMembersLoading] = useState(true);
   const [actionError, setActionError] = useState("");
@@ -64,17 +75,30 @@ export default function AttendancePage() {
   const { rows, loading, ready: musterReady, error, refresh } = useMuster(range.from, range.to);
 
   useEffect(() => {
-    getUsers(0, 200).then((r) => { setMembers(r.content.filter((u) => u.onPayroll)); setMembersLoading(false); }).catch(() => setMembersLoading(false));
+    getPayrollPeople().then((r) => { setMembers(r.content.filter((u) => u.onPayroll)); setMembersLoading(false); }).catch(() => setMembersLoading(false));
   }, []);
+
+  const memberIds = useMemo(() => members.map((m) => m.id), [members]);
+  const { profiles } = usePayrollProfiles(memberIds.length ? memberIds : undefined);
+  const { leavePolicies } = useLeavePolicies();
+  // Paid leave types offered for a leave mark or the other half of a half day, per member.
+  const leaveChoices = useMemo(() => {
+    return (userId: number): LeaveChoice[] => {
+      const pid = profiles[userId]?.leavePolicyId;
+      const policy = leavePolicies.find((lp) => lp.id === pid) ?? leavePolicies[0];
+      return (policy?.types ?? []).filter((t) => t.paid).map((t) => ({ value: t.name, label: t.name }));
+    };
+  }, [profiles, leavePolicies]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     return members.filter((m) => {
       if (dept !== "all" && (m.departmentName ?? "") !== dept) return false;
+      if (payType !== "all" && payGroupOf(profiles[m.id]) !== payType) return false;
       if (!q) return true;
       return m.fullName.toLowerCase().includes(q) || (m.email ?? "").toLowerCase().includes(q);
     });
-  }, [members, search, dept]);
+  }, [members, search, dept, payType, profiles]);
 
   const stepMonth = (dir: 1 | -1) => {
     let m = monthIdx + dir, y = year;
@@ -126,6 +150,7 @@ export default function AttendancePage() {
           </div>
         </div>
 
+        <PendingPunches onDecided={refresh} />
         {actionError && <div className="rounded-lg bg-rose-50 px-4 py-2 text-sm text-rose-600">{actionError}</div>}
         {error && <div className="rounded-lg bg-rose-50 px-4 py-2 text-sm text-rose-600">{error}</div>}
 
@@ -136,6 +161,7 @@ export default function AttendancePage() {
             <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search members…" className="w-full bg-transparent text-sm outline-none" />
           </div>
           <div className="w-44"><Select value={dept} onChange={setDept} options={[{ value: "all", label: "All departments" }, ...DEPARTMENTS.map((d) => ({ value: d, label: d }))]} /></div>
+          <div className="w-48"><Select value={payType} onChange={setPayType} options={[{ value: "all", label: "All staff types" }, ...PAY_GROUP_ORDER.map((g) => ({ value: g, label: g }))]} /></div>
         </div>
 
         {(loading && !musterReady) || membersLoading ? (
@@ -152,6 +178,8 @@ export default function AttendancePage() {
             refresh={refresh}
             setActionError={setActionError}
             onOpenCalendar={openCalendar}
+            profiles={profiles}
+            leaveChoices={leaveChoices}
           />
         ) : (
           <MonthView
@@ -175,6 +203,8 @@ function DayView({
   refresh,
   setActionError,
   onOpenCalendar,
+  profiles,
+  leaveChoices,
 }: {
   date: string;
   members: UserResponse[];
@@ -182,7 +212,10 @@ function DayView({
   refresh: () => Promise<void>;
   setActionError: (msg: string) => void;
   onOpenCalendar: (m: UserResponse) => void;
+  profiles: Record<number, PayrollProfileResponse>;
+  leaveChoices: (userId: number) => LeaveChoice[];
 }) {
+  const ownLock = useOwnRecordLock();
   const byUser = useMemo(() => {
     const m = new Map<number, AttendanceApiResponse>();
     for (const r of rows) m.set(r.userId, r);
@@ -190,16 +223,20 @@ function DayView({
   }, [rows]);
 
   const summary = useMemo(() => {
-    const s = { present: 0, absent: 0, halfDay: 0, leave: 0, overtime: 0, fine: 0 };
+    const s = { present: 0, absent: 0, halfDay: 0, leave: 0, overtime: 0, fine: 0, fineAmt: 0, otAmt: 0, punchedIn: 0, punchedOut: 0, unmarked: 0 };
     for (const m of members) {
       const att = byUser.get(m.id);
-      if (!att) continue;
-      if (att.code === "P") s.present++;
-      else if (att.code === "A") s.absent++;
+      if (!att || att.code === "NM") { s.unmarked++; if (!att) continue; }
+      if (att.code === "P" || att.code === "OD") s.present++;
+      else if (att.code === "A" || att.code === "L") s.absent++;
       else if (att.code === "HD") s.halfDay++;
       else if (att.code === "PL") s.leave++;
       s.overtime += Number(att.overtimeHours ?? 0);
       s.fine += Number(att.fineHours ?? 0);
+      s.fineAmt += Number(att.fineAmount ?? 0);
+      s.otAmt += Number(att.otAmount ?? 0);
+      if (att.inTime) s.punchedIn++;
+      if (att.outTime) s.punchedOut++;
     }
     return s;
   }, [members, byUser]);
@@ -265,7 +302,9 @@ function DayView({
     setBulkBusy(true);
     setActionError("");
     try {
-      await Promise.all(members.map((m) => editAttendance(buildBody(m.id, { code: "P" }))));
+      // Only members with nothing marked yet — a bulk click must not overwrite a leave or an absence.
+      const blank = members.filter((m) => { const a = byUser.get(m.id); return !a || a.code === "NM"; });
+      await bulkEditAttendance(blank.map((m) => buildBody(m.id, { code: "P" }) as AttendanceEditRequestBody));
       await refresh();
     } catch (err) {
       setActionError(err instanceof ApiError ? err.message : "Unable to mark all present.");
@@ -274,59 +313,130 @@ function DayView({
     }
   }
 
-  const head = ["Name", "Email", "Department", "Status", "In", "Out", "OT", "Fine"];
+  const [importOpen, setImportOpen] = useState(false);
+  const head = ["Name", "Email", "Department", "Status", "In", "Out", "OT hrs", "OT ₹", "Fine hrs", "Fine ₹", "Note"];
   const data = members.map((m) => {
     const a = byUser.get(m.id);
     return [
       m.fullName, m.email, m.departmentName ?? "",
       a ? ATTENDANCE_META[a.code].label : ATTENDANCE_META.NM.label,
       a?.inTime ?? "", a?.outTime ?? "",
-      a?.overtimeHours ?? 0, a?.fineHours ?? 0,
+      Number(a?.overtimeHours ?? 0), Number(a?.otAmount ?? 0), Number(a?.fineHours ?? 0), Number(a?.fineAmount ?? 0), a?.note ?? "",
     ];
   });
+  const [show, setShow] = useState("all");
+  const shownMembers = useMemo(() => members.filter((m) => {
+    const a = byUser.get(m.id);
+    const c = a?.code ?? "NM";
+    switch (show) {
+      case "present": return c === "P" || c === "OD";
+      case "absent": return c === "A" || c === "L";
+      case "half": return c === "HD";
+      case "leave": return c === "PL";
+      case "unmarked": return c === "NM";
+      case "punched": return !!a?.inTime;
+      case "ot": return Number(a?.overtimeHours ?? 0) > 0 || Number(a?.otAmount ?? 0) > 0;
+      case "fine": return Number(a?.fineAmount ?? 0) > 0 || Number(a?.fineHours ?? 0) > 0;
+      default: return true;
+    }
+  }), [members, byUser, show]);
+  const daySort = useMemo(() => ({
+    name: (m: UserResponse) => m.fullName,
+    mark: (m: UserResponse) => byUser.get(m.id)?.code ?? "NM",
+    in: (m: UserResponse) => byUser.get(m.id)?.inTime ?? "",
+    out: (m: UserResponse) => byUser.get(m.id)?.outTime ?? "",
+    hours: (m: UserResponse) => (byUser.get(m.id)?.workedHours == null ? null : Number(byUser.get(m.id)!.workedHours)),
+  }), [byUser]);
+  const { sorted: sortedMembers, sortKey, sortDir, toggle: sortBy } = useTableSort(shownMembers, daySort, { key: "name" });
+  // Rows grouped by staff type, as PagarBook's board is ("Monthly Regular 1", "Daily 1", …).
+  const groups = useMemo(() => {
+    const map = new Map<string, UserResponse[]>();
+    for (const m of sortedMembers) {
+      const g = payGroupOf(profiles[m.id]);
+      if (!map.has(g)) map.set(g, []);
+      map.get(g)!.push(m);
+    }
+    return PAY_GROUP_ORDER.filter((g) => map.has(g)).map((g) => ({ group: g, list: map.get(g)! }));
+  }, [sortedMembers, profiles]);
 
   return (
     <>
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
         <StatCard label="Total Members" value={members.length} accent="cyan" />
         <StatCard label="Present" value={summary.present} accent="green" icon={CircleCheck} />
         <StatCard label="Absent" value={summary.absent} accent="rose" icon={CircleX} />
         <StatCard label="Half Day" value={summary.halfDay} accent="amber" icon={Clock} />
         <StatCard label="On Leave" value={summary.leave} accent="blue" icon={Plane} />
-        <StatCard label="Overtime Hrs" value={summary.overtime.toFixed(1)} accent="green" />
+        <StatCard label="Overtime" value={`${hoursLabel(summary.overtime)} h`} hint={summary.otAmt > 0 ? inr(summary.otAmt) : undefined} accent="green" />
+        <StatCard label="Fine" value={`${hoursLabel(summary.fine)} h`} hint={summary.fineAmt > 0 ? inr(summary.fineAmt) : undefined} accent="rose" />
+        <StatCard label="Punched In" value={summary.punchedIn} accent="cyan" icon={LogIn} />
+        <StatCard label="Punched Out" value={summary.punchedOut} accent="cyan" icon={LogOut} />
+        <StatCard label="Not Marked" value={summary.unmarked} accent="amber" />
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
         <button onClick={bulkMarkPresent} disabled={bulkBusy} className="flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-600 transition-all hover:bg-gray-50 active:scale-95 disabled:cursor-not-allowed disabled:opacity-60">
           {bulkBusy ? <Spinner size={14} className="text-brand-accent" /> : <CheckCheck size={14} />} {bulkBusy ? "Marking…" : "Mark all present"}
         </button>
+        <button onClick={() => setImportOpen(true)} className="flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-600 hover:bg-gray-50">
+          <Upload size={14} /> Bulk Add Attendance
+        </button>
+        <div className="w-40">
+          <Select value={show} onChange={setShow} options={[
+            { value: "all", label: "Show: Everyone" }, { value: "present", label: "Present" }, { value: "absent", label: "Absent" },
+            { value: "half", label: "Half day" }, { value: "leave", label: "On leave" }, { value: "unmarked", label: "Not marked" },
+            { value: "punched", label: "Punched in" }, { value: "ot", label: "With overtime" }, { value: "fine", label: "With fine" },
+          ]} />
+        </div>
+        {show !== "all" && <span className="text-xs text-gray-500">{shownMembers.length} of {members.length}</span>}
+        <span className="mx-1 h-5 w-px bg-gray-200" />
+        <span className="text-xs text-gray-400">Daily report</span>
+        <button onClick={() => exportRowsToXlsx(`attendance-${date}`, head, data, [], { title: `Daily Attendance — ${date}` })} className="flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-600 hover:bg-gray-50">
+          <FileSpreadsheet size={14} /> Excel
+        </button>
+        <button onClick={() => printRows(`Daily Attendance — ${date}`, head, data)} className="flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-600 hover:bg-gray-50">
+          <Printer size={14} /> PDF
+        </button>
         <button onClick={() => exportRowsToCsv(`attendance-${date}`, head, data)} className="flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-600 hover:bg-gray-50">
-          <FileSpreadsheet size={14} /> CSV
+          <FileText size={14} /> CSV
         </button>
       </div>
+      {importOpen && (
+        <AttendanceImportDialog
+          members={members}
+          defaultDate={date}
+          onClose={() => setImportOpen(false)}
+          onImported={async () => { setImportOpen(false); await refresh(); }}
+        />
+      )}
 
       <p className="text-xs text-gray-400">
         Enter an <strong>In</strong> and <strong>Out</strong> time and the day is graded against that member&apos;s shift
-        (Setup → Shifts): full-day hours or more marks <strong>P</strong> and earns overtime, at least half-day hours
-        marks <strong>HD</strong>, anything less marks <strong>A</strong>. Clicking P / A / HD / PL sets the day by hand
-        and overrides that grading.
+        (Setup → Shifts) — including any late / early-exit fines and overtime pay the shift automates.
+        <strong> P / HD / A</strong> mark the day by hand (HD asks which session and what the other half is),
+        <strong> F</strong> and <strong>OT</strong> add fines and overtime, <strong>L</strong> marks leave, on duty or a holiday.
       </p>
 
       <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white">
         <table className="w-full min-w-[860px] border-collapse text-sm">
           <thead>
             <tr className="border-b border-gray-100 bg-gray-50 text-left text-gray-500">
-              <th className="px-4 py-2 font-medium">Member</th>
-              <th className="px-4 py-2 font-medium">Mark</th>
-              <th className="px-4 py-2 font-medium">In</th>
-              <th className="px-4 py-2 font-medium">Out</th>
-              <th className="px-4 py-2 font-medium">Hours</th>
-              <th className="px-4 py-2 font-medium">OT (hrs)</th>
-              <th className="px-4 py-2 font-medium">Fine (hrs)</th>
+              <SortTh label="Member" sortKey="name" activeKey={sortKey} dir={sortDir} onSort={sortBy} />
+              <SortTh label="Mark" sortKey="mark" activeKey={sortKey} dir={sortDir} onSort={sortBy} />
+              <SortTh label="In" sortKey="in" activeKey={sortKey} dir={sortDir} onSort={sortBy} />
+              <SortTh label="Out" sortKey="out" activeKey={sortKey} dir={sortDir} onSort={sortBy} />
+              <th className="px-4 py-2 font-medium">Photos</th>
+              <SortTh label="Hours" sortKey="hours" activeKey={sortKey} dir={sortDir} onSort={sortBy} />
             </tr>
           </thead>
           <tbody>
-            {members.map((m) => {
+            {groups.map(({ group, list }) => [
+              <tr key={`g-${group}`} className="bg-gray-50/80">
+                <td colSpan={6} className="px-4 py-1.5 text-xs font-semibold text-gray-600">
+                  {group} <span className="ml-1 rounded-full bg-white px-1.5 py-0.5 text-[10px] text-gray-500 ring-1 ring-gray-200">{list.length}</span>
+                </td>
+              </tr>,
+              ...list.map((m) => {
               const att = byUser.get(m.id);
               const code = att?.code ?? "NM";
               return (
@@ -365,28 +475,23 @@ function DayView({
                     </div>
                   </td>
                   <td className="px-4 py-2.5">
-                    <div className="inline-flex overflow-hidden rounded-lg ring-1 ring-gray-200">
-                      {MARK_CODES.map((c) => {
-                        const on = code === c;
-                        const meta = ATTENDANCE_META[c];
-                        return (
-                          <button
-                            key={c}
-                            onClick={() => mark(m.id, { code: c })}
-                            title={meta.label}
-                            className={`px-2.5 py-1 text-xs font-semibold transition-colors ${on ? meta.className : "bg-white text-gray-400 hover:bg-gray-50"}`}
-                          >
-                            {meta.short}
-                          </button>
-                        );
-                      })}
-                    </div>
+                    <DayActions
+                      target={{ userId: m.id, name: m.fullName, date, row: att }}
+                      leaveTypes={leaveChoices(m.id)}
+                      onSaved={refresh}
+                      onError={setActionError}
+                    />
+                    {att?.note && <div className="mt-1 max-w-[260px] truncate text-[11px] text-gray-500" title={att.note}>📝 {att.note}</div>}
+                    <span className="sr-only">{ATTENDANCE_META[code as AttendanceCodeApi]?.label}</span>
                   </td>
                   <td className="px-4 py-2.5">
-                    <input type="time" value={att?.inTime ?? ""} onChange={(e) => mark(m.id, { inTime: e.target.value || null })} className="rounded-md border border-gray-200 px-2 py-1 text-xs outline-none focus:border-cyan-500" />
+                    <input type="time" disabled={ownLock(m.id)} value={att?.inTime ?? ""} onChange={(e) => mark(m.id, { inTime: e.target.value || null })} className="disabled:opacity-50 rounded-md border border-gray-200 px-2 py-1 text-xs outline-none focus:border-cyan-500" />
                   </td>
                   <td className="px-4 py-2.5">
-                    <input type="time" value={att?.outTime ?? ""} onChange={(e) => mark(m.id, { outTime: e.target.value || null })} className="rounded-md border border-gray-200 px-2 py-1 text-xs outline-none focus:border-cyan-500" />
+                    <input type="time" disabled={ownLock(m.id)} value={att?.outTime ?? ""} onChange={(e) => mark(m.id, { outTime: e.target.value || null })} className="disabled:opacity-50 rounded-md border border-gray-200 px-2 py-1 text-xs outline-none focus:border-cyan-500" />
+                  </td>
+                  <td className="px-4 py-2.5">
+                    {punchShots(att).length > 0 ? <PunchPhotoThumbs row={att} name={m.fullName} size={30} /> : <span className="text-gray-300">—</span>}
                   </td>
                   {/* Hours actually worked, derived from the punch pair against the member's shift.
                       A present day with no punch-out is flagged so someone adds the time out; the run
@@ -413,15 +518,9 @@ function DayView({
                       <span className="text-gray-300">—</span>
                     )}
                   </td>
-                  <td className="px-4 py-2.5">
-                    <input type="number" value={Number(att?.overtimeHours ?? 0)} onChange={(e) => mark(m.id, { overtimeHours: Number(e.target.value) })} className="w-16 rounded-md border border-gray-200 px-2 py-1 text-right text-xs outline-none focus:border-cyan-500" />
-                  </td>
-                  <td className="px-4 py-2.5">
-                    <input type="number" value={Number(att?.fineHours ?? 0)} onChange={(e) => mark(m.id, { fineHours: Number(e.target.value) })} className="w-16 rounded-md border border-gray-200 px-2 py-1 text-right text-xs outline-none focus:border-cyan-500" />
-                  </td>
                 </tr>
               );
-            })}
+            })])}
           </tbody>
         </table>
       </div>
@@ -473,6 +572,7 @@ function MonthView({
     return members.map((m) => ({ member: m, s: summarize(map.get(m.id) ?? []) }));
   }, [rows, members]);
 
+  const { sorted: musterRows, sortKey, sortDir, toggle: sortBy } = useTableSort(byMember, MUSTER_SORT, { key: "name" });
   const exportHead = ["Member", "Present", "Absent", "Half Day", "Paid Leave", "Week Off", "Unmarked", "Overtime", "Fine", "Payable Days"];
   const exportRows = byMember.map(({ member, s }) => [member.fullName, s.present, s.absent, s.halfDay, s.paidLeave, s.weekOff, s.unmarked, s.overtime, s.fine, s.payableDays]);
 
@@ -487,20 +587,20 @@ function MonthView({
         <table className="w-full min-w-[720px] border-collapse text-sm">
           <thead>
             <tr className="border-b border-gray-100 bg-gray-50 text-left text-gray-500">
-              <th className="px-4 py-2 font-medium">Member</th>
-              <th className="px-3 py-2 text-center font-medium">P</th>
-              <th className="px-3 py-2 text-center font-medium">A</th>
-              <th className="px-3 py-2 text-center font-medium">HD</th>
-              <th className="px-3 py-2 text-center font-medium">PL</th>
-              <th className="px-3 py-2 text-center font-medium">WO</th>
-              <th className="px-3 py-2 text-center font-medium">NM</th>
-              <th className="px-3 py-2 text-right font-medium">OT (hrs)</th>
-              <th className="px-3 py-2 text-right font-medium">Fine</th>
-              <th className="px-3 py-2 text-right font-medium">Payable Days</th>
+              <SortTh label="Member" sortKey="name" activeKey={sortKey} dir={sortDir} onSort={sortBy} />
+              <SortTh label="P" sortKey="present" activeKey={sortKey} dir={sortDir} onSort={sortBy} align="right" className="px-3" />
+              <SortTh label="A" sortKey="absent" activeKey={sortKey} dir={sortDir} onSort={sortBy} align="right" className="px-3" />
+              <SortTh label="HD" sortKey="halfDay" activeKey={sortKey} dir={sortDir} onSort={sortBy} align="right" className="px-3" />
+              <SortTh label="PL" sortKey="paidLeave" activeKey={sortKey} dir={sortDir} onSort={sortBy} align="right" className="px-3" />
+              <SortTh label="WO" sortKey="weekOff" activeKey={sortKey} dir={sortDir} onSort={sortBy} align="right" className="px-3" />
+              <SortTh label="NM" sortKey="unmarked" activeKey={sortKey} dir={sortDir} onSort={sortBy} align="right" className="px-3" />
+              <SortTh label="OT (hrs)" sortKey="overtime" activeKey={sortKey} dir={sortDir} onSort={sortBy} align="right" className="px-3" />
+              <SortTh label="Fine" sortKey="fine" activeKey={sortKey} dir={sortDir} onSort={sortBy} align="right" className="px-3" />
+              <SortTh label="Payable Days" sortKey="payableDays" activeKey={sortKey} dir={sortDir} onSort={sortBy} align="right" className="px-3" />
             </tr>
           </thead>
           <tbody>
-            {byMember.map(({ member, s }) => (
+            {musterRows.map(({ member, s }) => (
               <tr
                 key={member.id}
                 onClick={() => onOpenCalendar(member)}
@@ -536,6 +636,20 @@ function MonthView({
     </>
   );
 }
+
+type MusterRow = { member: UserResponse; s: ReturnType<typeof summarize> };
+const MUSTER_SORT = {
+  name: (r: MusterRow) => r.member.fullName,
+  present: (r: MusterRow) => r.s.present,
+  absent: (r: MusterRow) => r.s.absent,
+  halfDay: (r: MusterRow) => r.s.halfDay,
+  paidLeave: (r: MusterRow) => r.s.paidLeave,
+  weekOff: (r: MusterRow) => r.s.weekOff,
+  unmarked: (r: MusterRow) => r.s.unmarked,
+  overtime: (r: MusterRow) => r.s.overtime,
+  fine: (r: MusterRow) => r.s.fine,
+  payableDays: (r: MusterRow) => Number(r.s.payableDays),
+};
 
 function MusterCell({ code, value }: { code: keyof typeof ATTENDANCE_META; value: number }) {
   const meta = ATTENDANCE_META[code];

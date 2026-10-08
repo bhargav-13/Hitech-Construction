@@ -5,7 +5,6 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ChevronRight } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
-import { NotificationBell } from "@/components/task/NotificationBell";
 import { useTaskStore } from "@/lib/taskStore";
 import { useCan } from "@/lib/permissions";
 
@@ -13,9 +12,11 @@ const TABS = [
   { label: "Dashboard", href: "/taskopad" },
   { label: "Tasks", href: "/taskopad/tasks", feature: "TASKOPAD_TASKS" },
   { label: "Approvals", href: "/taskopad/approvals", feature: "TASKOPAD_APPROVALS" },
+  { label: "Documents", href: "/taskopad/documents", feature: "TASKOPAD_DOCUMENTS" },
   { label: "Reports", href: "/taskopad/reports", feature: "TASKOPAD_REPORTS" },
   // Standalone routine board — see app/taskopad/checklist. Deliberately not tied to tasks.
   { label: "Checklist", href: "/taskopad/checklist", feature: "TASKOPAD_CHECKLIST" },
+  { label: "Settings", href: "/taskopad/settings", feature: "TASKOPAD_SETTINGS" },
 ];
 
 /**
@@ -48,7 +49,7 @@ export function TaskopadShell({ children, fill = false }: { children: React.Reac
             <ChevronRight size={12} className="shrink-0" />
             <span className="font-medium text-gray-600">{active?.label ?? "Dashboard"}</span>
           </div>
-          <NotificationBell />
+          {/* No bell here: notifications live in the global header's bell, one feed for the whole app. */}
         </div>
 
         <div className="flex gap-5 border-b border-gray-200">

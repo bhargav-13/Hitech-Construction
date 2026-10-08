@@ -21,19 +21,24 @@ export const PAYROLL_NAV: PayrollNavNode[] = [
   { label: "Dashboard", href: "/payroll", icon: "home" },
   // Pre-setup: reusable policies (shifts, holidays, leave) configured once and assigned to people.
   { label: "Setup", href: "/payroll/setup", feature: "PAYROLL_SETUP", icon: "sliders" },
-  { label: "People", href: "/payroll/staff", feature: "PAYROLL_STAFF", icon: "users" },
+  { label: "Staff", href: "/payroll/staff", feature: "PAYROLL_STAFF", icon: "users" },
   { label: "Locations", href: "/payroll/locations", feature: "PAYROLL_SETUP", icon: "pin" },
   // Combined Day + Month view (formerly two pages).
   { label: "Attendance", href: "/payroll/attendance", feature: "PAYROLL_ATTENDANCE", icon: "calendar" },
   // All Requests + Approval Queue are now tabs on one page.
   { label: "Leave", href: "/payroll/leave", feature: "PAYROLL_LEAVE", icon: "calendar" },
-  { label: "Monthly Runs", href: "/payroll/run", feature: "PAYROLL_RUN", icon: "wallet" },
+  { label: "Payroll", href: "/payroll/run", feature: "PAYROLL_RUN", icon: "wallet" },
+  // Payments ledger: salary, advances, bonuses, adjustments — records only, no money moves.
+  { label: "Payments", href: "/payroll/payments", feature: "PAYROLL_RUN", icon: "receipt" },
   { label: "Loans", href: "/payroll/loans", feature: "PAYROLL_LOANS", icon: "landmark" },
   { label: "Reimbursements", href: "/payroll/reimbursements", feature: "PAYROLL_REIMBURSEMENTS", icon: "receipt" },
-  // Payments (payout tracking) and Tax Profiles are not wired to the backend yet — hidden from
-  // nav so no mock data reaches users. Re-add once Phase 6 (payroll_payments) ships.
+  // Piece-rate work: catalogue + daily work logs, paid through the run.
+  { label: "Work Management", href: "/payroll/work", feature: "PAYROLL_ATTENDANCE", icon: "grid" },
   { label: "Reports", href: "/payroll/reports", feature: "PAYROLL_STAFF", icon: "chart" },
-  { label: "Others", href: "/payroll/others", icon: "grid" },
+  // Messages to staff, delivered to their notification bell and Inbox.
+  { label: "Broadcasts", href: "/payroll/broadcasts", feature: "PAYROLL_STAFF", icon: "megaphone" },
+  // Letters, cashbook and the attendance scorecard read every staff member's records.
+  { label: "Others", href: "/payroll/others", feature: "PAYROLL_STAFF", icon: "grid" },
   // Admins are employees too — they need somewhere to apply for their own leave and read their own
   // payslip. Without this the only "Leave" in the rail was the approval queue, which anyone without
   // PAYROLL:APPROVE was refused from, leaving them no way to raise a request at all.
@@ -47,6 +52,7 @@ export const PAYROLL_NAV: PayrollNavNode[] = [
       { label: "My Loans", href: "/payroll/me/loans" },
       { label: "My Reimbursements", href: "/payroll/me/reimbursements" },
       { label: "My Profile", href: "/payroll/me/profile" },
+      { label: "Inbox & Documents", href: "/payroll/me/inbox" },
     ],
   },
 ];
@@ -60,6 +66,7 @@ export const PAYROLL_SELF_NAV: PayrollNavNode[] = [
   { label: "My Loans", href: "/payroll/me/loans", icon: "landmark" },
   { label: "My Reimbursements", href: "/payroll/me/reimbursements", icon: "receipt" },
   { label: "My Profile", href: "/payroll/me/profile", icon: "users" },
+  { label: "Inbox & Documents", href: "/payroll/me/inbox", icon: "megaphone" },
 ];
 
 /** The three employment categories PagarBook offers when adding staff. */
@@ -110,8 +117,9 @@ export const STAFF_CATEGORIES: CategoryConfig[] = [
 export const categoryConfig = (key: StaffCategory) => STAFF_CATEGORIES.find((c) => c.key === key)!;
 
 /** Attendance status codes used across the dashboard and muster roll. */
-export type AttendanceCode = "P" | "A" | "HD" | "PL" | "NM" | "WO";
+export type AttendanceCode = "P" | "A" | "HD" | "PL" | "NM" | "WO" | "OD" | "H" | "OH" | "L";
 
+/** PagarBook's calendar legend — OD on duty, H holiday, OH optional holiday, L unpaid leave. */
 export const ATTENDANCE_META: Record<AttendanceCode, { label: string; short: string; className: string }> = {
   P: { label: "Present", short: "P", className: "bg-emerald-100 text-emerald-700" },
   A: { label: "Absent", short: "A", className: "bg-rose-100 text-rose-700" },
@@ -119,6 +127,10 @@ export const ATTENDANCE_META: Record<AttendanceCode, { label: string; short: str
   PL: { label: "Paid Leave", short: "PL", className: "bg-blue-100 text-blue-700" },
   NM: { label: "Not Marked", short: "NM", className: "bg-gray-100 text-gray-500" },
   WO: { label: "Week Off", short: "WO", className: "bg-slate-100 text-slate-500" },
+  OD: { label: "On Duty", short: "OD", className: "bg-teal-100 text-teal-700" },
+  H: { label: "Holiday", short: "H", className: "bg-violet-100 text-violet-700" },
+  OH: { label: "Optional Holiday", short: "OH", className: "bg-fuchsia-100 text-fuchsia-700" },
+  L: { label: "Unpaid Leave", short: "L", className: "bg-orange-100 text-orange-700" },
 };
 
 /** Report catalogue — the five groups from the PagarBook Reports page. */

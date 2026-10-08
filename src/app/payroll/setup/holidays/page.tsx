@@ -110,6 +110,17 @@ export default function HolidaysPage() {
   );
 }
 
+/** India's holiday list for 2026, as PagarBook pre-fills it (dates move each year, so per year). */
+const INDIA_HOLIDAYS: Record<number, [string, string][]> = {
+  2026: [
+    ["2026-01-01", "New Year's Day"], ["2026-01-14", "Makar Sankranti / Pongal"], ["2026-01-26", "Republic Day"],
+    ["2026-02-15", "Maha Shivratri"], ["2026-03-04", "Holi"], ["2026-03-26", "Ram Navami"], ["2026-03-31", "Mahavir Jayanti"],
+    ["2026-04-03", "Good Friday"], ["2026-05-01", "Buddha Purnima"], ["2026-05-27", "Id-ul-Zuha (Bakrid)"], ["2026-06-26", "Muharram"],
+    ["2026-08-15", "Independence Day"], ["2026-09-04", "Milad-un-Nabi"], ["2026-10-02", "Gandhi Jayanti"], ["2026-10-20", "Dussehra"],
+    ["2026-11-08", "Diwali"], ["2026-11-24", "Guru Nanak Jayanti"], ["2026-12-25", "Christmas Day"],
+  ],
+};
+
 function HolidayPolicyDrawer({
   existing,
   onClose,
@@ -161,10 +172,25 @@ function HolidayPolicyDrawer({
 
         <div className="rounded-xl border border-gray-200 p-3">
           <div className="mb-2 flex items-center justify-between">
-            <span className="text-sm font-semibold text-gray-800">Holidays ({holidays.length})</span>
-            <button type="button" onClick={addRow} className="flex items-center gap-1 text-xs font-medium text-brand-accent hover:underline">
-              <Plus size={13} /> Add holiday
-            </button>
+            <span className="text-sm font-semibold text-gray-800">Holidays ({holidays.length}{holidays.some((h) => h.type === "OPTIONAL") ? ` · ${holidays.filter((h) => h.type === "OPTIONAL").length} optional` : ""})</span>
+            <div className="flex items-center gap-3">
+              {INDIA_HOLIDAYS[Number(year)] && (
+                <button
+                  type="button"
+                  onClick={() => setHolidays((h) => {
+                    const have = new Set(h.map((x) => x.date));
+                    const add = INDIA_HOLIDAYS[Number(year)].filter(([d]) => !have.has(d)).map(([date, n]) => ({ date, name: n, type: "PUBLIC" as const }));
+                    return [...h, ...add].sort((a, b) => a.date.localeCompare(b.date));
+                  })}
+                  className="text-xs font-medium text-gray-600 hover:text-brand-accent hover:underline"
+                >
+                  Load Indian holidays {year}
+                </button>
+              )}
+              <button type="button" onClick={addRow} className="flex items-center gap-1 text-xs font-medium text-brand-accent hover:underline">
+                <Plus size={13} /> Add holiday
+              </button>
+            </div>
           </div>
           {holidays.length === 0 ? (
             <p className="py-4 text-center text-xs text-gray-400">No holidays yet. Add the year&apos;s holidays.</p>

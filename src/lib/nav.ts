@@ -12,6 +12,7 @@ export const NAV_ITEMS: NavItem[] = [
   { label: "Procurement", href: "/procurement" },
   { label: "Payroll", href: "/payroll" },
   { label: "Warehouse", href: "/warehouse" },
+  { label: "Asset", href: "/asset" },
   { label: "Audit", href: "/audit" },
   // Everyone has an inbox — it only ever shows requests waiting on (or raised by) you.
   { label: "Approvals", href: "/approvals" },
@@ -23,7 +24,6 @@ export const NAV_ITEMS: NavItem[] = [
   // { label: "Finance", href: "/finance" },
   // { label: "CRM", href: "/crm" },
   // { label: "Equipment", href: "/equipment" },
-  // { label: "Asset", href: "/asset" },
   // { label: "Services", href: "/services" },
 ];
 

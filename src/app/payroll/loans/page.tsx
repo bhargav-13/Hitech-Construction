@@ -9,7 +9,7 @@ import { DatePicker } from "@/components/DatePicker";
 import { RowMenu, RowMenuItem } from "@/components/RowMenu";
 import { computeEmi } from "@/lib/payrollApi";
 import { useLoans } from "@/lib/usePayrollLive";
-import { getUsers, ApiError } from "@/lib/api";
+import { getPayrollPeople, ApiError } from "@/lib/api";
 import type { LoanApi, UserResponse } from "@/lib/api";
 import { inr } from "@/lib/format";
 import { HandCoins, Landmark, Pencil, Plus, Trash2 } from "lucide-react";
@@ -23,8 +23,26 @@ export default function LoansPage() {
   const [actionError, setActionError] = useState("");
 
   useEffect(() => {
-    getUsers(0, 200).then((r) => setMembers(r.content.filter((u) => u.onPayroll))).catch(() => setMembers([]));
+    getPayrollPeople().then((r) => setMembers(r.content.filter((u) => u.onPayroll))).catch(() => setMembers([]));
   }, []);
+
+  const [q, setQ] = useState("");
+  const [status, setStatus] = useState("all");
+  const [order, setOrder] = useState("outstanding");
+  const shown = useMemo(() => {
+    const t = q.trim().toLowerCase();
+    const rows = loans.filter((l) =>
+      (status === "all" || (l.status ?? "ACTIVE") === status)
+      && (!t || l.memberName.toLowerCase().includes(t) || l.name.toLowerCase().includes(t)));
+    const by: Record<string, (a: LoanApi, b: LoanApi) => number> = {
+      outstanding: (a, b) => Number(b.outstanding) - Number(a.outstanding),
+      principal: (a, b) => Number(b.principal) - Number(a.principal),
+      emi: (a, b) => Number(b.emi) - Number(a.emi),
+      member: (a, b) => a.memberName.localeCompare(b.memberName),
+      newest: (a, b) => b.id - a.id,
+    };
+    return [...rows].sort(by[order]);
+  }, [loans, q, status, order]);
 
   const totals = useMemo(() => ({
     disbursed: loans.reduce((a, l) => a + Number(l.principal), 0),
@@ -54,6 +72,15 @@ export default function LoansPage() {
           <StatCard label="Monthly EMI" value={inr(totals.monthlyEmi)} accent="gray" />
         </div>
 
+        {loans.length > 0 && (
+          <div className="flex flex-wrap items-center gap-2">
+            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search member or loan" className="input w-56" />
+            <div className="w-40"><Select value={status} onChange={setStatus} options={[{ value: "all", label: "All statuses" }, { value: "ACTIVE", label: "Active" }, { value: "PAUSED", label: "Paused" }, { value: "CLOSED", label: "Closed" }, { value: "WRITTEN_OFF", label: "Written off" }]} /></div>
+            <div className="w-48"><Select value={order} onChange={setOrder} options={[{ value: "outstanding", label: "Sort: Outstanding ↓" }, { value: "principal", label: "Sort: Principal ↓" }, { value: "emi", label: "Sort: EMI ↓" }, { value: "member", label: "Sort: Member A–Z" }, { value: "newest", label: "Sort: Newest first" }]} /></div>
+            <span className="text-xs text-gray-500">{shown.length} of {loans.length}</span>
+          </div>
+        )}
+
         {loading ? (
           <div className="flex items-center justify-center gap-2 rounded-xl border border-dashed border-gray-300 bg-white py-16 text-sm text-gray-400">
             <Spinner size={16} className="text-brand-accent" /> Loading…
@@ -62,7 +89,7 @@ export default function LoansPage() {
           <PayrollEmpty icon={Landmark} title="No loans yet" hint="Issue a member loan and track its EMI and outstanding." action={<button onClick={() => setDialog("new")} className="rounded-lg bg-brand-accent px-4 py-2 text-sm font-medium text-white hover:opacity-90">+ Add Loan</button>} />
         ) : (
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {loans.map((l) => (
+            {shown.map((l) => (
               <LoanCard
                 key={l.id}
                 loan={l}

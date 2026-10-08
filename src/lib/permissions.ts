@@ -51,3 +51,17 @@ export function filterNav<T extends { feature?: Need; section?: string; children
   }
   return out;
 }
+
+/**
+ * Separation of duties, mirrored from the server (payroll `PayrollGuards`): nobody but Super Admin
+ * changes their own payroll records — attendance, payments, earnings, loans, claims, salary. Returns
+ * a check for a member id: true = this is the signed-in user's own record and they may not edit it.
+ */
+export function useOwnRecordLock() {
+  const me = useAuthStore((s) => s.user);
+  return useCallback(
+    (userId: number | null | undefined) =>
+      !!me && userId != null && me.id === userId && me.role?.name?.toLowerCase() !== "super admin",
+    [me],
+  );
+}

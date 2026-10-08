@@ -76,8 +76,11 @@ function parseCsv(text: string): ParsedTaskRow[] {
 export function TaskImportDrawer({
   onClose,
   onImport,
+  title = "Import Tasks",
 }: {
   onClose: () => void;
+  /** "Import Draft Tasks" reuses the same drawer; only the caption differs. */
+  title?: string;
   /** Creates the tasks; resolves to how many landed. */
   onImport: (rows: ParsedTaskRow[]) => Promise<number>;
 }) {
@@ -119,7 +122,7 @@ export function TaskImportDrawer({
 
   return (
     <Drawer
-      title="Import Tasks"
+      title={title}
       onClose={onClose}
       onSave={done == null ? run : onClose}
       saveLabel={done != null ? "Done" : busy ? "Importing…" : `Import ${rows.length || ""}`.trim()}

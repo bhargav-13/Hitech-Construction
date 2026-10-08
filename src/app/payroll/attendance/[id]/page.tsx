@@ -5,18 +5,22 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { PayrollShell, PayrollEmpty, StatCard } from "@/components/payroll/PayrollShell";
 import { Spinner } from "@/components/Spinner";
-import { useMuster } from "@/lib/usePayrollLive";
-import { editAttendance, getPayrollProfile, getUsers, ApiError } from "@/lib/api";
-import type { AttendanceApiResponse, AttendanceCodeApi, HolidayResponse, UserResponse } from "@/lib/api";
+import { useMemberAttendance } from "@/lib/usePayrollLive";
+import { getPayrollProfile, getPayrollPeople } from "@/lib/api";
+import type { AttendanceApiResponse, HolidayResponse, UserResponse } from "@/lib/api";
 import { useHolidayPolicies } from "@/lib/usePayrollSetup";
 import { ATTENDANCE_META } from "@/lib/payrollConfig";
+import { DayActions } from "@/components/payroll/AttendanceActions";
+import { useLeavePolicies } from "@/lib/usePayrollSetup";
+import { inr } from "@/lib/format";
 import {
   ArrowLeft, CalendarDays, ChevronLeft, ChevronRight, CircleCheck, CircleX, Clock, PartyPopper, Plane, Users,
 } from "lucide-react";
+import { DayPunchDetails, punchShots } from "@/components/payroll/PunchPhotos";
+import { formatDateIST, todayIST } from "@/lib/datetime";
 
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-const MARK_CODES: AttendanceCodeApi[] = ["P", "A", "HD", "PL", "WO"];
 const pad = (n: number) => String(n).padStart(2, "0");
 
 interface Stats {
@@ -30,7 +34,7 @@ const isShortDay = (r: AttendanceApiResponse) => r.code === "A" && Number(r.work
 /** What a row pays: the server's figure (same as the payroll run), else the plain code value. */
 function rowPayable(r: AttendanceApiResponse): number {
   if (r.payableDays != null) return Number(r.payableDays);
-  return r.code === "P" || r.code === "PL" || r.code === "WO" ? 1 : r.code === "HD" ? 0.5 : 0;
+  return ["P", "PL", "WO", "OD", "H"].includes(r.code) ? 1 : r.code === "HD" ? 0.5 : 0;
 }
 
 function summarize(rows: AttendanceApiResponse[]): Stats {
@@ -39,11 +43,11 @@ function summarize(rows: AttendanceApiResponse[]): Stats {
     s.overtime += Number(r.overtimeHours ?? 0);
     s.payableDays += rowPayable(r);
     switch (r.code) {
-      case "P": s.present++; break;
+      case "P": case "OD": s.present++; break;
       case "HD": s.halfDay++; break;
       case "PL": s.paidLeave++; break;
       case "WO": s.weekOff++; break;
-      case "A": s.absent++; break;
+      case "A": case "L": s.absent++; break;
       case "NM": s.unmarked++; break;
     }
   }
@@ -68,15 +72,17 @@ export default function MemberAttendancePage() {
   const [member, setMember] = useState<UserResponse | null>(null);
   const [memberLoading, setMemberLoading] = useState(true);
   const [holidayPolicyId, setHolidayPolicyId] = useState<number | null>(null);
+  const [leavePolicyId, setLeavePolicyId] = useState<number | null>(null);
+  const { leavePolicies } = useLeavePolicies();
   const { holidayPolicies } = useHolidayPolicies();
   const [year, setYear] = useState(new Date().getFullYear());
   const [monthIdx, setMonthIdx] = useState(new Date().getMonth());
-  const [selected, setSelected] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
+  // Open on today, so the day's punch times and photos show without a click.
+  const [selected, setSelected] = useState<string | null>(todayIST());
   const [error, setError] = useState("");
 
   useEffect(() => {
-    getUsers(0, 500)
+    getPayrollPeople()
       .then((r) => setMember(r.content.find((u) => u.id === userId) ?? null))
       .catch(() => setMember(null))
       .finally(() => setMemberLoading(false));
@@ -86,14 +92,15 @@ export default function MemberAttendancePage() {
     // Nobody has a payroll profile until one is filled in; no profile simply means no holidays to
     // show, which is the truth rather than an error worth surfacing on an attendance screen.
     getPayrollProfile(userId)
-      .then((p) => setHolidayPolicyId(p.holidayPolicyId))
+      .then((p) => { setHolidayPolicyId(p.holidayPolicyId); setLeavePolicyId(p.leavePolicyId); })
       .catch(() => setHolidayPolicyId(null));
   }, [userId]);
 
   const lastDay = new Date(year, monthIdx + 1, 0).getDate();
   const from = `${year}-${pad(monthIdx + 1)}-01`;
   const to = `${year}-${pad(monthIdx + 1)}-${pad(lastDay)}`;
-  const { rows, loading, refresh } = useMuster(from, to);
+  // Just this person's month — it used to load everyone's month (and every selfie) to show one person.
+  const { rows, loading, refresh } = useMemberAttendance(userId, from, to);
 
   const byDate = useMemo(() => {
     const m = new Map<string, AttendanceApiResponse>();
@@ -148,26 +155,15 @@ export default function MemberAttendancePage() {
     setSelected(null);
   };
 
-  async function markDay(dateIso: string, code: AttendanceCodeApi) {
-    setSaving(true);
-    setError("");
-    try {
-      await editAttendance({
-        userId,
-        date: dateIso,
-        code,
-        inTime: code === "P" ? "09:00" : null,
-        outTime: code === "P" ? "18:00" : null,
-        overtimeHours: 0,
-        fineHours: 0,
-      });
-      await refresh();
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Unable to save this change.");
-    } finally {
-      setSaving(false);
-    }
-  }
+  const leaveTypes = useMemo(() => {
+    const lp = leavePolicies.find((x) => x.id === leavePolicyId) ?? leavePolicies[0];
+    return (lp?.types ?? []).filter((t) => t.paid).map((t) => ({ value: t.name, label: t.name }));
+  }, [leavePolicies, leavePolicyId]);
+  const monthMoney = useMemo(() => {
+    let ot = 0, fine = 0;
+    for (const r of byDate.values()) { ot += Number(r.otAmount ?? 0); fine += Number(r.fineAmount ?? 0); }
+    return { ot, fine };
+  }, [byDate]);
 
   if (memberLoading) {
     return (
@@ -218,13 +214,15 @@ export default function MemberAttendancePage() {
         {error && <div className="rounded-lg bg-rose-50 px-4 py-2 text-sm text-rose-600">{error}</div>}
 
         {/* Analysis */}
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-8">
           <StatCard label="Attendance" value={`${rate}%`} accent="cyan" icon={CalendarDays} />
           <StatCard label="Present" value={stats.present} accent="green" icon={CircleCheck} />
           <StatCard label="Absent" value={stats.absent} accent="rose" icon={CircleX} />
           <StatCard label="Half Day" value={stats.halfDay} accent="amber" icon={Clock} />
           <StatCard label="Paid Leave" value={stats.paidLeave} accent="blue" icon={Plane} />
           <StatCard label="Payable Days" value={stats.payableDays} accent="green" />
+          <StatCard label="Overtime ₹" value={inr(monthMoney.ot)} accent="green" />
+          <StatCard label="Fine ₹" value={inr(monthMoney.fine)} accent="rose" />
         </div>
 
         <div className="grid gap-5 lg:grid-cols-[1fr_280px]">
@@ -263,9 +261,22 @@ export default function MemberAttendancePage() {
                         {isShortDay(att) ? `Short day · ${Number(att.workedHours)}h` : meta.label}
                       </span>
                     )}
+                    {att && (Number(att.otAmount ?? 0) > 0 || Number(att.overtimeHours ?? 0) > 0 || Number(att.fineAmount ?? 0) > 0) && (
+                      <span className="text-[9px] leading-none font-semibold">
+                        {Number(att.overtimeHours ?? 0) > 0 ? "OT " : ""}{Number(att.fineAmount ?? 0) > 0 ? "F" : ""}
+                      </span>
+                    )}
                     {holiday && (
                       <span className="line-clamp-2 text-[10px] leading-tight font-medium text-violet-600">
                         {holiday.name}
+                      </span>
+                    )}
+                    {punchShots(att).length > 0 && (
+                      <span className="flex -space-x-1.5" title="Punch photos — click the day to view">
+                        {punchShots(att).filter((p) => p.src).slice(0, 4).map((p) => (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img key={p.key} src={p.src!} alt={p.label} className="h-5 w-5 rounded-full object-cover ring-2 ring-white" />
+                        ))}
                       </span>
                     )}
                   </button>
@@ -279,7 +290,7 @@ export default function MemberAttendancePage() {
             <div className="rounded-2xl border border-gray-200 bg-white p-4">
               <h3 className="mb-3 text-sm font-semibold text-gray-800">Legend</h3>
               <div className="grid grid-cols-2 gap-2">
-                {(["P", "A", "HD", "PL", "WO", "NM"] as const).map((c) => (
+                {(["P", "OD", "A", "HD", "PL", "L", "WO", "H", "OH", "NM"] as const).map((c) => (
                   <div key={c} className="flex items-center gap-2 text-xs text-gray-600">
                     <span className={`inline-block h-4 w-4 rounded ${ATTENDANCE_META[c].className}`} />
                     {ATTENDANCE_META[c].label}
@@ -317,25 +328,21 @@ export default function MemberAttendancePage() {
             </div>
 
             <div className="rounded-2xl border border-gray-200 bg-white p-4">
-              <h3 className="mb-1 text-sm font-semibold text-gray-800">Mark a day</h3>
+              <h3 className="mb-1 text-sm font-semibold text-gray-800">Day details</h3>
               {selected ? (
                 <>
-                  <p className="mb-3 text-xs text-gray-500">{selected}</p>
-                  <div className="grid grid-cols-2 gap-2">
-                    {MARK_CODES.map((c) => (
-                      <button
-                        key={c}
-                        disabled={saving}
-                        onClick={() => markDay(selected, c)}
-                        className={`rounded-lg px-2 py-2 text-xs font-semibold transition-opacity hover:opacity-90 disabled:opacity-50 ${ATTENDANCE_META[c].className}`}
-                      >
-                        {ATTENDANCE_META[c].label}
-                      </button>
-                    ))}
-                  </div>
+                  <p className="mb-3 text-xs text-gray-500">{formatDateIST(selected)}</p>
+                  <DayPunchDetails row={byDate.get(selected)} name={member.fullName} />
+                  <DayActions
+                    target={{ userId, name: member.fullName, date: selected, row: byDate.get(selected) }}
+                    leaveTypes={leaveTypes}
+                    onSaved={refresh}
+                    onError={setError}
+                  />
+                  {byDate.get(selected)?.note && <p className="mt-2 text-xs text-gray-500">📝 {byDate.get(selected)!.note}</p>}
                 </>
               ) : (
-                <p className="text-xs text-gray-400">Click a date on the calendar to mark it.</p>
+                <p className="text-xs text-gray-400">Click a date on the calendar to see and mark it.</p>
               )}
             </div>
           </div>
@@ -344,3 +351,4 @@ export default function MemberAttendancePage() {
     </PayrollShell>
   );
 }
+

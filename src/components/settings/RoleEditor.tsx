@@ -48,6 +48,10 @@ const MODULES: { code: string; rule?: string }[] = [
     code: "WAREHOUSE",
     rule: "Which stores a person works in, and as keeper or supervisor, is set per store under Warehouse › Access.",
   },
+  {
+    code: "ASSET",
+    rule: "Asset Register covers what the firm owns (add, edit, types, repair / damaged counts). Assign / Return / Transfer covers handing assets out — so a store keeper can assign without changing the register.",
+  },
   { code: "AUDIT" },
   { code: "APPROVAL" },
   {

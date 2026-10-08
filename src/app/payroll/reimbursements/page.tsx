@@ -10,11 +10,13 @@ import { ScanButton } from "@/components/ScanButton";
 import { filledNote, isoDate, matchOption, type ScannedReceipt } from "@/lib/docScan";
 import { RowMenu, RowMenuDivider, RowMenuItem } from "@/components/RowMenu";
 import { useReimbursements } from "@/lib/usePayrollLive";
-import { getUsers, ApiError } from "@/lib/api";
+import { getPayrollPeople, ApiError } from "@/lib/api";
 import type { ReimbursementApi, ReimbStatus, UserResponse } from "@/lib/api";
 import { inr } from "@/lib/format";
 import { formatDateTimeIST } from "@/lib/datetime";
 import { Banknote, CalendarDays, Check, CircleCheck, Clock, Eye, Plus, Receipt, RotateCcw, UserRound, Wallet, X } from "lucide-react";
+import { useTableSort } from "@/lib/useTableSort";
+import { SortTh } from "@/components/vyapar/SortTh";
 
 /** What can be done to a claim. REOPEN clears a decision and sends it back to the pending queue. */
 type ReimbAction = "APPROVE" | "REJECT" | "PAY" | "REOPEN";
@@ -29,6 +31,16 @@ const STATUS_STYLE: Record<ReimbStatus, string> = {
 const EXPENSE_TYPES = ["Travel", "Fuel", "Site Supplies", "Food & Lodging", "Tools", "Medical", "Other"];
 
 /** Reimbursements — real backend. Members submit claims, admins approve/reject/pay. */
+const CLAIM_SORT = {
+  type: (r: ReimbursementApi) => r.expenseType,
+  member: (r: ReimbursementApi) => r.memberName,
+  date: (r: ReimbursementApi) => r.expenseDate,
+  requested: (r: ReimbursementApi) => Number(r.requestedAmount),
+  approved: (r: ReimbursementApi) => (r.approvedAmount == null ? null : Number(r.approvedAmount)),
+  approver: (r: ReimbursementApi) => r.approverName ?? "",
+  status: (r: ReimbursementApi) => r.status,
+};
+
 export default function ReimbursementsPage() {
   const { rows, loading, error, create, decide } = useReimbursements();
   const [creating, setCreating] = useState(false);
@@ -40,7 +52,7 @@ export default function ReimbursementsPage() {
   const [openClaim, setOpenClaim] = useState<ReimbursementApi | null>(null);
 
   useEffect(() => {
-    getUsers(0, 200).then((r) => setMembers(r.content.filter((u) => u.onPayroll))).catch(() => setMembers([]));
+    getPayrollPeople().then((r) => setMembers(r.content.filter((u) => u.onPayroll))).catch(() => setMembers([]));
   }, []);
 
   const totals = useMemo(() => ({
@@ -51,7 +63,16 @@ export default function ReimbursementsPage() {
     pending: rows.filter((r) => r.status === "PENDING").length,
   }), [rows]);
 
-  const visible = tab === "ALL" ? rows : rows.filter((r) => r.status === tab);
+  const [search, setSearch] = useState("");
+  const [type, setType] = useState("all");
+  const filteredRows = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return rows.filter((r) =>
+      (tab === "ALL" || r.status === tab)
+      && (type === "all" || r.expenseType === type)
+      && (!q || r.memberName.toLowerCase().includes(q) || r.claimId.toLowerCase().includes(q)));
+  }, [rows, tab, type, search]);
+  const { sorted: visible, sortKey, sortDir, toggle } = useTableSort(filteredRows, CLAIM_SORT, { key: "date", dir: "desc" });
 
   async function act(id: number, action: ReimbAction) {
     try {
@@ -89,6 +110,10 @@ export default function ReimbursementsPage() {
               {t === "ALL" ? "All" : t.charAt(0) + t.slice(1).toLowerCase()}
             </button>
           ))}
+          <div className="ml-auto flex flex-wrap items-center gap-2">
+            <div className="w-40"><Select value={type} onChange={setType} options={[{ value: "all", label: "All expense types" }, ...EXPENSE_TYPES.map((t) => ({ value: t, label: t }))]} /></div>
+            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search member or claim ID" className="input w-56" />
+          </div>
         </div>
 
         {loading ? (
@@ -100,13 +125,13 @@ export default function ReimbursementsPage() {
             <table className="w-full min-w-[900px] border-collapse text-sm">
               <thead>
                 <tr className="border-b border-gray-100 bg-gray-50 text-left text-gray-500">
-                  <th className="px-4 py-2 font-medium">Expense / Claim</th>
-                  <th className="px-4 py-2 font-medium">Member</th>
-                  <th className="px-4 py-2 font-medium">Expense Date</th>
-                  <th className="px-4 py-2 text-right font-medium">Requested</th>
-                  <th className="px-4 py-2 text-right font-medium">Approved</th>
-                  <th className="px-4 py-2 font-medium">Approved By</th>
-                  <th className="px-4 py-2 font-medium">Status</th>
+                  <SortTh label="Expense / Claim" sortKey="type" activeKey={sortKey} dir={sortDir} onSort={toggle} />
+                  <SortTh label="Member" sortKey="member" activeKey={sortKey} dir={sortDir} onSort={toggle} />
+                  <SortTh label="Expense Date" sortKey="date" activeKey={sortKey} dir={sortDir} onSort={toggle} />
+                  <SortTh label="Requested" sortKey="requested" activeKey={sortKey} dir={sortDir} onSort={toggle} align="right" />
+                  <SortTh label="Approved" sortKey="approved" activeKey={sortKey} dir={sortDir} onSort={toggle} align="right" />
+                  <SortTh label="Approved By" sortKey="approver" activeKey={sortKey} dir={sortDir} onSort={toggle} />
+                  <SortTh label="Status" sortKey="status" activeKey={sortKey} dir={sortDir} onSort={toggle} />
                   <th className="w-10 px-4 py-2" />
                 </tr>
               </thead>
@@ -127,7 +152,11 @@ export default function ReimbursementsPage() {
                     <td className="px-4 py-2.5 text-right text-gray-700">{inr(r.requestedAmount)}</td>
                     <td className="px-4 py-2.5 text-right font-medium text-gray-800">{r.approvedAmount != null ? inr(r.approvedAmount) : "—"}</td>
                     <td className="px-4 py-2.5 text-gray-500">{r.approverName ?? "—"}</td>
-                    <td className="px-4 py-2.5"><span className={`rounded-md px-2 py-0.5 text-xs font-medium ${STATUS_STYLE[r.status]}`}>{r.status}</span></td>
+                    <td className="px-4 py-2.5">
+                      <span className={`rounded-md px-2 py-0.5 text-xs font-medium ${STATUS_STYLE[r.status]}`}>{r.status}</span>
+                      {r.paidMonth && <div className="mt-0.5 text-[10px] text-gray-400">with {monthName(r.paidMonth)} salary</div>}
+                      {r.status === "APPROVED" && <div className="mt-0.5 text-[10px] text-gray-400">pays with next salary</div>}
+                    </td>
                     <td className="px-4 py-2.5 text-right" onClick={(e) => e.stopPropagation()}>
                       <div className="inline-flex">
                         <RowMenu align="right" buttonLabel={`Actions for ${r.claimId}`}>
@@ -230,7 +259,7 @@ function ClaimDetailDrawer({
           <Detail label="Expense date" value={claim.expenseDate} icon={CalendarDays} />
           <Detail label="Applied" value={formatDateTimeIST(claim.appliedAt)} />
           <Detail label="Decided" value={claim.approvedAt ? formatDateTimeIST(claim.approvedAt) : "—"} />
-          <Detail label="Settled" value={claim.settlementDate ?? "—"} />
+          <Detail label="Settled" value={claim.settlementDate ? `${claim.settlementDate}${claim.paidMonth ? ` · with ${monthName(claim.paidMonth)} salary` : ""}` : "—"} />
           <Detail label="Approved by" value={claim.approverName ?? "—"} />
           <Detail label="Claim id" value={claim.claimId} mono />
         </div>
@@ -378,4 +407,10 @@ function F({ label, required, children }: { label: string; required?: boolean; c
       {children}
     </label>
   );
+}
+
+/** "2026-10" → "Oct 2026". */
+function monthName(ym: string): string {
+  const [y, m] = ym.split("-").map(Number);
+  return `${["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][m - 1] ?? ym} ${y}`;
 }

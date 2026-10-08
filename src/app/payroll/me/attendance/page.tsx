@@ -6,7 +6,9 @@ import { Spinner } from "@/components/Spinner";
 import { useAuthStore } from "@/lib/authStore";
 import { useMemberAttendance } from "@/lib/usePayrollLive";
 import { ATTENDANCE_META } from "@/lib/payrollConfig";
-import { ChevronLeft, ChevronRight, CircleCheck, CircleX, Clock, Plane, UserRound } from "lucide-react";
+import { Camera, ChevronLeft, ChevronRight, CircleCheck, CircleX, Clock, Plane, UserRound } from "lucide-react";
+import { DayPunchDetails, punchShots } from "@/components/payroll/PunchPhotos";
+import { formatDateIST, todayIST } from "@/lib/datetime";
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const DOW = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -44,6 +46,7 @@ export default function MyAttendancePage() {
     setMonth(m); setYear(y);
   };
 
+  const [picked, setPicked] = useState<string | null>(null);
   const byDate = useMemo(() => {
     const m = new Map<string, typeof rows[number]>();
     for (const r of rows) m.set(r.date, r);
@@ -77,6 +80,9 @@ export default function MyAttendancePage() {
   if (!user) {
     return <PayrollShell><PayrollEmpty icon={UserRound} title="Please sign in" hint="Log in to see your attendance." /></PayrollShell>;
   }
+
+  // The day shown under the calendar: the one clicked, else today when it is in this month.
+  const day0 = picked && dates.includes(picked) ? picked : dates.includes(todayIST()) ? todayIST() : dates[0];
 
   return (
     <PayrollShell>
@@ -119,11 +125,17 @@ export default function MyAttendancePage() {
                 const code = r?.code ?? "NM";
                 const m = ATTENDANCE_META[code];
                 return (
-                  <div key={d} className={`flex flex-col items-center rounded-lg border border-gray-100 p-1.5 ${m.className}`}>
+                  <button
+                    key={d}
+                    type="button"
+                    onClick={() => setPicked(d)}
+                    className={`flex flex-col items-center rounded-lg border p-1.5 transition-all hover:ring-2 hover:ring-brand-accent/40 ${m.className} ${day0 === d ? "border-brand-accent ring-2 ring-brand-accent" : "border-gray-100"}`}
+                  >
                     <span className="text-[11px] font-semibold opacity-80">{day}</span>
                     <span className="text-[10px] font-bold">{m.short}</span>
                     {r?.inTime && <span className="text-[8px] opacity-70">{r.inTime}</span>}
-                  </div>
+                    {punchShots(r).length > 0 && <Camera size={9} className="mt-0.5 opacity-60" />}
+                  </button>
                 );
               })}
             </div>
@@ -132,6 +144,14 @@ export default function MyAttendancePage() {
                 <span key={k} className={`rounded px-1.5 py-0.5 font-medium ${ATTENDANCE_META[k].className}`}>{ATTENDANCE_META[k].short} · {ATTENDANCE_META[k].label}</span>
               ))}
             </div>
+          </div>
+        )}
+
+        {!loading && (
+          <div className="rounded-xl border border-gray-200 bg-white p-4">
+            <h3 className="text-sm font-semibold text-gray-800">Day details</h3>
+            <p className="mb-3 text-xs text-gray-500">{formatDateIST(day0)}</p>
+            <DayPunchDetails row={byDate.get(day0)} />
           </div>
         )}
 

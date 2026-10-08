@@ -4,7 +4,8 @@ import Link from "next/link";
 import { PayrollShell } from "@/components/payroll/PayrollShell";
 import { usePayrollStore } from "@/lib/payrollApi";
 import { useShifts, useHolidayPolicies, useLeavePolicies } from "@/lib/usePayrollSetup";
-import { CalendarDays, Clock, Coins, MapPin, Landmark, Palmtree, ChevronRight } from "lucide-react";
+import { CalendarDays, Clock, Coins, MapPin, Landmark, Palmtree, ChevronRight, FileText, ListPlus, FolderOpen } from "lucide-react";
+import { usePayrollSetting } from "@/lib/payrollSettings";
 
 /**
  * Payroll Setup — the pre-setup hub. Reusable policies are configured here once, then assigned to
@@ -16,7 +17,8 @@ export default function PayrollSetupPage() {
   const { holidayPolicies } = useHolidayPolicies();
   const { leavePolicies } = useLeavePolicies();
   const locations = usePayrollStore((s) => s.locations);
-  const taxProfiles = usePayrollStore((s) => s.taxProfiles);
+  const { value: taxProfiles } = usePayrollSetting("TAX_PROFILES");
+  const { value: customFields } = usePayrollSetting("CUSTOM_FIELDS");
 
   const cards = [
     {
@@ -49,6 +51,30 @@ export default function PayrollSetupPage() {
       title: "Salary Components",
       desc: "Default earnings & deductions (Basic, HRA, PF, ESIC, PT…) new employees inherit.",
       count: "Default template",
+      ready: true,
+    },
+    {
+      href: "/payroll/setup/payslip",
+      icon: FileText,
+      title: "Payslip Design",
+      desc: "Header, employee details, earnings layout, round-off and signatory on the printed slip.",
+      count: "Customise",
+      ready: true,
+    },
+    {
+      href: "/payroll/setup/custom-fields",
+      icon: ListPlus,
+      title: "Custom Staff Fields",
+      desc: "Extra details recorded on every staff profile.",
+      count: `${customFields.length} field${customFields.length === 1 ? "" : "s"}`,
+      ready: true,
+    },
+    {
+      href: "/payroll/setup/documents",
+      icon: FolderOpen,
+      title: "Organisation Documents",
+      desc: "Policies and handbooks every staff member can open from self-service.",
+      count: "Publish",
       ready: true,
     },
   ];

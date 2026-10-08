@@ -7,7 +7,7 @@
 ## The people who use this
 
 | Who | On a construction company | What they care about |
-|---|---|---|
+|---|---|---|||
 | **Owner / HR (office)** | Runs the show from the office | "Is everyone I'm paying actually showing up on site? Pay them the right amount, on time, with no fraud." |
 | **Site supervisor / PM** | Runs one project/site | "Who's on my site today? Let me add the guys working here and not chase paperwork." |
 | **Worker / labour** | On the ground, pouring concrete | "Mark that I came, and that I left. Don't make it complicated. Pay me for the days I worked." |

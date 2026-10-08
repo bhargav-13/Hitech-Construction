@@ -44,6 +44,10 @@ export interface SubTask {
   title: string;
   done: boolean;
   assigneeId?: string;
+  /** Its own status, priority and due date (Taskopad parity). `done` mirrors status === Completed. */
+  status?: TaskStatus;
+  priority?: TaskPriority;
+  dueDate?: string | null;
 }
 
 export interface TaskComment {
@@ -63,6 +67,8 @@ export interface TaskAttachment {
   userId: string;
   /** MIME type as uploaded; null on older rows, where the file extension is the fallback. */
   contentType: string | null;
+  /** The file has contents on the server; `url` may still be null until the task is opened. */
+  hasData?: boolean;
 }
 
 export interface TaskActivity {
@@ -103,7 +109,26 @@ export interface Task {
   completionRequestedBy?: string | null;
   /** Rejection note left by an approver when sending a completion request back. */
   completionNote?: string | null;
+  // ---- Taskopad parity ----
+  /** Company-defined status label (task_statuses id). `status` stays the base state. */
+  statusId: string | null;
+  /** When the task was closed (completed). Drives the Closed Date filter and day variance. */
+  closedAt: string | null;
+  /** Shared by the copies made when one task was given to several assignees. */
+  groupId: string | null;
+  serviceName: string | null;
+  subtasksMandatory: boolean;
+  recurrenceDays: string | null;
+  recurrenceExcludeDays: string | null;
+  recurrenceStopped: boolean;
+  reminderRecipients: ReminderRecipients;
+  reminderFrequency: ReminderFrequency;
+  reminderDays: string | null;
+  updatedAt: string;
 }
+
+export type ReminderRecipients = "ALL" | "OWNER" | "ASSIGNEES" | "FOLLOWERS";
+export type ReminderFrequency = "ONCE" | "HOURLY" | "DAILY" | "WEEKLY";
 
 // ---- Backend enum <-> UI label conversions (project-service com.hitech.erp.task) ----
 export type TaskStatusApi = "PENDING" | "IN_PROGRESS" | "ON_HOLD" | "STUCK" | "COMPLETED" | "AWAITING_APPROVAL";
@@ -172,6 +197,9 @@ export function taskFromApi(t: ApiTask): Task {
       title: s.title,
       done: s.done,
       assigneeId: s.assigneeId != null ? String(s.assigneeId) : undefined,
+      status: s.status ? statusFromApi(s.status as TaskStatusApi) : s.done ? "Completed" : "Pending",
+      priority: s.priority ? priorityFromApi(s.priority as TaskPriorityApi) : "Low",
+      dueDate: s.dueDate ?? null,
     })),
     comments: (t.comments ?? []).map((c) => ({
       id: String(c.id),
@@ -187,6 +215,7 @@ export function taskFromApi(t: ApiTask): Task {
       url: a.dataUrl ?? null,
       userId: String(a.uploadedBy),
       contentType: a.contentType ?? null,
+      hasData: a.hasData ?? !!a.dataUrl,
     })),
     activity: (t.activity ?? []).map((a) => ({
       id: String(a.id),
@@ -196,6 +225,18 @@ export function taskFromApi(t: ApiTask): Task {
     })),
     completionRequestedBy: t.completionRequestedBy != null ? String(t.completionRequestedBy) : null,
     completionNote: t.completionNote ?? null,
+    statusId: t.statusId != null ? String(t.statusId) : null,
+    closedAt: t.closedAt ?? null,
+    groupId: t.groupId != null ? String(t.groupId) : null,
+    serviceName: t.serviceName ?? null,
+    subtasksMandatory: t.subtasksMandatory ?? false,
+    recurrenceDays: t.recurrenceDays ?? null,
+    recurrenceExcludeDays: t.recurrenceExcludeDays ?? null,
+    recurrenceStopped: t.recurrenceStopped ?? false,
+    reminderRecipients: (t.reminderRecipients as ReminderRecipients) ?? "ALL",
+    reminderFrequency: (t.reminderFrequency as ReminderFrequency) ?? "ONCE",
+    reminderDays: t.reminderDays ?? null,
+    updatedAt: t.updatedAt ?? t.createdAt ?? "",
   };
 }
 

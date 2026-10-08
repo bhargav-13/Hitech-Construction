@@ -564,7 +564,9 @@ export default function PartiesPage() {
                         <span className={`block truncate text-sm ${active ? "font-medium text-brand-accent" : "text-gray-700"}`}>
                           {p.name}
                         </span>
-                        {p.partyGroup && <span className="block truncate text-[11px] text-gray-400">{p.partyGroup}</span>}
+                        {(p.partyGroup || p.userId != null) && (
+                          <span className="block truncate text-[11px] text-gray-400">{p.partyGroup ?? "Staff"}</span>
+                        )}
                       </span>
                       <span
                         className={`shrink-0 text-sm ${
@@ -642,6 +644,15 @@ export default function PartiesPage() {
                         >
                           {selected.partyType === "CUSTOMER" ? "Customer" : "Supplier"}
                         </span>
+                        {selected.userId != null && (
+                          <Link
+                            href={`/payroll/staff/${selected.userId}`}
+                            title="This party is a staff member's payroll ledger — salary, advances, claims and loans post here automatically"
+                            className="rounded-md bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700 hover:underline"
+                          >
+                            Staff · Payroll profile →
+                          </Link>
+                        )}
                       </div>
                       <div className="mt-2 grid grid-cols-1 gap-x-8 gap-y-1 text-sm sm:grid-cols-2">
                         <Meta label="GSTIN" value={selected.gstin} mono />

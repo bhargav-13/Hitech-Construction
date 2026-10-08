@@ -8,8 +8,12 @@ import { Select } from "@/components/Select";
 import { DatePicker } from "@/components/DatePicker";
 import { useMyLeave } from "@/lib/usePayrollLive";
 import { ApiError } from "@/lib/api";
+import type { LeaveBalanceApi, LeaveRequestApi } from "@/lib/api";
+import { todayIST } from "@/lib/datetime";
 import { LeaveStatusPill } from "@/components/payroll/LeaveStatusPill";
 import { CalendarDays, Plus, X } from "lucide-react";
+import { useTableSort } from "@/lib/useTableSort";
+import { SortTh } from "@/components/vyapar/SortTh";
 
 /**
  * Leave types offered when the member has no leave policy assigned yet.
@@ -21,9 +25,17 @@ import { CalendarDays, Plus, X } from "lucide-react";
  */
 const FALLBACK_LEAVE_TYPES = ["Casual Leave", "Sick Leave", "Earned Leave", "Unpaid Leave"];
 
+const MY_LEAVE_SORT = {
+  type: (r: LeaveRequestApi) => r.leaveTypeName,
+  from: (r: LeaveRequestApi) => r.fromDate,
+  days: (r: LeaveRequestApi) => Number(r.days),
+  status: (r: LeaveRequestApi) => r.status,
+};
+
 /** My Leave — self-service. See balance per type + apply for leave + cancel a pending request. */
 export default function MyLeavePage() {
   const { requests, balance, loading, error, apply, cancel } = useMyLeave();
+  const { sorted: sortedRequests, sortKey, sortDir, toggle } = useTableSort(requests, MY_LEAVE_SORT, { key: "from", dir: "desc" });
   const [applying, setApplying] = useState(false);
   const [actionError, setActionError] = useState("");
 
@@ -69,7 +81,9 @@ export default function MyLeavePage() {
                   <span className="text-2xl font-semibold text-brand-accent">{b.remaining}</span>
                 </div>
                 <div className="mt-2 text-[11px] text-gray-500">
-                  {b.taken} taken · {b.annualCount} granted
+                  {b.taken} taken · {b.entitled ?? b.annualCount} available so far
+                  {b.entitled != null && b.entitled !== b.annualCount && <> · {b.annualCount} / year</>}
+                  {!!b.earned && <> · {b.earned} earned</>}
                 </div>
               </div>
             ))}
@@ -91,19 +105,21 @@ export default function MyLeavePage() {
             <table className="w-full min-w-[640px] text-sm">
               <thead>
                 <tr className="border-b border-gray-100 bg-gray-50 text-left text-gray-500">
-                  <th className="px-4 py-2 font-medium">Leave Type</th>
-                  <th className="px-4 py-2 font-medium">From – To</th>
-                  <th className="px-4 py-2 text-right font-medium">Days</th>
-                  <th className="px-4 py-2 font-medium">Status</th>
+                  <SortTh label="Leave Type" sortKey="type" activeKey={sortKey} dir={sortDir} onSort={toggle} />
+                  <SortTh label="From – To" sortKey="from" activeKey={sortKey} dir={sortDir} onSort={toggle} />
+                  <SortTh label="Days" sortKey="days" activeKey={sortKey} dir={sortDir} onSort={toggle} align="right" />
+                  <SortTh label="Status" sortKey="status" activeKey={sortKey} dir={sortDir} onSort={toggle} />
                   <th className="px-4 py-2 font-medium">Decision</th>
                   <th className="px-4 py-2" />
                 </tr>
               </thead>
               <tbody>
-                {requests.map((r) => (
+                {sortedRequests.map((r) => (
                   <tr key={r.id} className="border-b border-gray-50 last:border-b-0">
                     <td className="px-4 py-2.5 font-medium text-gray-800">{r.leaveTypeName}</td>
-                    <td className="px-4 py-2.5 text-gray-600">{r.fromDate} → {r.toDate}</td>
+                    <td className="px-4 py-2.5 text-gray-600">
+                      {r.halfDay ? <>{r.fromDate} · {r.halfSession === 2 ? "2nd" : "1st"} half</> : <>{r.fromDate} → {r.toDate}</>}
+                    </td>
                     <td className="px-4 py-2.5 text-right font-medium">{r.days}</td>
                     <td className="px-4 py-2.5"><LeaveStatusPill status={r.status} /></td>
                     <td className="px-4 py-2.5 text-xs text-gray-500">
@@ -131,6 +147,7 @@ export default function MyLeavePage() {
       {applying && (
         <ApplyLeaveDrawer
           types={balance.length ? balance.map((b) => b.leaveTypeName) : FALLBACK_LEAVE_TYPES}
+          balance={balance}
           policyAssigned={balance.length > 0}
           onClose={() => setApplying(false)}
           onApply={async (body) => { try { await apply(body); setApplying(false); } catch (err) { throw err; } }}
@@ -142,31 +159,42 @@ export default function MyLeavePage() {
 
 function ApplyLeaveDrawer({
   types,
+  balance,
   policyAssigned,
   onClose,
   onApply,
 }: {
   types: string[];
+  balance: LeaveBalanceApi[];
   /** False when the types are the fallback list rather than the member's own policy. */
   policyAssigned: boolean;
   onClose: () => void;
-  onApply: (body: { leaveTypeName: string; fromDate: string; toDate: string; reason?: string }) => Promise<void>;
+  onApply: (body: { leaveTypeName: string; fromDate: string; toDate: string; reason?: string; halfDay?: boolean; halfSession?: number }) => Promise<void>;
 }) {
   const [type, setType] = useState(types[0] ?? "");
-  const [from, setFrom] = useState(new Date().toISOString().slice(0, 10));
-  const [to, setTo] = useState(new Date().toISOString().slice(0, 10));
+  const [from, setFrom] = useState(todayIST());
+  const [to, setTo] = useState(todayIST());
+  const [halfDay, setHalfDay] = useState(false);
+  const [session, setSession] = useState(1);
+  const bal = balance.find((b) => b.leaveTypeName === type);
+  const halfAllowed = bal?.halfDayAllowed ?? true;
   const [reason, setReason] = useState("");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
 
   async function submit() {
     if (!type) { setError("Pick a leave type."); return; }
-    if (!from || !to) { setError("Pick start and end dates."); return; }
-    if (to < from) { setError("End date must be on or after the start date."); return; }
+    const isHalf = halfDay && halfAllowed;
+    const end = isHalf ? from : to;
+    if (!from || !end) { setError("Pick start and end dates."); return; }
+    if (end < from) { setError("End date must be on or after the start date."); return; }
     setSaving(true);
     setError("");
     try {
-      await onApply({ leaveTypeName: type, fromDate: from, toDate: to, reason: reason.trim() || undefined });
+      await onApply({
+        leaveTypeName: type, fromDate: from, toDate: end, reason: reason.trim() || undefined,
+        halfDay: isHalf || undefined, halfSession: isHalf ? session : undefined,
+      });
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Unable to apply — try again.");
       setSaving(false);
@@ -186,14 +214,48 @@ function ApplyLeaveDrawer({
         <DrawerField label="Leave Type" required>
           <Select value={type} onChange={setType} options={types.map((t) => ({ value: t, label: t }))} />
         </DrawerField>
-        <div className="grid grid-cols-2 gap-3">
-          <DrawerField label="From" required>
-            <DatePicker value={from} onChange={setFrom} placeholder="From" />
-          </DrawerField>
-          <DrawerField label="To" required>
-            <DatePicker value={to} onChange={setTo} placeholder="To" />
-          </DrawerField>
-        </div>
+        {bal && (
+          <div className="text-xs text-gray-500">
+            Balance: <span className="font-semibold text-gray-700">{bal.remaining}</span> day(s)
+          </div>
+        )}
+        {halfAllowed && (
+          <div className="flex rounded-lg border border-gray-200 p-0.5 text-sm">
+            {[false, true].map((h) => (
+              <button
+                key={String(h)}
+                type="button"
+                onClick={() => setHalfDay(h)}
+                className={`flex-1 rounded-md px-3 py-1.5 font-medium transition-colors ${halfDay === h ? "bg-brand-accent text-white" : "text-gray-600 hover:bg-gray-50"}`}
+              >
+                {h ? "Half day" : "Full day(s)"}
+              </button>
+            ))}
+          </div>
+        )}
+        {halfDay && halfAllowed ? (
+          <div className="grid grid-cols-2 gap-3">
+            <DrawerField label="Date" required>
+              <DatePicker value={from} onChange={setFrom} placeholder="Date" />
+            </DrawerField>
+            <DrawerField label="Session">
+              <Select
+                value={String(session)}
+                onChange={(v) => setSession(Number(v))}
+                options={[{ value: "1", label: "First half" }, { value: "2", label: "Second half" }]}
+              />
+            </DrawerField>
+          </div>
+        ) : (
+          <div className="grid grid-cols-2 gap-3">
+            <DrawerField label="From" required>
+              <DatePicker value={from} onChange={setFrom} placeholder="From" />
+            </DrawerField>
+            <DrawerField label="To" required>
+              <DatePicker value={to} onChange={setTo} placeholder="To" />
+            </DrawerField>
+          </div>
+        )}
         <DrawerField label="Reason">
           <textarea value={reason} onChange={(e) => setReason(e.target.value)} rows={3} className="input" placeholder="Why do you need this leave? (optional)" />
         </DrawerField>

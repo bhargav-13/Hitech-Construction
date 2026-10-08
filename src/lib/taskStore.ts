@@ -26,6 +26,16 @@ export interface TaskInput {
   recurrenceInterval?: number;
   recurrenceUntil?: string | null;
   departmentId?: string | null;
+  /** Create only: several people → one linked task each. */
+  assigneeIds?: string[];
+  statusId?: string | null;
+  serviceName?: string | null;
+  subtasksMandatory?: boolean;
+  recurrenceDays?: string | null;
+  recurrenceExcludeDays?: string | null;
+  reminderRecipients?: string;
+  reminderFrequency?: string;
+  reminderDays?: string | null;
 }
 
 function toUpsert(input: TaskInput): tasksApi.TaskUpsertRequest {
@@ -51,7 +61,19 @@ function toUpsert(input: TaskInput): tasksApi.TaskUpsertRequest {
       title: s.title,
       done: s.done,
       assigneeId: s.assigneeId ? Number(s.assigneeId) : null,
+      status: s.status ? statusToApi(s.status) : s.done ? "COMPLETED" : "PENDING",
+      priority: s.priority ? priorityToApi(s.priority) : "LOW",
+      dueDate: s.dueDate || null,
     })),
+    assigneeIds: input.assigneeIds && input.assigneeIds.length > 1 ? input.assigneeIds.map(Number) : undefined,
+    statusId: input.statusId ? Number(input.statusId) : undefined,
+    serviceName: input.serviceName ?? null,
+    subtasksMandatory: input.subtasksMandatory,
+    recurrenceDays: input.recurrenceDays ?? null,
+    recurrenceExcludeDays: input.recurrenceExcludeDays ?? null,
+    reminderRecipients: input.reminderRecipients,
+    reminderFrequency: input.reminderFrequency,
+    reminderDays: input.reminderDays ?? null,
   };
 }
 
@@ -82,12 +104,29 @@ interface TaskState {
       progress?: number;
       pinned?: boolean;
       reminderAt?: string | null;
+      statusId?: string;
     }
   ) => Promise<void>;
   bulkPatch: (
     ids: string[],
-    patch: { status?: TaskStatus; priority?: TaskPriority; pinned?: boolean; assigneeId?: string }
+    patch: {
+      status?: TaskStatus;
+      priority?: TaskPriority;
+      pinned?: boolean;
+      assigneeId?: string;
+      statusId?: string;
+      dueDate?: string;
+    }
   ) => Promise<void>;
+  /** Change one sub-task in place (its own list row, or the drawer). */
+  patchSubtask: (
+    taskId: string,
+    subtaskId: string,
+    patch: { title?: string; status?: TaskStatus; priority?: TaskPriority; dueDate?: string | null; assigneeId?: string | null }
+  ) => Promise<void>;
+  setRecurrenceStopped: (taskId: string, stopped: boolean) => Promise<void>;
+  /** Merge server copies into the list (e.g. after a restore from the recycle bin). */
+  reload: () => Promise<void>;
   bulkRemove: (ids: string[]) => Promise<void>;
   removeTask: (id: string) => Promise<void>;
   // ---- Completion approvals ----
@@ -147,6 +186,8 @@ export const useTaskStore = create<TaskState>((set, get) => ({
   createTask: async (input) => {
     const created = taskFromApi(await tasksApi.createTask(toUpsert(input)));
     set({ tasks: [created, ...get().tasks] });
+    // Several assignees: the server made one linked copy each, but returns only the first.
+    if (input.assigneeIds && input.assigneeIds.length > 1) await get().load(true);
     return created;
   },
 
@@ -163,6 +204,7 @@ export const useTaskStore = create<TaskState>((set, get) => ({
         progress: patch.progress,
         pinned: patch.pinned,
         reminderAt: patch.reminderAt,
+        statusId: patch.statusId ? Number(patch.statusId) : undefined,
       })
     );
     set({ tasks: upsertLocal(get().tasks, updated) });
@@ -175,8 +217,36 @@ export const useTaskStore = create<TaskState>((set, get) => ({
       priority: patch.priority ? priorityToApi(patch.priority) : undefined,
       pinned: patch.pinned,
       assigneeId: patch.assigneeId ? Number(patch.assigneeId) : undefined,
+      statusId: patch.statusId ? Number(patch.statusId) : undefined,
+      dueDate: patch.dueDate || undefined,
     });
     set({ tasks: updated.map(taskFromApi).reduce((acc, t) => upsertLocal(acc, t), get().tasks) });
+  },
+
+  patchSubtask: async (taskId, subtaskId, patch) => {
+    const updated = taskFromApi(
+      await tasksApi.patchSubtask(Number(taskId), Number(subtaskId), {
+        title: patch.title,
+        status: patch.status ? statusToApi(patch.status) : undefined,
+        priority: patch.priority ? priorityToApi(patch.priority) : undefined,
+        dueDate: patch.dueDate === undefined ? undefined : patch.dueDate ?? "",
+        assigneeId: patch.assigneeId === undefined ? undefined : patch.assigneeId ? Number(patch.assigneeId) : 0,
+      })
+    );
+    set({ tasks: upsertLocal(get().tasks, updated) });
+  },
+
+  setRecurrenceStopped: async (taskId, stopped) => {
+    const res = stopped
+      ? await tasksApi.stopRecurrence(Number(taskId))
+      : await tasksApi.resumeRecurrence(Number(taskId));
+    set({ tasks: upsertLocal(get().tasks, taskFromApi(res)) });
+    // The flag is written across the whole series server-side; refetch so every occurrence shows it.
+    await get().load(true);
+  },
+
+  reload: async () => {
+    await get().load(true);
   },
 
   bulkRemove: async (ids) => {
@@ -244,6 +314,10 @@ export const useTaskStore = create<TaskState>((set, get) => ({
 // Sign-out / sign-in as someone else empties the list, so the next screen loads the new user's.
 useAuthStore.subscribe((state, prev) => {
   if ((state.user?.id ?? null) !== (prev.user?.id ?? null)) {
+    // A screen that asked for tasks before the session was restored (a hard refresh) had its answer
+    // dropped as "nobody's" — fetch again for the user who just arrived, or it sits empty for good.
+    const wasLoading = useTaskStore.getState().loading;
     useTaskStore.setState({ tasks: [], loaded: false, loading: false, ownerId: null, scope: "MINE", error: null });
+    if (state.user && wasLoading) void useTaskStore.getState().load();
   }
 });

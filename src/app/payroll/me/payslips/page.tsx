@@ -5,9 +5,12 @@ import { Spinner } from "@/components/Spinner";
 import { useMyPayslips } from "@/lib/usePayrollLive";
 import { useAuthStore } from "@/lib/authStore";
 import { usePayrollProfiles } from "@/lib/usePayrollSetup";
-import type { PayslipApi } from "@/lib/api";
+import { useEffect, useState } from "react";
+import { myPaymentsApi } from "@/lib/api";
+import type { PaymentApi, PayslipApi } from "@/lib/api";
+import { formatDateIST } from "@/lib/datetime";
 import { inr } from "@/lib/format";
-import { downloadPayslip } from "@/lib/payslipExport";
+import { downloadPayslip, leaveSummary } from "@/lib/payslipExport";
 import { Download, Wallet } from "lucide-react";
 
 /**
@@ -27,6 +30,9 @@ export default function MyPayslipsPage() {
   // payroll downloads for them — not a column of dashes.
   const myId = useAuthStore((s) => s.user?.id);
   const { profiles } = usePayrollProfiles(myId != null ? [Number(myId)] : undefined);
+
+  const [payments, setPayments] = useState<PaymentApi[]>([]);
+  useEffect(() => { myPaymentsApi().then(setPayments).catch(() => setPayments([])); }, []);
 
   function slipPdf(p: PayslipApi) {
     downloadPayslip(p, p.memberName, { profile: profiles[p.userId] });
@@ -70,11 +76,35 @@ export default function MyPayslipsPage() {
                 </div>
                 <div className="mt-3 grid grid-cols-3 gap-2 border-t border-gray-100 pt-2 text-[11px] text-gray-500">
                   <span>Gross {inr(p.gross)}</span>
-                  <span>Ded {inr(Number(p.pf) + Number(p.esic) + Number(p.pt) + Number(p.loanEmi))}</span>
-                  <span>{p.payableDays}/{p.totalDays} days</span>
+                  <span>Ded {inr(Number(p.gross) - Number(p.net) + Number(p.reimbursements))}</span>
+                  <span className={p.payStatus === "PAID" ? "font-medium text-emerald-600" : ""}>{p.payStatus === "PAID" ? "Paid" : p.holdStatus ? "On hold" : "Pending"}</span>
                 </div>
+                {(leaveSummary(p) || p.claimDetail) && (
+                  <div className="mt-2 space-y-0.5 text-[11px] text-gray-500">
+                    {leaveSummary(p) && <div>Leave: <span className="text-gray-700">{leaveSummary(p)}</span></div>}
+                    {p.claimDetail && <div>Claims reimbursed: <span className="text-gray-700">{p.claimDetail}</span></div>}
+                  </div>
+                )}
               </div>
             ))}
+          </div>
+        )}
+
+        {payments.length > 0 && (
+          <div className="rounded-xl border border-gray-200 bg-white">
+            <div className="border-b border-gray-100 px-4 py-2 text-sm font-semibold text-gray-800">Payments received</div>
+            <table className="w-full text-sm">
+              <tbody>
+                {payments.map((x) => (
+                  <tr key={x.id} className="border-t border-gray-50 first:border-t-0">
+                    <td className="px-4 py-2">{formatDateIST(x.recordDate)}</td>
+                    <td className="px-4 py-2 text-gray-600">{x.category === "ADVANCE" ? "Advance salary" : x.category === "SALARY" ? "Salary" : x.category.charAt(0) + x.category.slice(1).toLowerCase()} · {fmtMonth(x.month)}</td>
+                    <td className="px-4 py-2 text-xs text-gray-500">{x.mode}</td>
+                    <td className="px-4 py-2 text-right font-medium">{inr(x.amount)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         )}
       </div>

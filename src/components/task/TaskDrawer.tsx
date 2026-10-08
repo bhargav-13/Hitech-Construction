@@ -1,10 +1,9 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   X,
   Paperclip,
-  Download,
   Bell,
   Plus,
   Trash2,
@@ -12,8 +11,13 @@ import {
   ListTree,
   FileText,
   Loader2,
-  Eye,
   Lock,
+  Zap,
+  Repeat,
+  ClipboardPaste,
+  Search,
+  CirclePause,
+  CirclePlay,
 } from "lucide-react";
 import { useAppStore } from "@/lib/store";
 import { useAuthStore } from "@/lib/authStore";
@@ -21,15 +25,29 @@ import { useUsers } from "@/lib/useUsers";
 import { useDepartments } from "@/lib/useDepartments";
 import { useProjects } from "@/lib/useProjects";
 import { useTaskStore } from "@/lib/taskStore";
-import { ASSIGNABLE_TASK_STATUSES, TASK_PRIORITIES, formatTaskDateTime, toIso } from "@/lib/taskTypes";
-import { formatChatStampIST, msIST } from "@/lib/datetime";
-import type { SubTask, Task, TaskAttachment, TaskComment, TaskPriority, TaskStatus } from "@/lib/taskTypes";
+import { useTaskSeen } from "@/lib/taskNotifications";
+import { useTaskStatuses } from "@/lib/useTaskStatuses";
+import * as tasksApi from "@/lib/tasksApi";
+import { TASK_PRIORITIES, formatTaskDateTime, toIso } from "@/lib/taskTypes";
+import { dateKeyIST, formatChatStampIST, msIST, todayIST } from "@/lib/datetime";
+import type {
+  ReminderFrequency,
+  ReminderRecipients,
+  SubTask,
+  Task,
+  TaskAttachment,
+  TaskComment,
+  TaskPriority,
+  TaskStatus,
+} from "@/lib/taskTypes";
+import { attachmentsFor, fileUrl, formatBytes, uploadFile } from "@/lib/filesApi";
+import type { FileNode } from "@/lib/filesApi";
 import { UserAvatar, PeopleSelect, PeopleMultiSelect, ClientSelect } from "./TaskBits";
 import type { Person } from "./TaskBits";
 import { AttachmentPreview, canPreview } from "./AttachmentPreview";
 import { ModuleAttachments } from "@/components/files/ModuleAttachments";
 import { Select } from "@/components/Select";
-import { DatePicker } from "@/components/DatePicker";
+import { DatePicker, WeekdayPicker } from "@/components/DatePicker";
 import type { RecurrenceRule } from "@/components/DatePicker";
 import { useDrawerDismiss } from "@/lib/useDrawerDismiss";
 // The timeline now lives at components/ActivityTimeline so Tender renders the identical feed.
@@ -38,19 +56,8 @@ import { useTaskRights } from "@/lib/taskPermissions";
 
 type Panel = "Comment" | "Attachment" | "Log Activity";
 
-/** Reminder shortcuts, expressed relative to the task's due date. */
-const REMINDER_PRESETS: { label: string; from: (dueDate: string) => string }[] = [
-  { label: "On due", from: (d) => d || toIso(new Date()) },
-  { label: "1d before", from: (d) => shiftDays(d, -1) },
-  { label: "3d before", from: (d) => shiftDays(d, -3) },
-];
-
-function shiftDays(dateStr: string, days: number): string {
-  const base = dateStr ? new Date(dateStr) : new Date();
-  if (Number.isNaN(base.getTime())) return toIso(new Date());
-  base.setDate(base.getDate() + days);
-  return toIso(base);
-}
+/** One file in the chat: an old inline (base64) attachment, or a file in the shared registry. */
+type ChatFile = TaskAttachment & { fileId?: number };
 
 /**
  * `reminderAt` holds a time-of-day ("HH:mm") for repeating tasks — a fixed calendar date would be
@@ -71,17 +78,27 @@ function joinReminder(date: string, time: string, repeating: boolean): string | 
   return time ? `${date}T${time}` : date;
 }
 
+const RECIPIENTS: { value: ReminderRecipients; label: string }[] = [
+  { value: "ALL", label: "All" },
+  { value: "OWNER", label: "Owner" },
+  { value: "ASSIGNEES", label: "Assignees" },
+  { value: "FOLLOWERS", label: "Followers" },
+];
+const FREQUENCIES: { value: ReminderFrequency; label: string }[] = [
+  { value: "ONCE", label: "Once" },
+  { value: "DAILY", label: "Daily" },
+  { value: "HOURLY", label: "Hourly" },
+  { value: "WEEKLY", label: "Weekly" },
+];
+const SUB_STATUSES: TaskStatus[] = ["Pending", "In Progress", "On Hold", "Stuck", "Completed"];
+
 /**
- * WhatsApp-style discussion thread for a task. Merges comments and attachments into one timeline
- * sorted by time; the current user's messages bubble right in accent colour, everyone else's
- * bubble left on a light background. Attachments render as a compact file card inside a bubble
- * so uploads show up in the conversation instead of being hidden away in the Attachment tab.
+ * WhatsApp-style discussion thread for a task. Merges comments and files into one timeline sorted by
+ * time; the current user's messages bubble right in accent colour, everyone else's bubble left.
  */
-// `id` is prefixed so a comment and an attachment can't collide as React keys; `sourceId` keeps the
-// unprefixed id around for callers that need to act on the underlying record.
 type ChatEntry =
   | { kind: "comment"; id: string; sourceId: string; userId: string; at: string; text: string }
-  | { kind: "attachment"; id: string; sourceId: string; userId: string; at: string; att: TaskAttachment };
+  | { kind: "attachment"; id: string; sourceId: string; userId: string; at: string; att: ChatFile };
 
 function ChatThread({
   comments,
@@ -92,10 +109,10 @@ function ChatThread({
   onRemove,
 }: {
   comments: TaskComment[];
-  attachments: TaskAttachment[];
+  attachments: ChatFile[];
   userName: (id: string) => string;
   meId: string;
-  onOpenAttachment: (att: TaskAttachment) => void;
+  onOpenAttachment: (att: ChatFile) => void;
   /** Set only while composing a new task, where nothing has been sent yet and can still be pulled back. */
   onRemove?: (kind: "comment" | "attachment", id: string) => void;
 }) {
@@ -104,9 +121,6 @@ function ChatThread({
       ...comments.map((c) => ({ kind: "comment" as const, id: `c-${c.id}`, sourceId: c.id, userId: c.userId, at: c.at, text: c.text })),
       ...attachments.map((a) => ({ kind: "attachment" as const, id: `a-${a.id}`, sourceId: a.id, userId: a.userId, at: a.at, att: a })),
     ];
-    // Oldest first — matches WhatsApp reading order; the composer sits below. Sorted on the resolved
-    // instant rather than the raw string, since drafted entries and saved ones are spelled
-    // differently (`…Z` vs `…+05:30`) and would not sort against each other as text.
     merged.sort((x, y) => msIST(x.at) - msIST(y.at));
     return merged;
   }, [comments, attachments]);
@@ -123,17 +137,11 @@ function ChatThread({
           <div key={e.id} className={`flex items-end gap-1.5 ${mine ? "justify-end" : "justify-start"}`}>
             {!mine && <UserAvatar id={e.userId} name={userName(e.userId)} size={22} />}
             <div className={`flex max-w-[78%] flex-col ${mine ? "items-end" : "items-start"}`}>
-              {!mine && (
-                <span className="mb-0.5 px-1 text-[10px] font-medium text-gray-500">
-                  {userName(e.userId)}
-                </span>
-              )}
+              {!mine && <span className="mb-0.5 px-1 text-[10px] font-medium text-gray-500">{userName(e.userId)}</span>}
               {e.kind === "comment" ? (
                 <div
                   className={`whitespace-pre-wrap break-words rounded-2xl px-3 py-1.5 text-sm shadow-sm ${
-                    mine
-                      ? "rounded-br-sm bg-brand-accent text-white"
-                      : "rounded-bl-sm bg-gray-100 text-gray-800"
+                    mine ? "rounded-br-sm bg-brand-accent text-white" : "rounded-bl-sm bg-gray-100 text-gray-800"
                   }`}
                 >
                   {e.text}
@@ -145,11 +153,7 @@ function ChatThread({
                 {onRemove ? (
                   <>
                     <span title="Sent when you create the task">Not sent yet</span>
-                    <button
-                      onClick={() => onRemove(e.kind, e.sourceId)}
-                      title="Remove"
-                      className="text-gray-400 transition-colors duration-150 hover:text-rose-500"
-                    >
+                    <button onClick={() => onRemove(e.kind, e.sourceId)} title="Remove" className="text-gray-400 transition-colors duration-150 hover:text-rose-500">
                       <X size={11} />
                     </button>
                   </>
@@ -165,32 +169,19 @@ function ChatThread({
   );
 }
 
-/**
- * One attached file inside the chat. Images show as a real thumbnail so the conversation reads at a
- * glance; everything else keeps the compact file card. Clicking opens the preview rather than
- * downloading — downloading is still available from inside the viewer.
- */
-function AttachmentBubble({
-  att,
-  mine,
-  onOpen,
-}: {
-  att: TaskAttachment;
-  mine: boolean;
-  onOpen: (att: TaskAttachment) => void;
-}) {
-  const previewable = canPreview(att);
-  const isImage = previewable && (att.contentType ?? "").startsWith("image/");
+/** One attached file inside the chat. Images show as a thumbnail; everything else as a compact card. */
+function AttachmentBubble({ att, mine, onOpen }: { att: ChatFile; mine: boolean; onOpen: (att: ChatFile) => void }) {
+  const previewable = att.fileId != null || canPreview(att);
+  const isImage = (att.contentType ?? "").startsWith("image/");
   const bubble = mine ? "rounded-br-sm bg-brand-accent text-white" : "rounded-bl-sm bg-gray-100 text-gray-800";
 
-  if (isImage && att.url) {
+  if (isImage && att.url && att.fileId == null) {
     return (
       <button
         onClick={() => onOpen(att)}
         title={`Preview ${att.name}`}
         className={`max-w-[240px] overflow-hidden rounded-2xl shadow-sm transition-opacity duration-150 hover:opacity-90 ${bubble}`}
       >
-        {/* Stored as a data URL, so next/image can't optimise it. */}
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src={att.url} alt={att.name} className="max-h-44 w-full object-cover" />
         <span className="block px-2.5 py-1 text-left text-[10px] opacity-80">{att.size || "Image"}</span>
@@ -198,44 +189,30 @@ function AttachmentBubble({
     );
   }
 
-  const body = (
-    <>
+  return (
+    <button
+      onClick={() => onOpen(att)}
+      disabled={!previewable && !att.url}
+      title={`Open ${att.name}`}
+      className={`flex max-w-[240px] items-center gap-2 rounded-2xl px-2.5 py-1.5 text-left text-sm shadow-sm transition-opacity duration-150 hover:opacity-90 disabled:cursor-default ${bubble}`}
+    >
       <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${mine ? "bg-white/20" : "bg-white"}`}>
         <FileText size={14} />
       </span>
       <span className="min-w-0 flex-1">
         <span className="block truncate text-xs font-medium">{att.name}</span>
         <span className={`block truncate text-[10px] ${mine ? "text-white/80" : "text-gray-500"}`}>
-          {att.size || "File"}
-          {!att.url ? " · No file data" : previewable ? " · Tap to preview" : " · Tap to download"}
+          {att.size || "File"} · {att.fileId != null ? "Tap to open" : att.url ? "Tap to preview" : "No file data"}
         </span>
       </span>
-    </>
+    </button>
   );
-  const shell = `flex max-w-[240px] items-center gap-2 rounded-2xl px-2.5 py-1.5 text-left text-sm shadow-sm transition-opacity duration-150 ${bubble}`;
-
-  if (previewable) {
-    return (
-      <button onClick={() => onOpen(att)} title={`Preview ${att.name}`} className={`${shell} cursor-pointer hover:opacity-90`}>
-        {body}
-      </button>
-    );
-  }
-  // Nothing to render inline, but the bytes are there — keep the plain download.
-  if (att.url) {
-    return (
-      <a href={att.url} download={att.name} title={`Download ${att.name}`} className={`${shell} cursor-pointer hover:opacity-90`}>
-        {body}
-      </a>
-    );
-  }
-  return <span className={`${shell} cursor-default`}>{body}</span>;
 }
 
 /**
  * Add / edit a task. TaskOPad shows this as a centre popup; we use a right slide-over to match the
  * rest of the ERP. Left = the task form, right = Comment / Attachment / Activity — all backed by the
- * real task API (project-service). People come from the real user-management-service.
+ * real task API (project-service).
  */
 export function TaskDrawer({
   existing,
@@ -253,54 +230,76 @@ export function TaskDrawer({
   const parties = useAppStore((s) => s.parties);
   const addParty = useAppStore((s) => s.addParty);
   const { closing, requestClose } = useDrawerDismiss(onClose);
+  const { active: statusRows, rowFor } = useTaskStatuses();
+  const markTaskSeen = useTaskSeen((s) => s.markTaskSeen);
+  const allTasks = useTaskStore((s) => s.tasks);
 
   const createTask = useTaskStore((s) => s.createTask);
   const saveTask = useTaskStore((s) => s.saveTask);
   const patchTask = useTaskStore((s) => s.patchTask);
   const addComment = useTaskStore((s) => s.addComment);
-  const addAttachment = useTaskStore((s) => s.addAttachment);
   const toggleSubtask = useTaskStore((s) => s.toggleSubtask);
+  const patchSubtask = useTaskStore((s) => s.patchSubtask);
+  const setRecurrenceStopped = useTaskStore((s) => s.setRecurrenceStopped);
   // Re-read the live task from the store so newly added comments/attachments/activity show at once.
   const liveTask = useTaskStore((s) => (existing ? s.tasks.find((t) => t.id === existing.id) ?? existing : undefined));
 
-  const defaultAssignee = existing?.assigneeId ?? (authUser ? String(authUser.id) : users[0]?.id ?? "");
+  const meId = authUser ? String(authUser.id) : "";
+  const defaultAssignee = existing?.assigneeId ?? (meId || users[0]?.id || "");
 
   const [title, setTitle] = useState(existing?.title ?? "");
   const [description, setDescription] = useState(existing?.description ?? "");
   const [dueDate, setDueDate] = useState(existing?.dueDate ?? toIso(new Date()));
   const [status, setStatus] = useState<TaskStatus>(existing?.status ?? "Pending");
+  const [statusId, setStatusId] = useState<string | null>(existing?.statusId ?? null);
   const [priority, setPriority] = useState<TaskPriority>(existing?.priority ?? "Low");
   const [projectId, setProjectId] = useState<string>(existing?.projectId ?? defaultProjectId ?? "");
   const [assigneeId, setAssigneeId] = useState<string>(defaultAssignee);
+  // New tasks may go to several people (one linked copy each); an existing task has one assignee.
+  const [assigneeIds, setAssigneeIds] = useState<string[]>(defaultAssignee ? [defaultAssignee] : []);
   const [followerIds, setFollowerIds] = useState<string[]>(existing?.followerIds ?? []);
   const [clientName, setClientName] = useState<string>(existing?.clientName ?? "");
+  const [serviceName, setServiceName] = useState<string>(existing?.serviceName ?? "");
   const [progress, setProgress] = useState(existing?.progress ?? 0);
   const [subtasks, setSubtasks] = useState<SubTask[]>(existing?.subtasks ?? []);
-  const [subtaskInput, setSubtaskInput] = useState("");
+  const [subtasksMandatory, setSubtasksMandatory] = useState(existing?.subtasksMandatory ?? false);
+  const [importingSubs, setImportingSubs] = useState(false);
+  const [recurrenceRule, setRecurrenceRule] = useState<RecurrenceRule>((existing?.recurrenceRule as RecurrenceRule) ?? "NONE");
+  const [recurrenceInterval, setRecurrenceInterval] = useState(existing?.recurrenceInterval ?? 1);
+  const [recurrenceDays, setRecurrenceDays] = useState(existing?.recurrenceDays ?? "");
+  const [recurrenceExcludeDays, setRecurrenceExcludeDays] = useState(existing?.recurrenceExcludeDays ?? "");
+  const [recurrenceUntil, setRecurrenceUntil] = useState(existing?.recurrenceUntil ?? "");
+  const [reminderOn, setReminderOn] = useState(!!existing?.reminderAt);
   const [reminderDate, setReminderDate] = useState(() => splitReminder(existing?.reminderAt).date);
   const [reminderTime, setReminderTime] = useState(() => splitReminder(existing?.reminderAt).time);
-  const [recurrenceRule, setRecurrenceRule] = useState<RecurrenceRule>(
-    (existing?.recurrenceRule as RecurrenceRule) ?? "NONE"
-  );
-  const [recurrenceInterval, setRecurrenceInterval] = useState(existing?.recurrenceInterval ?? 1);
+  const [reminderFrequency, setReminderFrequency] = useState<ReminderFrequency>(existing?.reminderFrequency ?? "ONCE");
+  const [reminderRecipients, setReminderRecipients] = useState<ReminderRecipients>(existing?.reminderRecipients ?? "ALL");
+  const [reminderDays, setReminderDays] = useState(existing?.reminderDays ?? "");
   const [departmentId, setDepartmentId] = useState<string>(existing?.departmentId ?? "");
   const [panel, setPanel] = useState<Panel>("Comment");
   const [commentText, setCommentText] = useState("");
   // Comments and files added while composing a brand-new task. The API can only hang them off a
   // task id, which doesn't exist yet, so they're held here and posted right after the create call.
   const [draftComments, setDraftComments] = useState<TaskComment[]>([]);
-  const [draftAttachments, setDraftAttachments] = useState<TaskAttachment[]>([]);
+  const [draftFiles, setDraftFiles] = useState<{ id: string; file: File; at: string }[]>([]);
   // Set once the create succeeds. Guards against a second create if posting the drafted
   // comments/files then fails and the user hits Submit again.
   const [createdId, setCreatedId] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   const [sendingComment, setSendingComment] = useState(false);
+  const [uploading, setUploading] = useState(false);
   const [togglingSubtaskId, setTogglingSubtaskId] = useState<string | null>(null);
   const [previewId, setPreviewId] = useState<string | null>(null);
+  const [regFiles, setRegFiles] = useState<FileNode[]>([]);
+  const [projectMembers, setProjectMembers] = useState<string[] | null>(null);
+  const [quickReplies, setQuickReplies] = useState<tasksApi.QuickReplyDto[]>([]);
+  const [showQuick, setShowQuick] = useState(false);
+  // Search and date filter over the side panel (comments, files, activity) — Taskopad's 🔍 and 📅.
+  const [panelSearchOpen, setPanelSearchOpen] = useState(false);
+  const [panelQuery, setPanelQuery] = useState("");
+  const [panelDate, setPanelDate] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
-  // Ids for drafted chat/files. A counter rather than Date.now(), which repeats within a millisecond
-  // and would hand two entries the same React key.
   const draftSeq = useRef(0);
 
   // Who may change what. A task's details belong to its creator (and Super Admin); the assignee
@@ -310,14 +309,103 @@ export function TaskDrawer({
   const readOnlyFields = !rights.canEditAll;
 
   const clients = parties.filter((p) => p.type === "Client");
-  // A repeating task reminds at a time of day on each occurrence, so it carries no reminder date.
   const isRepeating = recurrenceRule !== "NONE";
+  const userName = (id: string) => users.find((u) => u.id === id)?.name ?? "Unknown";
 
-  // People for the searchable pickers. Assignee is scoped to the chosen department; followers span all.
+  // Opening a task clears its "new comments" badge in the list.
+  useEffect(() => {
+    if (existing) markTaskSeen(existing.id);
+  }, [existing, markTaskSeen]);
+
+  // Files on this task in the shared registry — the same rows the project's Files tab shows.
+  const refreshFiles = useCallback(async () => {
+    if (!existing) return;
+    try {
+      setRegFiles(await attachmentsFor("TASK", Number(existing.id)));
+    } catch {
+      /* registry unavailable — the old inline attachments still show */
+    }
+  }, [existing]);
+  useEffect(() => {
+    void refreshFiles();
+  }, [refreshFiles]);
+
+  // Task lists come without attachment contents (they used to carry every inline photo); fetch this
+  // task once, in full, when one of its older inline attachments still has no data loaded.
+  const [inlineData, setInlineData] = useState<Record<string, string | null>>({});
+  const needsInline = (liveTask?.attachments ?? []).some((a) => a.hasData && !a.url && !(a.id in inlineData));
+  useEffect(() => {
+    if (!existing || !needsInline) return;
+    let cancelled = false;
+    tasksApi
+      .getTask(Number(existing.id))
+      .then((full) => {
+        if (!cancelled) setInlineData(Object.fromEntries((full.attachments ?? []).map((a) => [String(a.id), a.dataUrl])));
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [existing, needsInline]);
+
+  useEffect(() => {
+    tasksApi
+      .getQuickReplies()
+      .then(setQuickReplies)
+      .catch(() => {});
+  }, []);
+
+  // A task on a project can only go to that project's members (Taskopad does the same).
+  useEffect(() => {
+    if (!projectId) {
+      setProjectMembers(null);
+      return;
+    }
+    let cancelled = false;
+    tasksApi
+      .getProjectMembers(Number(projectId))
+      .then((ids) => !cancelled && setProjectMembers(ids.map(String)))
+      .catch(() => !cancelled && setProjectMembers(null));
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId]);
+
+  // People for the pickers: scoped by department and project; followers exclude whoever is assigned.
   const allPeople: Person[] = users.map((u) => ({ id: u.id, name: u.name, role: u.role }));
-  const assigneePeople: Person[] = departmentId
-    ? users.filter((u) => String(u.departmentId ?? "") === departmentId).map((u) => ({ id: u.id, name: u.name, role: u.role }))
-    : allPeople;
+  const assigneePeople: Person[] = users
+    // The task's current assignee always stays listed, even if they sit outside the chosen department.
+    .filter((u) => (departmentId ? String(u.departmentId ?? "") === departmentId || u.id === assigneeId : true))
+    .filter((u) => (projectMembers ? projectMembers.includes(u.id) || u.id === assigneeId : true))
+    .map((u) => ({ id: u.id, name: u.name, role: u.role }));
+  const chosenAssignees = existing ? [assigneeId] : assigneeIds;
+  const followerPeople = allPeople.filter((p) => !chosenAssignees.includes(p.id));
+  const servicesKnown = useMemo(
+    () => [...new Set(allTasks.map((t) => t.serviceName).filter((s): s is string => !!s))].sort(),
+    [allTasks]
+  );
+
+  // The status picker over company statuses. Awaiting Approval is reached by completing, never picked.
+  const currentStatusRow = rowFor({ status, statusId });
+  const statusChoices = statusRows.filter((r) => r.base !== "Awaiting Approval");
+
+  function validate(asDraft: boolean): string | null {
+    if (!title.trim()) return "Task title is required.";
+    if (!dueDate) return "Due date is required.";
+    if (chosenAssignees.filter(Boolean).length === 0) return "An assignee is required.";
+    if (!existing && !asDraft && dueDate < todayIST()) return "The due date can't be in the past.";
+    if (reminderOn && !isRepeating && !reminderDate) return "Pick the reminder date, or switch the reminder off.";
+    if (reminderOn && !reminderTime && (isRepeating || reminderFrequency !== "ONCE")) return "Pick the reminder time.";
+    if (!asDraft) {
+      // Taskopad won't submit a task with a half-filled sub-task; a draft may keep one.
+      for (const s of subtasks) {
+        if (!s.title.trim()) return "Every sub-task needs a title (or delete the empty one).";
+        if (!s.assigneeId) return `Sub-task "${s.title}" needs an assignee.`;
+        if (!s.dueDate) return `Sub-task "${s.title}" needs a due date.`;
+      }
+    } else if (subtasks.some((s) => !s.title.trim())) {
+      return "Every sub-task needs a title (or delete the empty one).";
+    }
+    return null;
+  }
 
   async function save(asDraft: boolean) {
     // An assignee may move the work along but not rewrite the record, so their save is a narrow
@@ -327,7 +415,7 @@ export function TaskDrawer({
       setSaving(true);
       setError("");
       try {
-        await patchTask(existing.id, { status, progress });
+        await patchTask(existing.id, { ...(statusId ? { statusId } : { status }), progress });
         requestClose();
       } catch (err) {
         setError(err instanceof Error ? err.message : "Could not save the task.");
@@ -336,27 +424,36 @@ export function TaskDrawer({
       return;
     }
 
-    if (!title.trim()) return setError("Task title is required.");
-    if (!dueDate) return setError("Due date is required.");
-    if (!assigneeId) return setError("An assignee is required.");
+    const problem = validate(asDraft);
+    if (problem) return setError(problem);
 
     const payload = {
       title: title.trim(),
       description: description.trim(),
       projectId: projectId || null,
-      assigneeId,
-      followerIds,
+      assigneeId: existing ? assigneeId : assigneeIds[0],
+      assigneeIds: existing ? undefined : assigneeIds,
+      followerIds: followerIds.filter((f) => !chosenAssignees.includes(f)),
       clientName: clientName || null,
+      serviceName: serviceName.trim() || null,
       status,
+      statusId,
       priority,
       progress,
       dueDate,
       subtasks,
+      subtasksMandatory,
       isDraft: asDraft,
       pinned: existing?.pinned ?? false,
-      reminderAt: joinReminder(reminderDate, reminderTime, isRepeating),
+      reminderAt: reminderOn ? joinReminder(reminderDate, reminderTime, isRepeating) : "",
+      reminderFrequency,
+      reminderRecipients,
+      reminderDays: reminderFrequency === "WEEKLY" ? reminderDays : "",
       recurrenceRule,
       recurrenceInterval,
+      recurrenceDays: recurrenceRule === "WEEKLY" ? recurrenceDays : "",
+      recurrenceExcludeDays: recurrenceRule === "CUSTOM" ? recurrenceExcludeDays : "",
+      recurrenceUntil: isRepeating ? recurrenceUntil || "" : "",
       departmentId: departmentId || null,
     };
 
@@ -374,9 +471,7 @@ export function TaskDrawer({
         taskId = created.id;
       }
       // Drafted chat and files can only be posted now that the task has an id. Sequential, because
-      // each call returns the whole task and the store mirrors the last response — parallel writes
-      // would race and drop entries. Each item is cleared as it lands, so a retry after a failure
-      // only resends what's left.
+      // each call returns the whole task and the store mirrors the last response.
       await flushDrafts(taskId);
       requestClose();
     } catch (err) {
@@ -385,61 +480,84 @@ export function TaskDrawer({
     }
   }
 
-  /** Posts the comments/attachments drafted before the task existed. Throws on the first failure. */
+  /** Posts the comments/files drafted before the task existed. Throws on the first failure. */
   async function flushDrafts(taskId: string) {
     for (const c of draftComments) {
       await addComment(taskId, c.text);
       setDraftComments((list) => list.filter((x) => x.id !== c.id));
     }
-    for (const a of draftAttachments) {
-      await addAttachment(taskId, {
-        name: a.name,
-        sizeLabel: a.size,
-        contentType: a.contentType ?? undefined,
-        dataUrl: a.url ?? undefined,
+    for (const f of draftFiles) {
+      await uploadFile(f.file, {
+        projectId: projectId ? Number(projectId) : null,
+        source: { module: "TASK", id: Number(taskId), label: `Task: ${title.trim()}` },
       });
-      setDraftAttachments((list) => list.filter((x) => x.id !== a.id));
+      setDraftFiles((list) => list.filter((x) => x.id !== f.id));
     }
   }
 
-  function addSubtask() {
-    if (!subtaskInput.trim()) return;
-    setSubtasks((s) => [...s, { id: `st-${Date.now()}`, title: subtaskInput.trim(), done: false }]);
-    setSubtaskInput("");
+  // ---- Sub-tasks ----
+  function addSubtask(titleText = "") {
+    setSubtasks((s) => [
+      ...s,
+      {
+        id: `st-${Date.now()}-${++draftSeq.current}`,
+        title: titleText,
+        done: false,
+        status: "Pending",
+        priority: "Low",
+        // Prefilled so a sub-task is submittable at once — Taskopad requires both.
+        assigneeId: chosenAssignees[0] || undefined,
+        dueDate: dueDate || null,
+      },
+    ]);
+  }
+  function updateSub(id: string, patch: Partial<SubTask>) {
+    setSubtasks((list) =>
+      list.map((x) => {
+        if (x.id !== id) return x;
+        const next = { ...x, ...patch };
+        if (patch.status) next.done = patch.status === "Completed";
+        return next;
+      })
+    );
   }
 
   /**
-   * Tick a sub task off.
-   *
-   * For the creator/Super Admin this is just another edited field — it rides along with Save like
-   * the title or the due date. The assignee has no full-save path (their Save is a narrow PATCH of
-   * status and progress), so their tick has to persist on its own through the dedicated toggle
-   * endpoint, and is rolled back if that call fails.
+   * Tick a sub task off. For the creator this rides along with Save like any field; anyone else
+   * (the assignee, or whoever the sub-task was given to) persists it on its own.
    */
   async function onToggleSubtask(s: SubTask) {
     const next = !s.done;
-    setSubtasks((list) => list.map((x) => (x.id === s.id ? { ...x, done: next } : x)));
+    updateSub(s.id, { status: next ? "Completed" : "Pending" });
     if (rights.canEditAll || !existing) return;
     setTogglingSubtaskId(s.id);
     try {
       await toggleSubtask(existing.id, s.id);
     } catch (err) {
-      setSubtasks((list) => list.map((x) => (x.id === s.id ? { ...x, done: !next } : x)));
+      updateSub(s.id, { status: next ? "Pending" : "Completed" });
       setError(err instanceof Error ? err.message : "Could not update the sub task.");
     } finally {
       setTogglingSubtaskId(null);
     }
   }
 
+  /** A sub-task's own status, changed by its assignee without rewriting the parent. */
+  async function onSubStatus(s: SubTask, st: TaskStatus) {
+    updateSub(s.id, { status: st });
+    if (rights.canEditAll || !existing) return;
+    try {
+      await patchSubtask(existing.id, s.id, { status: st });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not update the sub task.");
+    }
+  }
+
+  // ---- Chat ----
   async function sendComment() {
     const text = commentText.trim();
     if (!text) return;
-    // Composing a new task: hold the message until there's a task to hang it off.
     if (!existing) {
-      setDraftComments((list) => [
-        ...list,
-        { id: `draft-${++draftSeq.current}`, userId: meId, text, at: new Date().toISOString() },
-      ]);
+      setDraftComments((list) => [...list, { id: `draft-${++draftSeq.current}`, userId: meId, text, at: new Date().toISOString() }]);
       setCommentText("");
       return;
     }
@@ -454,70 +572,97 @@ export function TaskDrawer({
     }
   }
 
+  /**
+   * Attach a file. It goes into the shared file registry against this task — the one copy the
+   * project's Files tab ("Tasks") and Taskopad's Documents both read. Nothing is stored twice.
+   */
   async function onUploadFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     e.target.value = "";
     if (!file) return;
-    // Store the file contents as a data URL so it can actually be downloaded later.
-    const MAX_BYTES = 8 * 1024 * 1024; // 8 MB
-    if (file.size > MAX_BYTES) {
-      setError("File is too large to attach (max 8 MB).");
+    if (!existing) {
+      setDraftFiles((list) => [...list, { id: `draft-${++draftSeq.current}`, file, at: new Date().toISOString() }]);
       return;
     }
+    setUploading(true);
     try {
-      const dataUrl = await readAsDataUrl(file);
-      // Composing a new task: keep the file locally until the create call gives us an id.
-      if (!existing) {
-        setDraftAttachments((list) => [
-          ...list,
-          {
-            id: `draft-${++draftSeq.current}`,
-            name: file.name,
-            size: formatBytes(file.size),
-            at: new Date().toISOString(),
-            url: dataUrl,
-            userId: meId,
-            contentType: file.type || null,
-          },
-        ]);
-        return;
-      }
-      await addAttachment(existing.id, {
-        name: file.name,
-        sizeLabel: formatBytes(file.size),
-        contentType: file.type || undefined,
-        dataUrl,
+      await uploadFile(file, {
+        projectId: projectId ? Number(projectId) : null,
+        source: { module: "TASK", id: Number(existing.id), label: `Task: ${existing.title}` },
       });
+      await refreshFiles();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not attach the file.");
+    } finally {
+      setUploading(false);
     }
   }
 
   function removeDraft(kind: "comment" | "attachment", id: string) {
     if (kind === "comment") setDraftComments((list) => list.filter((c) => c.id !== id));
-    else setDraftAttachments((list) => list.filter((a) => a.id !== id));
+    else setDraftFiles((list) => list.filter((a) => a.id !== id));
   }
 
-  const userName = (id: string) => users.find((u) => u.id === id)?.name ?? "Unknown";
-  const meId = authUser ? String(authUser.id) : "";
+  async function openFile(att: ChatFile) {
+    if (att.fileId != null) {
+      try {
+        const url = await fileUrl(att.fileId, true);
+        window.open(url, "_blank", "noopener");
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Could not open the file.");
+      }
+      return;
+    }
+    if (canPreview(att)) setPreviewId(att.id);
+    else if (att.url) window.open(att.url, "_blank", "noopener");
+  }
 
-  // A task being composed has no server-side thread yet, so the side panel runs off the local
-  // drafts instead. Everything below reads these rather than `liveTask` directly.
+  // A task being composed has no server-side thread yet, so the side panel runs off local drafts.
   const isDrafting = !existing;
   const panelComments = liveTask ? liveTask.comments : draftComments;
-  const panelAttachments = liveTask ? liveTask.attachments : draftAttachments;
+  const regNames = new Set(regFiles.map((f) => f.name));
+  // Old inline attachments whose file has since been copied into the registry would show twice.
+  const legacyAttachments = (liveTask?.attachments ?? [])
+    .filter((a) => !regNames.has(a.name))
+    .map((a) => (a.url || !(a.id in inlineData) ? a : { ...a, url: inlineData[a.id] }));
+  const chatFiles: ChatFile[] = isDrafting
+    ? draftFiles.map((f) => ({
+        id: f.id,
+        name: f.file.name,
+        size: formatBytes(f.file.size),
+        at: f.at,
+        url: null,
+        userId: meId,
+        contentType: f.file.type || null,
+      }))
+    : [
+        ...legacyAttachments,
+        ...regFiles.map((f) => ({
+          id: `f-${f.fileId}`,
+          fileId: f.fileId ?? undefined,
+          name: f.name,
+          size: formatBytes(f.sizeBytes),
+          at: f.createdAt ?? "",
+          url: null,
+          userId: String(f.uploadedBy ?? ""),
+          contentType: f.contentType,
+        })),
+      ];
+
+  const panelFiltering = !!panelQuery.trim() || !!panelDate;
+  const pq = panelQuery.trim().toLowerCase();
+  const onDay = (at: string) => !panelDate || dateKeyIST(at) === panelDate;
+  const hit = (...texts: (string | null | undefined)[]) => !pq || texts.some((t) => (t ?? "").toLowerCase().includes(pq));
+  const shownComments = panelComments.filter((c) => onDay(c.at) && hit(c.text, userName(c.userId)));
+  const shownFiles = chatFiles.filter((f) => onDay(f.at) && hit(f.name, userName(f.userId)));
+  const shownActivity = (liveTask?.activity ?? []).filter((a) => onDay(a.at) && hit(a.text, userName(a.userId)));
+
+  const series = existing && existing.recurrenceRule && existing.recurrenceRule !== "NONE";
 
   return (
-    <div
-      className={`fixed inset-0 z-50 flex justify-end bg-black/40 ${
-        closing ? "animate-overlay-out" : "animate-overlay-in"
-      }`}
-      onClick={requestClose}
-    >
+    <div className={`fixed inset-0 z-50 flex justify-end bg-black/40 ${closing ? "animate-overlay-out" : "animate-overlay-in"}`} onClick={requestClose}>
       <div
-        className={`flex h-full w-full max-w-5xl flex-col overflow-hidden bg-white shadow-2xl ${
-          closing ? "animate-slide-out-right" : "animate-slide-in-right"
-        }`}
+        className={`flex h-full w-full max-w-6xl flex-col overflow-hidden bg-white shadow-2xl ${closing ? "animate-slide-out-right" : "animate-slide-in-right"}`}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="h-1 w-full bg-gradient-to-r from-brand-accent to-cyan-400" />
@@ -525,9 +670,7 @@ export function TaskDrawer({
         {/* Header */}
         <div className="flex items-center justify-between border-b border-gray-100 px-6 py-3">
           <div className="flex items-center gap-4">
-            <h2 className="text-base font-semibold text-gray-800">
-              {existing ? `Edit Task · ${existing.code}` : "Add Task"}
-            </h2>
+            <h2 className="text-base font-semibold text-gray-800">{existing ? `Edit Task · ${existing.code}` : "Add Task"}</h2>
             <div className="flex items-center gap-2">
               <span className="text-xs text-gray-400">Progress</span>
               <input
@@ -544,13 +687,17 @@ export function TaskDrawer({
             </div>
           </div>
           <div className="flex items-center gap-1 text-gray-400">
-            <button title="Reminder" className="rounded-md p-1.5 transition-colors duration-150 hover:bg-gray-100 hover:text-gray-600">
-              <Bell size={16} />
-            </button>
-            <button
-              onClick={requestClose}
-              className="rounded-full p-1.5 transition-all duration-150 hover:bg-gray-100 hover:text-gray-600 active:scale-90"
-            >
+            {series && rights.canEditAll && (
+              <button
+                onClick={() => void setRecurrenceStopped(existing!.id, !existing!.recurrenceStopped)}
+                title={existing!.recurrenceStopped ? "Resume the recurring series" : "Stop the recurring series"}
+                className="flex items-center gap-1 rounded-md px-2 py-1.5 text-xs font-medium transition-colors duration-150 hover:bg-gray-100 hover:text-gray-700"
+              >
+                {existing!.recurrenceStopped ? <CirclePlay size={15} /> : <CirclePause size={15} />}
+                {existing!.recurrenceStopped ? "Resume series" : "Stop series"}
+              </button>
+            )}
+            <button onClick={requestClose} className="rounded-full p-1.5 transition-all duration-150 hover:bg-gray-100 hover:text-gray-600 active:scale-90">
               <X size={18} />
             </button>
           </div>
@@ -590,18 +737,20 @@ export function TaskDrawer({
                   <span>Completion was sent back: {existing.completionNote}</span>
                 </div>
               )}
+              {existing?.recurrenceStopped && (
+                <div className="flex items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-600">
+                  <Repeat size={13} className="shrink-0" /> This recurring series is stopped — completing it won&apos;t create the next one.
+                </div>
+              )}
 
-              {/*
-                Compact meta row: Due Date + Reminder (date + time + presets) on one line, Status and
-                Priority on the next. A repeating task's reminder is a time of day only — it fires on
-                each occurrence's own due date, so pinning it to one calendar date would be wrong.
-              */}
+              {/* Due date (with recurrence) · Status · Priority */}
               <div className="flex flex-wrap items-end gap-x-4 gap-y-3">
                 <div>
                   <div className="mb-1 text-[11px] font-medium uppercase tracking-wide text-gray-400">Due Date *</div>
                   <DatePicker
                     value={dueDate}
                     onChange={setDueDate}
+                    min={existing ? undefined : todayIST()}
                     placeholder="Due date"
                     className="py-1.5"
                     disabled={readOnlyFields}
@@ -609,79 +758,33 @@ export function TaskDrawer({
                     onRecurrenceChange={setRecurrenceRule}
                     recurrenceInterval={recurrenceInterval}
                     onRecurrenceIntervalChange={setRecurrenceInterval}
+                    recurrenceDays={recurrenceDays}
+                    onRecurrenceDaysChange={setRecurrenceDays}
+                    recurrenceExcludeDays={recurrenceExcludeDays}
+                    onRecurrenceExcludeDaysChange={setRecurrenceExcludeDays}
+                    recurrenceUntil={recurrenceUntil}
+                    onRecurrenceUntilChange={setRecurrenceUntil}
                   />
                 </div>
-
-                <div>
-                  <div className="mb-1 flex items-center gap-1 text-[11px] font-medium uppercase tracking-wide text-gray-400">
-                    <Bell size={11} /> Reminder
-                  </div>
-                  <div className="flex items-center gap-1.5">
-                    {!isRepeating && (
-                      <DatePicker
-                        value={reminderDate}
-                        onChange={setReminderDate}
-                        placeholder="Date"
-                        className="py-1.5"
-                        disabled={readOnlyFields}
-                      />
-                    )}
-                    <input
-                      type="time"
-                      value={reminderTime}
-                      onChange={(e) => setReminderTime(e.target.value)}
-                      disabled={readOnlyFields}
-                      aria-label={isRepeating ? "Reminder time for each occurrence" : "Reminder time"}
-                      className="rounded-lg border border-gray-200 px-2 py-1.5 text-sm text-gray-700 outline-none transition-colors duration-150 focus:border-cyan-500 disabled:cursor-not-allowed disabled:bg-gray-50 disabled:opacity-70"
-                    />
-                    {isRepeating && <span className="text-[10px] text-gray-400">each occurrence</span>}
-                    {(isRepeating ? reminderTime : reminderDate || reminderTime) ? (
-                      <button
-                        type="button"
-                        onClick={() => { setReminderDate(""); setReminderTime(""); }}
-                        hidden={readOnlyFields}
-                        title="Clear reminder"
-                        className="rounded-md p-1 text-gray-400 transition-colors duration-150 hover:bg-rose-50 hover:text-rose-600"
-                      >
-                        <X size={13} />
-                      </button>
-                    ) : (
-                      !isRepeating && !readOnlyFields && (
-                        <div className="flex gap-1">
-                          {REMINDER_PRESETS.map((p) => (
-                            <button
-                              key={p.label}
-                              type="button"
-                              onClick={() => setReminderDate(p.from(dueDate))}
-                              className="rounded-md border border-gray-200 px-1.5 py-1 text-[10px] font-medium text-gray-500 transition-all duration-150 hover:border-brand-accent hover:text-brand-accent active:scale-95"
-                            >
-                              {p.label}
-                            </button>
-                          ))}
-                        </div>
-                      )
-                    )}
-                  </div>
-                </div>
-              </div>
-
-              {/* Status + Priority on their own line — keeps the date row clean. */}
-              <div className="flex flex-wrap items-end gap-x-4 gap-y-3">
                 <div>
                   <div className="mb-1 text-[11px] font-medium uppercase tracking-wide text-gray-400">Status</div>
                   <Select
-                    value={status}
-                    onChange={(v) => setStatus(v as TaskStatus)}
+                    value={currentStatusRow.id}
+                    onChange={(id) => {
+                      const row = statusChoices.find((r) => r.id === id);
+                      if (!row) return;
+                      setStatus(row.base);
+                      setStatusId(row.id.startsWith("base:") ? null : row.id);
+                    }}
                     size="sm"
                     disabled={!rights.canSetStatus}
-                    // The task's own status is kept in the list even when it isn't assignable, so a
-                    // task already awaiting approval shows what it is instead of an empty box.
-                    options={(ASSIGNABLE_TASK_STATUSES as string[]).includes(status)
-                      ? ASSIGNABLE_TASK_STATUSES.map((s) => ({ value: s, label: s }))
-                      : [{ value: status, label: status, disabled: true }, ...ASSIGNABLE_TASK_STATUSES.map((s) => ({ value: s, label: s }))]}
+                    options={(statusChoices.some((r) => r.id === currentStatusRow.id) ? statusChoices : [currentStatusRow, ...statusChoices]).map((r) => ({
+                      value: r.id,
+                      label: r.name,
+                      disabled: r.base === "Awaiting Approval",
+                    }))}
                   />
                 </div>
-
                 <div>
                   <div className="mb-1 text-[11px] font-medium uppercase tracking-wide text-gray-400">Priority</div>
                   <Select
@@ -694,6 +797,25 @@ export function TaskDrawer({
                 </div>
               </div>
 
+              {/* Reminder */}
+              <ReminderEditor
+                on={reminderOn}
+                setOn={setReminderOn}
+                repeating={isRepeating}
+                date={reminderDate}
+                setDate={setReminderDate}
+                time={reminderTime}
+                setTime={setReminderTime}
+                frequency={reminderFrequency}
+                setFrequency={setReminderFrequency}
+                recipients={reminderRecipients}
+                setRecipients={setReminderRecipients}
+                days={reminderDays}
+                setDays={setReminderDays}
+                dueDate={dueDate}
+                disabled={readOnlyFields}
+              />
+
               <textarea
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
@@ -703,128 +825,151 @@ export function TaskDrawer({
                 className="input resize-none read-only:cursor-default read-only:bg-gray-50 read-only:text-gray-500"
               />
 
-              <Field label="Project">
-                <Select
-                  value={projectId}
-                  onChange={setProjectId}
-                  placeholder="No project"
-                  disabled={readOnlyFields}
-                  options={[
-                    { value: "", label: "No project" },
-                    ...projects.map((p) => ({ value: p.id, label: p.name })),
-                  ]}
-                />
-              </Field>
+              <div className="grid gap-4 md:grid-cols-2">
+                <Field label="Project">
+                  <Select
+                    value={projectId}
+                    onChange={setProjectId}
+                    placeholder="No project"
+                    disabled={readOnlyFields}
+                    options={[{ value: "", label: "No project" }, ...projects.map((p) => ({ value: p.id, label: p.name }))]}
+                  />
+                </Field>
+                <Field label="Department">
+                  <Select
+                    value={departmentId}
+                    onChange={(v) => {
+                      setDepartmentId(v);
+                      if (v) {
+                        const inDept = (id: string) => users.some((u) => u.id === id && String(u.departmentId ?? "") === v);
+                        if (existing) {
+                          if (!inDept(assigneeId)) setAssigneeId("");
+                        } else {
+                          setAssigneeIds((ids) => ids.filter(inDept));
+                        }
+                      }
+                    }}
+                    placeholder="Any department"
+                    disabled={readOnlyFields}
+                    options={[
+                      { value: "", label: "Any department" },
+                      ...departments.map((d) => ({ value: String(d.id), label: `${d.name}${d.memberCount ? ` · ${d.memberCount}` : ""}` })),
+                    ]}
+                  />
+                </Field>
+              </div>
 
-              <Field label="Department">
-                <Select
-                  value={departmentId}
-                  onChange={(v) => {
-                    setDepartmentId(v);
-                    // If the current assignee isn't in the newly picked department, clear them so
-                    // the list below only offers people who actually belong to that team.
-                    if (v) {
-                      const stillValid = users.some(
-                        (u) => u.id === assigneeId && String(u.departmentId ?? "") === v
-                      );
-                      if (!stillValid) setAssigneeId("");
-                    }
-                  }}
-                  placeholder="Any department"
-                  disabled={readOnlyFields}
-                  options={[
-                    { value: "", label: "Any department" },
-                    ...departments.map((d) => ({
-                      value: String(d.id),
-                      label: `${d.name}${d.memberCount ? ` · ${d.memberCount}` : ""}`,
-                    })),
-                  ]}
-                />
-              </Field>
-
-              <Field label="Assignee *">
-                <PeopleSelect
-                  people={assigneePeople}
-                  value={assigneeId}
-                  onChange={setAssigneeId}
-                  disabled={readOnlyFields}
-                  placeholder={departmentId ? "Select from this department" : "Select assignee"}
-                />
-              </Field>
-
-              <Field label="Client">
-                <ClientSelect
-                  clients={clients.map((c) => c.name)}
-                  value={clientName}
-                  onChange={setClientName}
-                  disabled={readOnlyFields}
-                  onAddClient={(name) =>
-                    addParty({ name, type: "Client", phone: "", gstin: "", rating: 0, toReceive: 0, toPay: 0 })
-                  }
-                />
+              <Field label={existing ? "Assignee *" : "Assignees * (one task each)"}>
+                {existing ? (
+                  <PeopleSelect
+                    people={assigneePeople}
+                    value={assigneeId}
+                    onChange={setAssigneeId}
+                    disabled={readOnlyFields}
+                    placeholder={projectMembers ? "Select from this project's members" : "Select assignee"}
+                  />
+                ) : (
+                  <PeopleMultiSelect
+                    people={assigneePeople}
+                    values={assigneeIds}
+                    onChange={setAssigneeIds}
+                    placeholder={projectMembers ? "Add this project's members…" : "Search and add assignees…"}
+                  />
+                )}
+                {projectMembers && (
+                  <p className="mt-1 text-[11px] text-gray-400">Only members of the chosen project are listed.</p>
+                )}
+                {!existing && assigneeIds.length > 1 && (
+                  <p className="mt-1 text-[11px] text-indigo-600">{assigneeIds.length} people — each gets their own linked copy.</p>
+                )}
               </Field>
 
               <Field label="Followers">
                 <PeopleMultiSelect
-                  people={allPeople}
-                  values={followerIds}
+                  people={followerPeople}
+                  values={followerIds.filter((f) => !chosenAssignees.includes(f))}
                   onChange={setFollowerIds}
                   disabled={readOnlyFields}
                   placeholder="Search and add followers…"
                 />
               </Field>
 
-              {/* Subtasks */}
-              <Field label={`Sub tasks (${subtasks.filter((s) => s.done).length}/${subtasks.length})`}>
+              <div className="grid gap-4 md:grid-cols-2">
+                <Field label="Client">
+                  <ClientSelect
+                    clients={clients.map((c) => c.name)}
+                    value={clientName}
+                    onChange={setClientName}
+                    disabled={readOnlyFields}
+                    onAddClient={(name) => addParty({ name, type: "Client", phone: "", gstin: "", rating: 0, toReceive: 0, toPay: 0 })}
+                  />
+                </Field>
+                <Field label="Service">
+                  <input
+                    value={serviceName}
+                    onChange={(e) => setServiceName(e.target.value)}
+                    list="taskopad-services"
+                    readOnly={readOnlyFields}
+                    placeholder="e.g. Plumbing, Billing, Site survey"
+                    className="input read-only:bg-gray-50"
+                  />
+                  <datalist id="taskopad-services">
+                    {servicesKnown.map((s) => (
+                      <option key={s} value={s} />
+                    ))}
+                  </datalist>
+                </Field>
+              </div>
+
+              {/* Sub-tasks */}
+              <div>
+                <div className="mb-1.5 flex items-center justify-between">
+                  <span className="flex items-center gap-1 text-[11px] font-medium uppercase tracking-wide text-gray-400">
+                    <ListTree size={11} /> Sub tasks ({subtasks.filter((s) => s.done).length}/{subtasks.length})
+                  </span>
+                  <label className={`flex items-center gap-1.5 text-xs text-gray-600 ${readOnlyFields ? "opacity-60" : ""}`}>
+                    <input
+                      type="checkbox"
+                      checked={subtasksMandatory}
+                      onChange={(e) => setSubtasksMandatory(e.target.checked)}
+                      disabled={readOnlyFields}
+                      className="h-3.5 w-3.5 accent-cyan-600"
+                    />
+                    Mark as mandatory
+                  </label>
+                </div>
                 <div className="space-y-2">
                   {subtasks.map((s) => (
-                    <div key={s.id} className="flex items-center gap-2 rounded-lg border border-gray-100 px-3 py-1.5">
-                      <input
-                        type="checkbox"
-                        checked={s.done}
-                        disabled={!rights.canToggleSubtasks || togglingSubtaskId === s.id}
-                        title={
-                          rights.canToggleSubtasks
-                            ? undefined
-                            : "Only the task's creator or assignee can tick sub tasks off"
-                        }
-                        onChange={() => onToggleSubtask(s)}
-                        className="h-3.5 w-3.5 accent-cyan-600 disabled:cursor-not-allowed disabled:opacity-50"
-                      />
-                      <span className={`flex-1 text-sm ${s.done ? "text-gray-400 line-through" : "text-gray-700"}`}>
-                        {s.title}
-                      </span>
-                      <button
-                        onClick={() => setSubtasks((list) => list.filter((x) => x.id !== s.id))}
-                        hidden={readOnlyFields}
-                        className="rounded p-1 text-gray-300 transition-colors duration-150 hover:bg-rose-50 hover:text-rose-500"
-                      >
-                        <Trash2 size={13} />
-                      </button>
-                    </div>
+                    <SubtaskRow
+                      key={s.id}
+                      s={s}
+                      people={allPeople}
+                      editable={!readOnlyFields}
+                      canStatus={rights.canToggleSubtasks || s.assigneeId === meId}
+                      busy={togglingSubtaskId === s.id}
+                      onToggle={() => onToggleSubtask(s)}
+                      onStatus={(st) => onSubStatus(s, st)}
+                      onChange={(patch) => updateSub(s.id, patch)}
+                      onRemove={() => setSubtasks((list) => list.filter((x) => x.id !== s.id))}
+                    />
                   ))}
                   {!readOnlyFields && (
-                    <div className="flex gap-2">
-                      <input
-                        value={subtaskInput}
-                        onChange={(e) => setSubtaskInput(e.target.value)}
-                        onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addSubtask())}
-                        placeholder="Add a sub task"
-                        className="input flex-1"
-                      />
-                      <button
-                        onClick={addSubtask}
-                        className="flex items-center gap-1 rounded-lg border border-gray-200 px-3 text-sm text-gray-600 transition-all duration-150 hover:border-brand-accent hover:text-brand-accent active:scale-95"
-                      >
-                        <Plus size={14} />
+                    <div className="flex items-center gap-3">
+                      <button onClick={() => addSubtask()} className="flex items-center gap-1 text-sm font-medium text-brand-accent hover:underline">
+                        <Plus size={14} /> Add Sub Task
+                      </button>
+                      <span className="text-gray-300">|</span>
+                      <button onClick={() => setImportingSubs(true)} className="flex items-center gap-1 text-sm font-medium text-brand-accent hover:underline">
+                        <ClipboardPaste size={13} /> Import Subtask
                       </button>
                     </div>
                   )}
-                  {readOnlyFields && subtasks.length === 0 && (
-                    <p className="text-xs text-gray-400">No sub tasks.</p>
+                  {readOnlyFields && subtasks.length === 0 && <p className="text-xs text-gray-400">No sub tasks.</p>}
+                  {subtasksMandatory && subtasks.length > 0 && (
+                    <p className="text-[11px] text-amber-600">The task can&apos;t be completed until every sub-task is done.</p>
                   )}
                 </div>
-              </Field>
+              </div>
 
               {error && <div className="text-xs font-medium text-rose-600">{error}</div>}
             </div>
@@ -847,7 +992,6 @@ export function TaskDrawer({
                   Draft
                 </button>
               )}
-              {/* Nothing to save for a pure viewer — the chat and attachments save themselves. */}
               {(rights.canEditAll || rights.canSetStatus || rights.canSetProgress) && (
                 <button
                   onClick={() => save(false)}
@@ -862,10 +1006,7 @@ export function TaskDrawer({
           </div>
 
           {/* Side panel */}
-          <div className="hidden w-[340px] shrink-0 flex-col lg:flex">
-            {/* Hidden file input, shared by the Attachment tab's "Upload a file" button and the
-                Comment tab's paper-clip in the composer. Kept at the top so it stays mounted
-                whichever tab is active. */}
+          <div className="hidden w-[360px] shrink-0 flex-col lg:flex">
             <input ref={fileRef} type="file" hidden onChange={onUploadFile} />
             <div className="flex border-b border-gray-100">
               {(["Comment", "Attachment", "Log Activity"] as Panel[]).map((p) => (
@@ -881,185 +1022,456 @@ export function TaskDrawer({
               ))}
             </div>
 
+            <div className="flex items-center justify-end gap-1.5 border-b border-gray-100 px-3 py-1.5">
+              {panelSearchOpen ? (
+                <div className="flex flex-1 items-center gap-1.5 rounded-lg border border-gray-200 px-2 py-1 focus-within:border-cyan-500">
+                  <Search size={13} className="text-gray-400" />
+                  <input
+                    autoFocus
+                    value={panelQuery}
+                    onChange={(e) => setPanelQuery(e.target.value)}
+                    placeholder={panel === "Comment" ? "Search messages…" : panel === "Attachment" ? "Search files…" : "Search activity…"}
+                    className="w-full bg-transparent text-xs outline-none"
+                  />
+                  <button
+                    onClick={() => {
+                      setPanelQuery("");
+                      setPanelSearchOpen(false);
+                    }}
+                    className="text-gray-300 hover:text-gray-500"
+                    title="Close search"
+                  >
+                    <X size={12} />
+                  </button>
+                </div>
+              ) : (
+                <button onClick={() => setPanelSearchOpen(true)} title="Search" className="rounded-md p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700">
+                  <Search size={15} />
+                </button>
+              )}
+              <DatePicker value={panelDate} onChange={setPanelDate} placeholder="Any date" className="!py-1 text-xs" />
+              {panelFiltering && (
+                <button
+                  onClick={() => {
+                    setPanelQuery("");
+                    setPanelDate("");
+                    setPanelSearchOpen(false);
+                  }}
+                  className="text-[11px] font-medium text-gray-400 hover:text-rose-600"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+
             <div className="flex-1 overflow-y-auto px-4 py-3">
-              {panel === "Comment" ? (
+              {panel === "Comment" && panelFiltering && shownComments.length + shownFiles.length === 0 ? (
+                <p className="py-10 text-center text-xs text-gray-400">No messages match.</p>
+              ) : panel === "Comment" ? (
                 <ChatThread
-                  comments={panelComments}
-                  attachments={panelAttachments}
+                  comments={shownComments}
+                  attachments={shownFiles}
                   userName={userName}
                   meId={meId}
-                  onOpenAttachment={(a) => setPreviewId(a.id)}
+                  onOpenAttachment={(a) => void openFile(a)}
                   onRemove={isDrafting ? removeDraft : undefined}
                 />
               ) : panel === "Attachment" ? (
                 <div className="space-y-3">
                   {/*
-                    New attachments go to the shared file registry, so a photo added to a task on
-                    site also appears in that project's Files tab under "Task Attachments" — one
-                    row, read twice, never copied. The base64 list below it is what this task
-                    already held; it stays until the backfill moves those across.
+                    Files go to the shared registry against this task — the same row the project's
+                    Files tab lists under "Tasks" and Taskopad's Documents page lists. Old inline
+                    attachments without a registry copy show read-only underneath.
                   */}
-                  {existing ? (
+                  {existing && panelFiltering ? (
+                    shownFiles.length === 0 ? (
+                      <p className="py-6 text-center text-xs text-gray-400">No files match.</p>
+                    ) : (
+                      shownFiles.map((f) => (
+                        <button
+                          key={f.id}
+                          onClick={() => void openFile(f)}
+                          className="flex w-full items-center gap-2.5 rounded-lg border border-gray-100 px-3 py-2 text-left hover:border-cyan-200 hover:bg-cyan-50/30"
+                        >
+                          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-cyan-50 text-brand-accent">
+                            <FileText size={16} />
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <div className="truncate text-sm font-medium text-gray-700">{f.name}</div>
+                            <div className="text-[10px] text-gray-400">
+                              {f.size} · {userName(f.userId)} · {formatTaskDateTime(f.at)}
+                            </div>
+                          </div>
+                        </button>
+                      ))
+                    )
+                  ) : existing ? (
                     <ModuleAttachments
                       module="TASK"
                       sourceId={Number(existing.id)}
                       projectId={projectId ? Number(projectId) : null}
                       label={`Task: ${title || existing.title}`}
+                      legacy={legacyAttachments.filter((a) => a.url).map((a) => ({ name: a.name, dataUrl: a.url! }))}
                     />
                   ) : (
-                    <button
-                      onClick={() => fileRef.current?.click()}
-                      className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-gray-300 py-3 text-sm text-gray-500 transition-colors duration-150 hover:border-brand-accent hover:text-brand-accent"
-                    >
-                      <Paperclip size={14} /> Upload a file
-                    </button>
-                  )}
-                  {panelAttachments.length === 0 ? (
-                    <p className="py-6 text-center text-xs text-gray-400">No attachments yet.</p>
-                  ) : (
-                    panelAttachments.map((a) => {
-                      const previewable = canPreview(a);
-                      const isImage = previewable && (a.contentType ?? "").startsWith("image/");
-                      return (
-                        <div
-                          key={a.id}
-                          className="group flex items-center gap-2.5 rounded-lg border border-gray-100 px-3 py-2 transition-colors duration-150 hover:border-cyan-200 hover:bg-cyan-50/30"
-                        >
-                          {/* An image thumbnail identifies the file far faster than a generic icon. */}
-                          {isImage && a.url ? (
-                            <button
-                              onClick={() => setPreviewId(a.id)}
-                              title={`Preview ${a.name}`}
-                              className="h-9 w-9 shrink-0 overflow-hidden rounded-lg transition-transform duration-150 hover:scale-105"
-                            >
-                              {/* eslint-disable-next-line @next/next/no-img-element */}
-                              <img src={a.url} alt={a.name} className="h-full w-full object-cover" />
-                            </button>
-                          ) : (
+                    <>
+                      <button
+                        onClick={() => fileRef.current?.click()}
+                        className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-gray-300 py-3 text-sm text-gray-500 transition-colors duration-150 hover:border-brand-accent hover:text-brand-accent"
+                      >
+                        <Paperclip size={14} /> Upload a file
+                      </button>
+                      {draftFiles.length === 0 ? (
+                        <p className="py-6 text-center text-xs text-gray-400">No attachments yet.</p>
+                      ) : (
+                        draftFiles.map((f) => (
+                          <div key={f.id} className="flex items-center gap-2.5 rounded-lg border border-gray-100 px-3 py-2">
                             <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-cyan-50 text-brand-accent">
                               <FileText size={16} />
                             </div>
-                          )}
-                          <div className="min-w-0 flex-1">
-                            <div className="truncate text-sm font-medium text-gray-700">{a.name}</div>
-                            <div className="text-[10px] text-gray-400">
-                              {a.size} · {isDrafting ? "Uploaded when you create the task" : formatTaskDateTime(a.at)}
+                            <div className="min-w-0 flex-1">
+                              <div className="truncate text-sm font-medium text-gray-700">{f.file.name}</div>
+                              <div className="text-[10px] text-gray-400">{formatBytes(f.file.size)} · Uploaded when you create the task</div>
                             </div>
-                          </div>
-                          {isDrafting ? (
                             <button
-                              onClick={() => removeDraft("attachment", a.id)}
-                              title={`Remove ${a.name}`}
+                              onClick={() => removeDraft("attachment", f.id)}
                               className="shrink-0 rounded-lg border border-gray-200 bg-white p-1.5 text-gray-400 transition-all duration-150 hover:border-rose-200 hover:bg-rose-50 hover:text-rose-500 active:scale-95"
                             >
                               <Trash2 size={13} />
                             </button>
-                          ) : a.url ? (
-                            <div className="flex shrink-0 items-center gap-1">
-                              {previewable && (
-                                <button
-                                  onClick={() => setPreviewId(a.id)}
-                                  title={`Preview ${a.name}`}
-                                  className="flex items-center gap-1 rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 text-xs font-medium text-gray-600 transition-all duration-150 hover:border-brand-accent hover:bg-cyan-50 hover:text-brand-accent active:scale-95"
-                                >
-                                  <Eye size={13} /> Preview
-                                </button>
-                              )}
-                              <a
-                                href={a.url}
-                                download={a.name}
-                                title={`Download ${a.name}`}
-                                className="flex items-center gap-1 rounded-lg border border-gray-200 bg-white p-1.5 text-gray-500 transition-all duration-150 hover:border-brand-accent hover:bg-cyan-50 hover:text-brand-accent active:scale-95"
-                              >
-                                <Download size={13} />
-                              </a>
-                            </div>
-                          ) : (
-                            <span
-                              title="This file was attached before download support was added, so its contents weren't stored. Re-upload it to enable download."
-                              className="shrink-0 cursor-help rounded-md bg-gray-50 px-2 py-1 text-[10px] font-medium text-gray-400"
-                            >
-                              No file data
-                            </span>
-                          )}
-                        </div>
-                      );
-                    })
+                          </div>
+                        ))
+                      )}
+                    </>
                   )}
                 </div>
               ) : liveTask ? (
-                <ActivityTimeline items={liveTask.activity} userName={userName} />
+                shownActivity.length === 0 && panelFiltering ? (
+                  <p className="py-10 text-center text-xs text-gray-400">No activity matches.</p>
+                ) : (
+                  <ActivityTimeline items={shownActivity} userName={userName} />
+                )
               ) : (
-                <p className="py-10 text-center text-xs text-gray-400">
-                  The activity log starts once the task is created.
-                </p>
+                <p className="py-10 text-center text-xs text-gray-400">The activity log starts once the task is created.</p>
               )}
             </div>
 
             {panel === "Comment" && (
-              <div className="flex items-center gap-2 border-t border-gray-100 px-3 py-2">
-                <input
-                  value={commentText}
-                  onChange={(e) => setCommentText(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && sendComment()}
-                  placeholder={isDrafting ? "Type a message — sent on create" : "Type a message"}
-                  className="flex-1 rounded-full border border-gray-200 px-3 py-1.5 text-sm outline-none transition-colors duration-150 focus:border-cyan-500"
-                />
-                <button
-                  onClick={() => fileRef.current?.click()}
-                  title="Attach a file"
-                  className="rounded-full border border-gray-200 p-2 text-gray-500 transition-all duration-150 hover:border-brand-accent hover:text-brand-accent active:scale-90"
-                >
-                  <Paperclip size={14} />
-                </button>
-                <button
-                  onClick={sendComment}
-                  disabled={sendingComment}
-                  title="Send message"
-                  className="rounded-full bg-brand-accent p-2 text-white transition-all duration-150 hover:opacity-90 active:scale-90 disabled:opacity-60"
-                >
-                  {sendingComment ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
-                </button>
+              <div className="relative border-t border-gray-100 px-3 py-2">
+                {showQuick && (
+                  <div className="animate-menu-pop absolute bottom-full left-3 right-3 mb-2 max-h-60 overflow-y-auto rounded-xl border border-gray-100 bg-white py-1 shadow-xl">
+                    <div className="flex items-center justify-between px-3 py-1.5 text-[11px] font-medium uppercase tracking-wide text-gray-400">
+                      Quick replies
+                      <a href="/taskopad/settings?tab=quick-replies" className="normal-case text-brand-accent hover:underline">
+                        Manage
+                      </a>
+                    </div>
+                    {quickReplies.length === 0 ? (
+                      <p className="px-3 py-3 text-xs text-gray-400">No quick replies yet. Add some under More → Quick Reply.</p>
+                    ) : (
+                      quickReplies.map((q) => (
+                        <button
+                          key={q.id}
+                          onClick={() => {
+                            setCommentText((t) => (t ? `${t} ${q.message}` : q.message));
+                            setShowQuick(false);
+                          }}
+                          className="block w-full px-3 py-2 text-left hover:bg-cyan-50"
+                        >
+                          <span className="block text-xs font-medium text-gray-800">{q.title}</span>
+                          <span className="block truncate text-[11px] text-gray-500">{q.message}</span>
+                        </button>
+                      ))
+                    )}
+                  </div>
+                )}
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setShowQuick((s) => !s)}
+                    title="Quick replies"
+                    className={`rounded-full border p-2 transition-all duration-150 active:scale-90 ${
+                      showQuick ? "border-brand-accent text-brand-accent" : "border-gray-200 text-gray-500 hover:border-brand-accent hover:text-brand-accent"
+                    }`}
+                  >
+                    <Zap size={14} />
+                  </button>
+                  <input
+                    value={commentText}
+                    onChange={(e) => setCommentText(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && sendComment()}
+                    placeholder={isDrafting ? "Type a message — sent on create" : "Type a message"}
+                    className="flex-1 rounded-full border border-gray-200 px-3 py-1.5 text-sm outline-none transition-colors duration-150 focus:border-cyan-500"
+                  />
+                  <button
+                    onClick={() => fileRef.current?.click()}
+                    disabled={uploading}
+                    title="Attach a file"
+                    className="rounded-full border border-gray-200 p-2 text-gray-500 transition-all duration-150 hover:border-brand-accent hover:text-brand-accent active:scale-90 disabled:opacity-60"
+                  >
+                    {uploading ? <Loader2 size={14} className="animate-spin" /> : <Paperclip size={14} />}
+                  </button>
+                  <button
+                    onClick={sendComment}
+                    disabled={sendingComment}
+                    title="Send message"
+                    className="rounded-full bg-brand-accent p-2 text-white transition-all duration-150 hover:opacity-90 active:scale-90 disabled:opacity-60"
+                  >
+                    {sendingComment ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
+                  </button>
+                </div>
               </div>
             )}
           </div>
         </div>
       </div>
 
-      {previewId && panelAttachments.length > 0 && (
-        <AttachmentPreview
-          attachments={panelAttachments}
-          startId={previewId}
-          onClose={() => setPreviewId(null)}
+      {previewId && legacyAttachments.length > 0 && (
+        <AttachmentPreview attachments={legacyAttachments} startId={previewId} onClose={() => setPreviewId(null)} />
+      )}
+      {importingSubs && (
+        <ImportSubtasksDialog
+          onClose={() => setImportingSubs(false)}
+          onImport={(lines) => {
+            lines.forEach((l) => addSubtask(l));
+            setImportingSubs(false);
+          }}
         />
       )}
     </div>
   );
 }
 
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+/**
+ * The reminder settings Taskopad offers: when it starts, how often it repeats, who hears it, and on
+ * which weekdays. The server sends it on time as an in-app notification (header bell).
+ */
+function ReminderEditor({
+  on,
+  setOn,
+  repeating,
+  date,
+  setDate,
+  time,
+  setTime,
+  frequency,
+  setFrequency,
+  recipients,
+  setRecipients,
+  days,
+  setDays,
+  dueDate,
+  disabled,
+}: {
+  on: boolean;
+  setOn: (v: boolean) => void;
+  repeating: boolean;
+  date: string;
+  setDate: (v: string) => void;
+  time: string;
+  setTime: (v: string) => void;
+  frequency: ReminderFrequency;
+  setFrequency: (v: ReminderFrequency) => void;
+  recipients: ReminderRecipients;
+  setRecipients: (v: ReminderRecipients) => void;
+  days: string;
+  setDays: (v: string) => void;
+  dueDate: string;
+  disabled: boolean;
+}) {
+  return (
+    <div className={`rounded-xl border px-4 py-3 ${on ? "border-orange-200 bg-orange-50/40" : "border-gray-200"}`}>
+      <div className="flex items-center justify-between">
+        <span className="flex items-center gap-1.5 text-sm font-medium text-gray-700">
+          <Bell size={14} className={on ? "text-orange-500" : "text-gray-400"} /> Remind on
+        </span>
+        <button
+          type="button"
+          role="switch"
+          aria-checked={on}
+          disabled={disabled}
+          onClick={() => {
+            const next = !on;
+            setOn(next);
+            if (next && !repeating && !date) setDate(dueDate || toIso(new Date()));
+            if (next && !time) setTime("10:00");
+          }}
+          className={`relative h-5 w-9 rounded-full transition-colors duration-200 disabled:opacity-50 ${on ? "bg-orange-500" : "bg-gray-200"}`}
+        >
+          <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all duration-200 ${on ? "left-[18px]" : "left-0.5"}`} />
+        </button>
+      </div>
+      {on && (
+        <div className="mt-3 space-y-3">
+          <div className="flex flex-wrap items-center gap-2">
+            {!repeating && <DatePicker value={date} onChange={setDate} placeholder="Reminder start date" className="py-1.5" disabled={disabled} />}
+            <input
+              type="time"
+              value={time}
+              onChange={(e) => setTime(e.target.value)}
+              disabled={disabled}
+              className="rounded-lg border border-gray-200 bg-white px-2 py-1.5 text-sm text-gray-700 outline-none focus:border-cyan-500 disabled:opacity-60"
+            />
+            {repeating && <span className="text-[11px] text-gray-500">on each occurrence&apos;s due date</span>}
+          </div>
+          <div>
+            <div className="mb-1 text-[11px] font-medium text-gray-500">Reminder get</div>
+            <Segmented value={recipients} options={RECIPIENTS} onChange={setRecipients} disabled={disabled} />
+          </div>
+          <div>
+            <div className="mb-1 text-[11px] font-medium text-gray-500">Frequency</div>
+            <Segmented value={frequency} options={FREQUENCIES} onChange={setFrequency} disabled={disabled} />
+          </div>
+          {frequency === "WEEKLY" && (
+            <div>
+              <div className="mb-1 text-[11px] font-medium text-gray-500">On these days</div>
+              <WeekdayPicker value={days} onChange={setDays} />
+            </div>
+          )}
+          <p className="text-[11px] text-gray-400">Sent as a notification in the bell at the top of the app, until the task is completed.</p>
+        </div>
+      )}
+    </div>
+  );
 }
 
-function readAsDataUrl(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result as string);
-    reader.onerror = () => reject(new Error("Could not read the file."));
-    reader.readAsDataURL(file);
-  });
+function Segmented<T extends string>({
+  value,
+  options,
+  onChange,
+  disabled,
+}: {
+  value: T;
+  options: { value: T; label: string }[];
+  onChange: (v: T) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <div className="inline-flex overflow-hidden rounded-lg border border-gray-200 bg-white text-xs">
+      {options.map((o) => (
+        <button
+          key={o.value}
+          type="button"
+          disabled={disabled}
+          onClick={() => onChange(o.value)}
+          className={`border-r border-gray-100 px-3 py-1.5 last:border-r-0 disabled:cursor-not-allowed ${
+            value === o.value ? "bg-cyan-50 font-medium text-brand-accent" : "text-gray-600 hover:bg-gray-50"
+          }`}
+        >
+          {o.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** One sub-task: its own title, status, priority, assignee and due date (Taskopad parity). */
+function SubtaskRow({
+  s,
+  people,
+  editable,
+  canStatus,
+  busy,
+  onToggle,
+  onStatus,
+  onChange,
+  onRemove,
+}: {
+  s: SubTask;
+  people: Person[];
+  editable: boolean;
+  canStatus: boolean;
+  busy: boolean;
+  onToggle: () => void;
+  onStatus: (st: TaskStatus) => void;
+  onChange: (patch: Partial<SubTask>) => void;
+  onRemove: () => void;
+}) {
+  const missing = !s.title.trim() || !s.assigneeId || !s.dueDate;
+  return (
+    <div className={`rounded-lg border px-3 py-2 ${missing && editable ? "border-amber-200 bg-amber-50/30" : "border-gray-100"}`}>
+      <div className="flex items-center gap-2">
+        <input
+          type="checkbox"
+          checked={s.done}
+          disabled={!canStatus || busy}
+          onChange={onToggle}
+          className="h-3.5 w-3.5 accent-cyan-600 disabled:cursor-not-allowed disabled:opacity-50"
+        />
+        <input
+          value={s.title}
+          onChange={(e) => onChange({ title: e.target.value })}
+          readOnly={!editable}
+          placeholder="Write your sub task"
+          className={`min-w-0 flex-1 bg-transparent text-sm outline-none ${s.done ? "text-gray-400 line-through" : "text-gray-700"}`}
+        />
+        {editable && (
+          <button onClick={onRemove} title="Delete sub-task" className="rounded p-1 text-gray-300 transition-colors duration-150 hover:bg-rose-50 hover:text-rose-500">
+            <Trash2 size={13} />
+          </button>
+        )}
+      </div>
+      <div className="mt-2 grid grid-cols-2 gap-2 lg:grid-cols-4">
+        <Select
+          value={s.status ?? (s.done ? "Completed" : "Pending")}
+          onChange={(v) => onStatus(v as TaskStatus)}
+          size="sm"
+          disabled={!canStatus}
+          options={SUB_STATUSES.map((st) => ({ value: st, label: st }))}
+        />
+        <Select
+          value={s.priority ?? "Low"}
+          onChange={(v) => onChange({ priority: v as TaskPriority })}
+          size="sm"
+          disabled={!editable}
+          options={TASK_PRIORITIES.map((p) => ({ value: p, label: p }))}
+        />
+        <PeopleSelect people={people} value={s.assigneeId ?? ""} onChange={(id) => onChange({ assigneeId: id || undefined })} disabled={!editable} placeholder="Assignee" />
+        <DatePicker value={s.dueDate ?? ""} onChange={(d) => onChange({ dueDate: d || null })} placeholder="Due date" className="py-1.5" disabled={!editable} />
+      </div>
+    </div>
+  );
+}
+
+/** "Import Subtask": paste a list, one sub-task per line. */
+function ImportSubtasksDialog({ onClose, onImport }: { onClose: () => void; onImport: (lines: string[]) => void }) {
+  const [text, setText] = useState("");
+  const lines = text
+    .split(/\r?\n/)
+    .map((l) => l.replace(/^[\s\-*•\d.)]+/, "").trim())
+    .filter(Boolean);
+  return (
+    <div className="animate-overlay-in fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+      <div className="w-full max-w-md rounded-2xl bg-white p-5 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <div className="mb-3 flex items-center justify-between">
+          <h3 className="text-base font-semibold text-gray-800">Import Subtask</h3>
+          <button onClick={onClose} className="rounded-full p-1 text-gray-400 hover:bg-gray-100">
+            <X size={16} />
+          </button>
+        </div>
+        <p className="mb-2 text-xs text-gray-500">Paste one sub-task per line — from Excel, WhatsApp or a list. Bullets and numbers are removed.</p>
+        <textarea value={text} onChange={(e) => setText(e.target.value)} rows={8} autoFocus className="input resize-none" placeholder={"Check scaffolding\nCheck fire extinguishers\nUpdate site register"} />
+        <div className="mt-4 flex justify-end gap-2">
+          <button onClick={onClose} className="rounded-lg border border-gray-200 px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-50">
+            Cancel
+          </button>
+          <button
+            disabled={lines.length === 0}
+            onClick={() => onImport(lines)}
+            className="rounded-lg bg-brand-accent px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-40"
+          >
+            Add {lines.length || ""} sub-task{lines.length === 1 ? "" : "s"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <label className="block">
-      <span className="mb-1.5 flex items-center gap-1 text-[11px] font-medium tracking-wide text-gray-400 uppercase">
-        {label.includes("Sub tasks") && <ListTree size={11} />}
-        {label}
-      </span>
+    <div className="block">
+      <span className="mb-1.5 flex items-center gap-1 text-[11px] font-medium tracking-wide text-gray-400 uppercase">{label}</span>
       {children}
-    </label>
+    </div>
   );
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { AppShell } from "@/components/AppShell";
@@ -12,6 +12,7 @@ import { PAYROLL_NAV, PAYROLL_SELF_NAV } from "@/lib/payrollConfig";
 import { filterNav, useCan } from "@/lib/permissions";
 import type { PayrollNavNode } from "@/lib/payrollConfig";
 import {
+  Megaphone,
   Banknote,
   BarChart3,
   CalendarDays,
@@ -53,6 +54,7 @@ const ICONS: Record<string, React.ComponentType<{ size?: number; className?: str
   gift: Gift,
   tiles: Grid3x3,
   sliders: SlidersHorizontal,
+  megaphone: Megaphone,
 };
 
 /**
@@ -89,6 +91,11 @@ export function PayrollShell({
   // included, which needs the Team Leave feature.
   const can = useCan();
   const nav = isAdmin ? filterNav(PAYROLL_NAV, can) : PAYROLL_SELF_NAV;
+  // The feature this route belongs to: the longest nav href that prefixes the path (Staff covers
+  // /payroll/staff/12/edit, Setup covers /payroll/setup/leave …). Before, every team page only
+  // asked "any Payroll feature?", so a leave approver could open Staff, Payroll or Payments and got
+  // a screen of errors instead of a redirect.
+  const routeFeature = useMemo(() => featureForPath(pathname), [pathname]);
 
   const [open, setOpen] = useState<Record<string, boolean>>(() => {
     const init: Record<string, boolean> = {};
@@ -100,7 +107,8 @@ export function PayrollShell({
 
   // Self-service users must not reach admin pages — send them to their own dashboard. Only act
   // once the session has hydrated, so an admin isn't redirected during the pre-hydration tick.
-  const denied = hydrated && requireAdmin && !isAdmin;
+  const featureDenied = hydrated && requireAdmin && !!routeFeature && !can(routeFeature);
+  const denied = (hydrated && requireAdmin && !isAdmin) || featureDenied;
   const approvalDenied = hydrated && requireApprove && !canApprove;
   useEffect(() => {
     if (denied) router.replace("/payroll");
@@ -108,7 +116,7 @@ export function PayrollShell({
   }, [denied, approvalDenied, router]);
   // Hold admin content until we know the user is allowed (avoids a flash + the redirect race).
   const showContent =
-    (!requireAdmin || (hydrated && isAdmin)) && (!requireApprove || (hydrated && canApprove));
+    (!requireAdmin || (hydrated && isAdmin && !featureDenied)) && (!requireApprove || (hydrated && canApprove));
 
   const isActive = (href?: string) =>
     !!href && (href === "/payroll" ? pathname === "/payroll" : pathname.startsWith(href));
@@ -158,6 +166,21 @@ export function PayrollShell({
       </div>
     </AppShell>
   );
+}
+
+/** The Roles & Access feature that owns a payroll path, from the nav config; undefined = none. */
+function featureForPath(pathname: string): string | undefined {
+  let best: { len: number; feature?: string } = { len: 0 };
+  const walk = (nodes: readonly PayrollNavNode[]) => {
+    for (const n of nodes) {
+      if (n.href && n.href !== "/payroll" && pathname.startsWith(n.href) && n.href.length > best.len) {
+        best = { len: n.href.length, feature: typeof n.feature === "string" ? n.feature : undefined };
+      }
+      if (n.children) walk(n.children);
+    }
+  };
+  walk(PAYROLL_NAV);
+  return best.feature;
 }
 
 function NavItem({
