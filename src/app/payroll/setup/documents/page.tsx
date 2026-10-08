@@ -7,8 +7,9 @@ import { Spinner } from "@/components/Spinner";
 import { ApiError, addOrgDocument, deleteOrgDocument, getOrgDocument, getOrgDocuments } from "@/lib/api";
 import type { OrgDocumentApi } from "@/lib/api";
 import { formatDateIST } from "@/lib/datetime";
-import { MAX_ATTACHMENT_BYTES, readFileAsDataUrl, saveDataUrl } from "@/lib/dataUrlFile";
+import { MAX_ATTACHMENT_BYTES, readFileAsDataUrl } from "@/lib/dataUrlFile";
 import { ArrowLeft, Download, FileText, FolderOpen, Trash2, Upload } from "lucide-react";
+import { previewFile } from "@/lib/filePreview";
 
 /** Organisation documents — policies, handbooks and circulars every staff member can open. */
 export default function OrgDocumentsPage() {
@@ -91,7 +92,7 @@ export default function OrgDocumentsPage() {
                   <div className="text-xs text-gray-500">{d.fileName}{d.createdAt ? ` · ${formatDateIST(d.createdAt)}` : ""}{d.createdByName ? ` · ${d.createdByName}` : ""}</div>
                 </div>
                 <button
-                  onClick={async () => { const full = await getOrgDocument(d.id); if (full.dataUrl) saveDataUrl(full.dataUrl, full.fileName); }}
+                  onClick={async () => { const full = await getOrgDocument(d.id); if (full.dataUrl) previewFile({ name: full.fileName, url: full.dataUrl }); }}
                   title="Download"
                   className="rounded-md p-1.5 text-gray-400 hover:bg-gray-100 hover:text-brand-accent"
                 >

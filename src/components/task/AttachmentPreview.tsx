@@ -2,8 +2,11 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { ChevronLeft, ChevronRight, Download, FileText, Loader2, X } from "lucide-react";
-import type { TaskAttachment } from "@/lib/taskTypes";
 import { formatTaskDateTime } from "@/lib/taskTypes";
+import type { PreviewFile } from "@/lib/filePreview";
+
+/** Anything with a name, a link and (ideally) a MIME type — task attachments and app-wide files. */
+type TaskAttachment = PreviewFile;
 
 /** What we can render inline; anything else falls back to a download prompt. */
 type PreviewKind = "image" | "pdf" | "video" | "audio" | "text" | "none";
@@ -21,7 +24,9 @@ const EXT_KIND: Record<string, PreviewKind> = {
  * contentType was stored have none — so the extension is the fallback.
  */
 export function previewKindOf(att: TaskAttachment): PreviewKind {
-  const mime = (att.contentType ?? "").toLowerCase();
+  // A data URL names its own type ("data:application/pdf;base64,…") when the row doesn't.
+  const fromUrl = att.url?.startsWith("data:") ? att.url.slice(5, att.url.indexOf(";")) : "";
+  const mime = (att.contentType || fromUrl || "").toLowerCase();
   if (mime.startsWith("image/")) return "image";
   if (mime === "application/pdf") return "pdf";
   if (mime.startsWith("video/")) return "video";
@@ -30,6 +35,15 @@ export function previewKindOf(att: TaskAttachment): PreviewKind {
 
   const ext = att.name.split(".").pop()?.toLowerCase() ?? "";
   return EXT_KIND[ext] ?? "none";
+}
+
+/** The MIME type to show a file as: its own, else one implied by how it previews. */
+function mimeOf(att: TaskAttachment): string {
+  if (att.contentType && att.contentType !== "application/octet-stream") return att.contentType;
+  const ext = att.name.split(".").pop()?.toLowerCase() ?? "";
+  if (EXT_KIND[ext] === "pdf") return "application/pdf";
+  if (EXT_KIND[ext] === "image") return ext === "svg" ? "image/svg+xml" : `image/${ext === "jpg" ? "jpeg" : ext}`;
+  return "";
 }
 
 /** True when the file can be shown inline rather than only downloaded. */
@@ -42,7 +56,7 @@ export function canPreview(att: TaskAttachment): boolean {
  * never render), and inlining megabytes of base64 into the DOM is wasteful for media — a blob URL
  * sidesteps both. Revoked when the previewed file changes or the viewer closes.
  */
-function useBlobUrl(dataUrl: string | null): { blobUrl: string | null; failed: boolean } {
+function useBlobUrl(dataUrl: string | null, mimeHint: string): { blobUrl: string | null; failed: boolean } {
   const [state, setState] = useState<{ blobUrl: string | null; failed: boolean }>({
     blobUrl: null,
     failed: false,
@@ -56,6 +70,37 @@ function useBlobUrl(dataUrl: string | null): { blobUrl: string | null; failed: b
     if (!dataUrl) {
       setState({ blobUrl: null, failed: false });
       return;
+    }
+    if (!dataUrl.startsWith("data:")) {
+      if (dataUrl.startsWith("blob:")) {
+        setState({ blobUrl: dataUrl, failed: false });
+        return;
+      }
+      // A storage link. Storage often serves files as application/octet-stream (or as an
+      // attachment), which makes the browser download instead of showing them — fetch it and
+      // re-label it with the real type so images and PDFs render inline.
+      let cancelled = false;
+      let made: string | null = null;
+      setState({ blobUrl: null, failed: false });
+      fetch(dataUrl)
+        .then((r) => {
+          if (!r.ok) throw new Error(String(r.status));
+          return r.blob();
+        })
+        .then((b) => {
+          if (cancelled) return;
+          made = URL.createObjectURL(new Blob([b], { type: mimeHint || b.type }));
+          setState({ blobUrl: made, failed: false });
+        })
+        .catch(() => {
+          // Fetch blocked (e.g. no CORS on the bucket): the link itself is signed "inline" with the
+          // file's real type, so the browser still shows it rather than downloading.
+          if (!cancelled) setState({ blobUrl: dataUrl, failed: false });
+        });
+      return () => {
+        cancelled = true;
+        if (made) URL.revokeObjectURL(made);
+      };
     }
     let url: string | null = null;
     try {
@@ -73,7 +118,7 @@ function useBlobUrl(dataUrl: string | null): { blobUrl: string | null; failed: b
     return () => {
       if (url) URL.revokeObjectURL(url);
     };
-  }, [dataUrl]);
+  }, [dataUrl, mimeHint]);
 
   return state;
 }
@@ -117,7 +162,7 @@ export function AttachmentPreview({
 
   const current: TaskAttachment | undefined = items[index];
   const kind = current ? previewKindOf(current) : "none";
-  const { blobUrl, failed } = useBlobUrl(current?.url ?? null);
+  const { blobUrl, failed } = useBlobUrl(current?.url ?? null, current ? mimeOf(current) : "");
   const text = useDecodedText(current?.url ?? null, kind === "text");
 
   // Bound in the capture phase so Escape reaches this viewer before the task drawer's own
@@ -160,8 +205,8 @@ export function AttachmentPreview({
           <div className="truncate text-sm font-medium">{current.name}</div>
           <div className="text-[11px] text-white/60">
             {current.size}
-            {current.size && " · "}
-            {formatTaskDateTime(current.at)}
+            {current.size && current.at && " · "}
+            {current.at && formatTaskDateTime(current.at)}
             {items.length > 1 && ` · ${index + 1} of ${items.length}`}
           </div>
         </div>

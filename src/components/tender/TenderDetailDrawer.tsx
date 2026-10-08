@@ -34,6 +34,7 @@ import {
   tval,
 } from "@/lib/tenderHelpers";
 import { ArrowUpRight, Check, ExternalLink, FolderPlus, History, Hourglass, Paperclip, Pencil, Trash2, Upload, X } from "lucide-react";
+import { previewFile } from "@/lib/filePreview";
 
 /** 2 MB per file — attachments live in localStorage until there is a backend to store them. */
 const MAX_ATTACHMENT_BYTES = 2 * 1024 * 1024;
@@ -459,14 +460,14 @@ export function TenderDetailDrawer({
               {(t.attachments ?? []).map((a) => (
                 <li key={a.id} className="flex items-center gap-2 px-3 py-2">
                   <Paperclip size={13} className="shrink-0 text-gray-300" />
-                  <a
-                    href={a.dataUrl}
-                    download={a.name}
-                    className="min-w-0 flex-1 truncate text-sm text-gray-700 hover:text-brand-accent"
+                  <button
+                    type="button"
+                    onClick={() => previewFile({ name: a.name, url: a.dataUrl })}
+                    className="min-w-0 flex-1 truncate text-left text-sm text-gray-700 hover:text-brand-accent"
                     title={a.name}
                   >
                     {a.name}
-                  </a>
+                  </button>
                   <span className="shrink-0 text-[11px] text-gray-400">{(a.size / 1024).toFixed(0)} KB</span>
                   <button
                     onClick={() => removeAttachment(t.id, a.id)}

@@ -27,6 +27,7 @@ import { CalendarDays, ChevronLeft, ChevronRight, Download, FileText, Pencil, Pl
 import { useTableSort } from "@/lib/useTableSort";
 import { SortTh } from "@/components/vyapar/SortTh";
 import { PunchPhotoThumbs } from "@/components/payroll/PunchPhotos";
+import { previewFile } from "@/lib/filePreview";
 
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const pad = (n: number) => String(n).padStart(2, "0");
@@ -900,13 +901,13 @@ export function DocumentsTab({ member, profile }: { member: UserResponse; profil
       {withFile.length === 0 ? <Empty text="No documents uploaded." /> : (
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {withFile.map((d, i) => (
-            <a key={i} href={d.dataUrl} target="_blank" rel="noreferrer" download={d.fileName} className="flex items-center gap-3 rounded-xl border border-gray-200 bg-white p-3 hover:bg-gray-50">
+            <button key={i} type="button" onClick={() => previewFile({ name: d.fileName, url: d.dataUrl })} className="flex items-center gap-3 rounded-xl border border-gray-200 bg-white p-3 text-left hover:bg-gray-50">
               <FileText size={20} className="text-brand-accent" />
               <div className="min-w-0">
                 <div className="truncate text-sm font-medium text-gray-800">{d.type}</div>
                 <div className="truncate text-xs text-gray-500">{d.fileName}</div>
               </div>
-            </a>
+            </button>
           ))}
         </div>
       )}

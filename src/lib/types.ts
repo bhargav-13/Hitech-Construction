@@ -47,6 +47,10 @@ export interface NavItem {
   href: string;
   /** Optional small pill shown next to the label, e.g. "Soon" for work-in-progress modules. */
   badge?: string;
+  /** Where clicking the item lands, when not the module's own home (e.g. Taskopad → its Tasks list). */
+  landing?: string;
+  /** Feature the landing page needs; without it the item opens `href` instead. */
+  landingFeature?: string;
 }
 
 export interface ScheduleTask {

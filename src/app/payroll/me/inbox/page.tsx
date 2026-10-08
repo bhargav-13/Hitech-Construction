@@ -6,8 +6,8 @@ import { Spinner } from "@/components/Spinner";
 import { ApiError, getBroadcastAttachment, getOrgDocument, getOrgDocuments, myBroadcasts } from "@/lib/api";
 import type { BroadcastApi, OrgDocumentApi } from "@/lib/api";
 import { formatDateIST, formatDateTimeIST } from "@/lib/datetime";
-import { saveDataUrl } from "@/lib/dataUrlFile";
 import { Download, FileText, Megaphone, Paperclip } from "lucide-react";
+import { previewFile } from "@/lib/filePreview";
 
 /** Self-service: messages HR has sent me, and the organisation's documents. */
 export default function MyInboxPage() {
@@ -52,7 +52,7 @@ export default function MyInboxPage() {
                       <p className="mt-1 text-sm whitespace-pre-line text-gray-700">{b.message}</p>
                       {b.hasAttachment && (
                         <button
-                          onClick={async () => { const r = await getBroadcastAttachment(b.id); if (r.dataUrl) saveDataUrl(r.dataUrl, b.attachmentName ?? "attachment"); }}
+                          onClick={async () => { const r = await getBroadcastAttachment(b.id); if (r.dataUrl) previewFile({ name: b.attachmentName ?? "attachment", url: r.dataUrl }); }}
                           className="mt-1 flex items-center gap-1 text-xs text-brand-accent hover:underline"
                         >
                           <Paperclip size={12} /> {b.attachmentName ?? "Attachment"}
@@ -72,7 +72,7 @@ export default function MyInboxPage() {
                   {docs.map((d) => (
                     <button
                       key={d.id}
-                      onClick={async () => { const full = await getOrgDocument(d.id); if (full.dataUrl) saveDataUrl(full.dataUrl, full.fileName); }}
+                      onClick={async () => { const full = await getOrgDocument(d.id); if (full.dataUrl) previewFile({ name: full.fileName, url: full.dataUrl }); }}
                       className="flex w-full items-center gap-3 px-4 py-2.5 text-left hover:bg-gray-50"
                     >
                       <FileText size={16} className="shrink-0 text-gray-400" />

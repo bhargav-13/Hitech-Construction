@@ -53,6 +53,7 @@ import { useDrawerDismiss } from "@/lib/useDrawerDismiss";
 // The timeline now lives at components/ActivityTimeline so Tender renders the identical feed.
 import { ActivityTimeline } from "@/components/ActivityTimeline";
 import { useTaskRights } from "@/lib/taskPermissions";
+import { previewFile } from "@/lib/filePreview";
 
 type Panel = "Comment" | "Attachment" | "Log Activity";
 
@@ -607,14 +608,14 @@ export function TaskDrawer({
     if (att.fileId != null) {
       try {
         const url = await fileUrl(att.fileId, true);
-        window.open(url, "_blank", "noopener");
+        previewFile({ name: att.name, url, contentType: att.contentType });
       } catch (err) {
         setError(err instanceof Error ? err.message : "Could not open the file.");
       }
       return;
     }
     if (canPreview(att)) setPreviewId(att.id);
-    else if (att.url) window.open(att.url, "_blank", "noopener");
+    else if (att.url) previewFile({ name: att.name, url: att.url, contentType: att.contentType });
   }
 
   // A task being composed has no server-side thread yet, so the side panel runs off local drafts.

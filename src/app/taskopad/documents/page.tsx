@@ -31,6 +31,7 @@ import { fileUrl, formatBytes, thumbUrl } from "@/lib/filesApi";
 import { formatDateTimeIST, msIST } from "@/lib/datetime";
 import type { Task } from "@/lib/taskTypes";
 import { getTask } from "@/lib/tasksApi";
+import { previewFile } from "@/lib/filePreview";
 
 /**
  * Taskopad Documents — every file attached to every task you can see, in one place.
@@ -183,7 +184,8 @@ function Documents() {
     try {
       if (d.fileId != null) {
         const url = await fileUrl(d.fileId, !download);
-        window.open(url, "_blank", "noopener");
+        if (download) window.open(url, "_blank", "noopener");
+        else previewFile({ name: d.name, url, contentType: d.contentType });
       } else {
         // An older inline attachment: lists don't carry the file, so fetch its task once.
         let data = d.dataUrl;
@@ -192,11 +194,14 @@ function Documents() {
           data = full.attachments?.find((x) => `a-${x.id}` === d.key)?.dataUrl ?? null;
         }
         if (!data) throw new Error("This file has no contents.");
-        const a = document.createElement("a");
-        a.href = data;
-        if (download) a.download = d.name;
-        else a.target = "_blank";
-        a.click();
+        if (download) {
+          const a = document.createElement("a");
+          a.href = data;
+          a.download = d.name;
+          a.click();
+        } else {
+          previewFile({ name: d.name, url: data, contentType: d.contentType });
+        }
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not open the file.");

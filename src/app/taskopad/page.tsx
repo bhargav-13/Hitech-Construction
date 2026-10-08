@@ -132,7 +132,7 @@ export default function TaskopadDashboardPage() {
   const activity = useMemo(
     () =>
       [...live]
-        .flatMap((t) => t.activity.map((a) => ({ ...a, task: t.title })))
+        .flatMap((t) => t.activity.map((a) => ({ ...a, task: t.title, taskId: t.id })))
         .sort((a, b) => b.at.localeCompare(a.at))
         .slice(0, 6),
     [live]
@@ -324,7 +324,11 @@ export default function TaskopadDashboardPage() {
               {/* Cap the height so a large team scrolls instead of pushing the page down. */}
               <div className="max-h-[280px] space-y-2.5 overflow-y-auto pr-1">
                 {teamIncomplete.map((u) => (
-                  <div key={u.id} className="flex items-center gap-2.5">
+                  <Link
+                    key={u.id}
+                    href={`/taskopad/tasks?assignee=${encodeURIComponent(u.id)}`}
+                    className="-mx-1.5 flex items-center gap-2.5 rounded-lg px-1.5 py-1 transition-colors hover:bg-gray-50"
+                  >
                     <UserAvatar id={u.id} name={u.name} size={30} />
                     <div className="min-w-0 flex-1">
                       <div className="truncate text-sm font-medium text-gray-800">{u.name}</div>
@@ -337,7 +341,7 @@ export default function TaskopadDashboardPage() {
                     >
                       {u.count}
                     </span>
-                  </div>
+                  </Link>
                 ))}
               </div>
             </div>
@@ -376,7 +380,11 @@ export default function TaskopadDashboardPage() {
             ) : (
               <div className="space-y-3">
                 {activity.map((a) => (
-                  <div key={a.id} className="flex gap-2.5">
+                  <Link
+                    key={a.id}
+                    href={`/taskopad/tasks?task=${encodeURIComponent(a.taskId)}`}
+                    className="-mx-1.5 flex gap-2.5 rounded-lg px-1.5 py-1 transition-colors hover:bg-gray-50"
+                  >
                     <UserAvatar id={a.userId} name={userName(a.userId)} size={26} />
                     <div className="min-w-0 flex-1">
                       <div className="text-sm text-gray-700">
@@ -385,7 +393,7 @@ export default function TaskopadDashboardPage() {
                       <div className="truncate text-xs text-gray-400">{a.task}</div>
                       <div className="text-[10px] text-gray-400">{formatTaskDateTime(a.at)}</div>
                     </div>
-                  </div>
+                  </Link>
                 ))}
               </div>
             )}
@@ -412,7 +420,7 @@ function UpcomingList({ tasks, userName }: { tasks: Task[]; userName: (id: strin
         return (
           <Link
             key={t.id}
-            href="/taskopad/tasks"
+            href={`/taskopad/tasks?task=${encodeURIComponent(t.id)}`}
             className="flex items-center gap-3 rounded-lg border border-gray-100 px-3 py-2 transition-colors duration-150 hover:bg-gray-50"
           >
             <span

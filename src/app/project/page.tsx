@@ -58,6 +58,11 @@ export default function ProjectsPage() {
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<"ALL" | ProjectStatus>("ALL");
+  // Deep link from the dashboard's status cards: /project?status=ONGOING.
+  useEffect(() => {
+    const want = new URLSearchParams(window.location.search).get("status");
+    if (want && FILTERS.some((f) => f.key === want)) setFilter(want as ProjectStatus);
+  }, []);
   const [selected, setSelected] = useState<ProjectResponse | null>(null);
   const [showNew, setShowNew] = useState(false);
   /** Derived money per project id — see api.getProjectsFinance. Empty until it loads, or on 403. */

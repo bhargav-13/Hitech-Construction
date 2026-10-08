@@ -1,11 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { ArrowUpRight, Building2, Download, Paperclip, Pencil, Trash2, User, Wallet, X } from "lucide-react";
+import { ArrowUpRight, Building2, Download, Eye, Paperclip, Pencil, Trash2, User, Wallet, X } from "lucide-react";
 import { useDrawerDismiss } from "@/lib/useDrawerDismiss";
 import { RowMenu, RowMenuItem } from "@/components/RowMenu";
 import { inr } from "@/lib/format";
 import { amountInWords } from "@/lib/vyaparExport";
+import { previewFile } from "@/lib/filePreview";
 
 export type TxnTone = "in" | "out";
 
@@ -190,17 +191,15 @@ export function TransactionDetailDrawer({
           </dl>
 
           {attachment && (
-            <a
-              href={attachment.href}
-              download={attachment.name}
-              target="_blank"
-              rel="noreferrer"
-              className="mt-2 flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2.5 text-sm text-gray-700 transition-colors hover:border-brand-accent hover:text-brand-accent"
+            <button
+              type="button"
+              onClick={() => previewFile({ name: attachment.name, url: attachment.href })}
+              className="mt-2 flex w-full items-center gap-2 rounded-lg border border-gray-200 px-3 py-2.5 text-left text-sm text-gray-700 transition-colors hover:border-brand-accent hover:text-brand-accent"
             >
               <Paperclip size={14} className="text-gray-400" />
               <span className="truncate">{attachment.name}</span>
-              <Download size={14} className="ml-auto shrink-0 text-gray-400" />
-            </a>
+              <Eye size={14} className="ml-auto shrink-0 text-gray-400" />
+            </button>
           )}
 
           {linked && linked.length > 0 && (

@@ -51,6 +51,11 @@ const shiftIso = (iso: string, deltaDays: number): string => {
 export default function AttendancePage() {
   const [view, setView] = useState<View>("DAY");
   const [date, setDate] = useState(todayIso());
+  // Deep link from the Payroll dashboard tiles: ?date=2026-10-08.
+  useEffect(() => {
+    const d = new URLSearchParams(window.location.search).get("date");
+    if (d && /^\d{4}-\d{2}-\d{2}$/.test(d)) setDate(d);
+  }, []);
   const [year, setYear] = useState(new Date().getFullYear());
   const [monthIdx, setMonthIdx] = useState(new Date().getMonth());
   const [search, setSearch] = useState("");
@@ -325,6 +330,11 @@ function DayView({
     ];
   });
   const [show, setShow] = useState("all");
+  // Deep link from the Payroll dashboard tiles: ?show=present (the page reads ?date=).
+  useEffect(() => {
+    const s = new URLSearchParams(window.location.search).get("show");
+    if (s) setShow(s);
+  }, []);
   const shownMembers = useMemo(() => members.filter((m) => {
     const a = byUser.get(m.id);
     const c = a?.code ?? "NM";

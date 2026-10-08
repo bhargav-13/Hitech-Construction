@@ -1,3 +1,6 @@
+"use client";
+
+import { useRouter } from "next/navigation";
 import { ArrowDown, Calendar, LayoutList, Maximize2, MoreVertical, Type } from "lucide-react";
 import type { Project } from "@/lib/types";
 import { healthTableLabel, statusTableLabel } from "@/lib/types";
@@ -31,6 +34,7 @@ function cellValue(project: Project, key: Column["key"]): string {
 }
 
 export function ProjectTable({ projects }: { projects: Project[] }) {
+  const router = useRouter();
   return (
     <div className="rounded-xl border border-gray-200 bg-white">
       <div className="flex items-center justify-between border-b border-gray-100 px-4 py-3">
@@ -69,7 +73,11 @@ export function ProjectTable({ projects }: { projects: Project[] }) {
           </thead>
           <tbody>
             {projects.map((project, i) => (
-              <tr key={project.id} className="border-b border-cyan-50">
+              <tr
+                key={project.id}
+                onClick={() => router.push(`/project/${project.id}`)}
+                className="cursor-pointer border-b border-cyan-50 hover:bg-cyan-50/40"
+              >
                 <td className="border-r border-cyan-50 px-3 py-2 text-gray-400">{i + 1}</td>
                 {COLUMNS.map((col) => (
                   <td

@@ -7,7 +7,8 @@ export const NAV_ITEMS: NavItem[] = [
   { label: "Dashboard", href: "/" },
   { label: "Tender", href: "/tender" },
   { label: "Project", href: "/project" },
-  { label: "Taskopad", href: "/taskopad" },
+  // Opens straight on the task list; the Taskopad dashboard is one tab away.
+  { label: "Taskopad", href: "/taskopad", landing: "/taskopad/tasks", landingFeature: "TASKOPAD_TASKS" },
   { label: "Vyapar", href: "/vyapar" },
   { label: "Procurement", href: "/procurement" },
   { label: "Payroll", href: "/payroll" },

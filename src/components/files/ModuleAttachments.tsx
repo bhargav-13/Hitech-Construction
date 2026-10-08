@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Download, Paperclip, Trash2, Upload } from "lucide-react";
+import { Eye, Paperclip, Trash2, Upload } from "lucide-react";
 import { Spinner } from "@/components/Spinner";
 import {
   attachmentsFor,
@@ -13,6 +13,7 @@ import {
   type FileSource,
   type SourceModule,
 } from "@/lib/filesApi";
+import { previewFile } from "@/lib/filePreview";
 
 /**
  * Files attached to one record — a purchase bill, a task, a tender, a work order.
@@ -173,12 +174,13 @@ export function ModuleAttachments({
             <button
               type="button"
               onClick={async () =>
-                item.fileId != null && window.open(await fileUrl(item.fileId, true), "_blank")
+                item.fileId != null &&
+                previewFile({ name: item.name, url: await fileUrl(item.fileId, true), contentType: item.contentType })
               }
               aria-label={`Open ${item.name}`}
               className="rounded p-0.5 text-slate-400 hover:bg-slate-200 hover:text-slate-600"
             >
-              <Download size={13} />
+              <Eye size={13} />
             </button>
             {canEdit && (
               <button
@@ -203,14 +205,14 @@ export function ModuleAttachments({
               {l.name}
             </span>
             <span className="text-[10px] uppercase tracking-wide text-amber-600">legacy</span>
-            <a
-              href={l.dataUrl}
-              download={l.name}
+            <button
+              type="button"
+              onClick={() => previewFile({ name: l.name, url: l.dataUrl })}
               className="rounded p-0.5 text-slate-400 hover:bg-slate-200 hover:text-slate-600"
-              aria-label={`Download ${l.name}`}
+              aria-label={`Open ${l.name}`}
             >
-              <Download size={13} />
-            </a>
+              <Eye size={13} />
+            </button>
           </li>
         ))}
       </ul>

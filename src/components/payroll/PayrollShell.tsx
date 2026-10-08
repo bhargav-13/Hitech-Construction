@@ -295,12 +295,15 @@ export function StatCard({
   accent = "gray",
   hint,
   icon: Icon,
+  href,
 }: {
   label: string;
   value: string | number;
   accent?: "gray" | "green" | "rose" | "amber" | "blue" | "cyan";
   hint?: string;
   icon?: React.ComponentType<{ size?: number; className?: string }>;
+  /** Opens the screen behind the number. */
+  href?: string;
 }) {
   const tone: Record<string, string> = {
     gray: "text-gray-800",
@@ -318,8 +321,7 @@ export function StatCard({
     blue: "bg-blue-50 text-blue-600",
     cyan: "bg-cyan-50 text-brand-accent",
   };
-  return (
-    <div className="rounded-xl border border-gray-200 bg-white p-4 transition-shadow duration-150 hover:shadow-sm">
+  const body = (
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           <div className="text-xs text-gray-500">{label}</div>
@@ -332,6 +334,18 @@ export function StatCard({
           </div>
         )}
       </div>
-    </div>
+  );
+  if (href) {
+    return (
+      <Link
+        href={href}
+        className="block rounded-xl border border-gray-200 bg-white p-4 transition-all duration-150 hover:-translate-y-0.5 hover:border-brand-accent hover:shadow-md"
+      >
+        {body}
+      </Link>
+    );
+  }
+  return (
+    <div className="rounded-xl border border-gray-200 bg-white p-4 transition-shadow duration-150 hover:shadow-sm">{body}</div>
   );
 }

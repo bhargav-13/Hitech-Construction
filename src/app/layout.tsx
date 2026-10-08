@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Inter, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 import { SessionGuard } from "@/components/SessionGuard";
+import { GlobalFilePreview } from "@/components/GlobalFilePreview";
 
 // Inter — the workhorse UI typeface used across production ERP / SaaS dashboards.
 const inter = Inter({
@@ -35,6 +36,7 @@ export default function RootLayout({
       <body className="h-full">
         <SessionGuard />
         {children}
+        <GlobalFilePreview />
       </body>
     </html>
   );

@@ -36,6 +36,7 @@ import { documentImportConfig } from "@/lib/vyaparImportConfigs";
 import * as vyapar from "@/lib/vyaparApi";
 import type { Invoice, InvoiceLine, Party } from "@/lib/vyaparApi";
 import { Download, FileText, Plus, Receipt, Search, Upload, X } from "lucide-react";
+import { previewFile } from "@/lib/filePreview";
 const UNCATEGORISED = "Uncategorised";
 
 /**
@@ -785,15 +786,18 @@ function ExpenseForm({
             </button>
           </div>
           {(attachment.imageDataUrl || attachment.documentDataUrl) && (
-            <a
-              href={attachment.imageDataUrl ?? attachment.documentDataUrl ?? undefined}
-              target="_blank"
-              rel="noreferrer"
-              download={attachment.documentName ?? undefined}
+            <button
+              type="button"
+              onClick={() =>
+                previewFile({
+                  name: attachment.documentName ?? "Receipt",
+                  url: attachment.imageDataUrl ?? attachment.documentDataUrl ?? null,
+                })
+              }
               className="ml-auto flex items-center gap-1 text-xs text-gray-500 hover:text-brand-accent"
             >
               <FileText size={13} /> {attachment.documentName ?? "Receipt attached"}
-            </a>
+            </button>
           )}
         </div>
 

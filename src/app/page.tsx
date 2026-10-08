@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { AppShell } from "@/components/AppShell";
 import { BubbleCluster } from "@/components/BubbleCluster";
 import { ProjectTable } from "@/components/ProjectTable";
@@ -78,6 +79,9 @@ function toProject(p: api.ProjectResponse): Project {
 }
 
 export default function DashboardPage() {
+  const router = useRouter();
+  /** Every card on the dashboard opens the screen behind its numbers. */
+  const go = (href: string) => () => router.push(href);
   // Sample/mock data — no backend yet for materials.
   const materials = useAppStore((s) => s.materials);
   const [tab, setTab] = useState<"Operational" | "Financial">("Operational");
@@ -325,7 +329,7 @@ export default function DashboardPage() {
             ) : (
               <>
                 <div className="grid grid-cols-3 gap-4">
-                  <div className="rounded-xl border border-gray-200 bg-white p-4">
+                  <div role="link" onClick={go("/vyapar/sale")} className="cursor-pointer rounded-xl border border-gray-200 bg-white p-4 transition-shadow hover:shadow-md hover:ring-1 hover:ring-brand-accent/30">
                     <h3 className="mb-2 text-sm font-semibold text-gray-700">Sales</h3>
                     <div className="h-40">
                       <ResponsiveContainer width="100%" height="100%">
@@ -339,7 +343,7 @@ export default function DashboardPage() {
                     </div>
                   </div>
 
-                  <div className="rounded-xl border border-gray-200 bg-white p-4">
+                  <div role="link" onClick={go("/vyapar/expenses")} className="cursor-pointer rounded-xl border border-gray-200 bg-white p-4 transition-shadow hover:shadow-md hover:ring-1 hover:ring-brand-accent/30">
                     <h3 className="mb-2 text-sm font-semibold text-gray-700">Expense</h3>
                     <div className="h-40">
                       <ResponsiveContainer width="100%" height="100%">
@@ -353,7 +357,7 @@ export default function DashboardPage() {
                     </div>
                   </div>
 
-                  <div className="rounded-xl border border-gray-200 bg-white p-4">
+                  <div role="link" onClick={go("/vyapar/reports")} className="cursor-pointer rounded-xl border border-gray-200 bg-white p-4 transition-shadow hover:shadow-md hover:ring-1 hover:ring-brand-accent/30">
                     <h3 className="mb-2 text-sm font-semibold text-gray-700">Margin</h3>
                     <div className="h-40">
                       <ResponsiveContainer width="100%" height="100%">
@@ -373,15 +377,15 @@ export default function DashboardPage() {
                 </div>
 
                 <div className="grid grid-cols-3 gap-4">
-                  <div className="rounded-xl bg-green-50 p-4 text-center">
+                  <div role="link" onClick={go("/vyapar/sale")} className="cursor-pointer rounded-xl bg-green-50 p-4 text-center transition-shadow hover:shadow-md">
                     <div className="text-sm font-medium text-green-600">Total Sales</div>
                     <div className="mt-1 text-xl font-semibold text-gray-800">{formatLakh(totalSales)}</div>
                   </div>
-                  <div className="rounded-xl bg-pink-50 p-4 text-center">
+                  <div role="link" onClick={go("/vyapar/expenses")} className="cursor-pointer rounded-xl bg-pink-50 p-4 text-center transition-shadow hover:shadow-md">
                     <div className="text-sm font-medium text-pink-600">Total Expense</div>
                     <div className="mt-1 text-xl font-semibold text-pink-600">{formatLakh(totalExpense)}</div>
                   </div>
-                  <div className="rounded-xl bg-gray-100 p-4 text-center">
+                  <div role="link" onClick={go("/vyapar/reports")} className="cursor-pointer rounded-xl bg-gray-100 p-4 text-center transition-shadow hover:shadow-md">
                     <div className="text-sm font-medium text-gray-500">Total Margin</div>
                     <div className={`mt-1 text-xl font-semibold ${totalMargin < 0 ? "text-pink-600" : "text-green-600"}`}>
                       {formatLakh(totalMargin)}
@@ -390,7 +394,7 @@ export default function DashboardPage() {
                 </div>
 
                 <div className="grid grid-cols-2 gap-4">
-                  <div className="rounded-xl border border-gray-200 bg-white p-4">
+                  <div role="link" onClick={go("/vyapar/payments")} className="cursor-pointer rounded-xl border border-gray-200 bg-white p-4 transition-shadow hover:shadow-md hover:ring-1 hover:ring-brand-accent/30">
                     <h3 className="mb-2 text-sm font-semibold text-gray-700">Payments</h3>
                     {paymentSeries.length === 0 ? (
                       <div className="flex h-32 items-center justify-center text-xs text-gray-400">
@@ -412,7 +416,7 @@ export default function DashboardPage() {
                     )}
                   </div>
 
-                  <div className="rounded-xl border border-gray-200 bg-white p-4">
+                  <div role="link" onClick={go("/vyapar/expenses")} className="cursor-pointer rounded-xl border border-gray-200 bg-white p-4 transition-shadow hover:shadow-md hover:ring-1 hover:ring-brand-accent/30">
                     <h3 className="mb-2 text-sm font-semibold text-gray-700">Expense Type</h3>
                     {expenseTypes.length === 0 ? (
                       <div className="flex h-32 flex-col items-center justify-center gap-2 text-gray-300">
@@ -448,13 +452,13 @@ export default function DashboardPage() {
             </div>
 
             <div className="grid grid-cols-4 gap-4">
-              <KpiCard label="Not Started Projects" value={counts["Not Started"]} color="text-red-500" />
-              <KpiCard label="Ongoing Projects" value={counts.Ongoing} color="text-green-600" />
-              <KpiCard label="Onhold Projects" value={counts.Onhold} color="text-amber-500" />
-              <KpiCard label="Completed Projects" value={counts.Completed} color="text-gray-600" />
+              <KpiCard label="Not Started Projects" value={counts["Not Started"]} color="text-red-500" href="/project?status=NOT_STARTED" />
+              <KpiCard label="Ongoing Projects" value={counts.Ongoing} color="text-green-600" href="/project?status=ONGOING" />
+              <KpiCard label="Onhold Projects" value={counts.Onhold} color="text-amber-500" href="/project?status=ONHOLD" />
+              <KpiCard label="Completed Projects" value={counts.Completed} color="text-gray-600" href="/project?status=COMPLETED" />
             </div>
 
-            <div className="rounded-xl border border-gray-200 bg-white p-4">
+            <div role="link" onClick={go("/project")} className="cursor-pointer rounded-xl border border-gray-200 bg-white p-4 transition-shadow hover:shadow-md hover:ring-1 hover:ring-brand-accent/30">
               <h3 className="mb-2 text-sm font-semibold text-gray-700">Project Health</h3>
               <div className="flex items-center">
                 <div className="h-64 w-full max-w-md">
@@ -497,7 +501,7 @@ export default function DashboardPage() {
             </div>
 
             <div className="grid grid-cols-2 gap-4">
-              <div className="rounded-xl border border-gray-200 bg-white p-4">
+              <div role="link" onClick={go("/payroll/attendance")} className="cursor-pointer rounded-xl border border-gray-200 bg-white p-4 transition-shadow hover:shadow-md hover:ring-1 hover:ring-brand-accent/30">
                 <div className="mb-2 flex items-center justify-between">
                   <h3 className="text-sm font-semibold text-gray-700">Last 7 Days Attendance</h3>
                   {workforce && (
@@ -538,7 +542,7 @@ export default function DashboardPage() {
                 )}
               </div>
 
-              <div className="rounded-xl border border-gray-200 bg-white p-4">
+              <div role="link" onClick={go("/warehouse")} className="cursor-pointer rounded-xl border border-gray-200 bg-white p-4 transition-shadow hover:shadow-md hover:ring-1 hover:ring-brand-accent/30">
                 <div className="mb-2 flex items-center justify-between">
                   <h3 className="text-sm font-semibold text-gray-700">Last 7 Days Material Received</h3>
                   <SampleBadge />
@@ -571,16 +575,21 @@ function KpiCard({
   label,
   value,
   color,
+  href,
 }: {
   label: string;
   value: number;
   color: string;
+  href: string;
 }) {
   return (
-    <div className="rounded-xl border border-gray-200 bg-white p-4 text-center">
+    <Link
+      href={href}
+      className="block rounded-xl border border-gray-200 bg-white p-4 text-center transition-shadow hover:shadow-md hover:ring-1 hover:ring-brand-accent/30"
+    >
       <div className={`text-sm font-medium ${color}`}>{label}</div>
       <div className="mt-1 text-3xl font-semibold text-gray-800">{value}</div>
-    </div>
+    </Link>
   );
 }
 

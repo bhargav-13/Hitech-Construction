@@ -83,6 +83,8 @@ export default function PayrollLanding() {
  */
 function AdminAttendanceDashboard() {
   const [date, setDate] = useState(iso(new Date()));
+  /** The attendance board for the selected day, filtered to one kind of row. */
+  const att = (show: string) => `/payroll/attendance?date=${date}&show=${show}`;
   const [team, setTeam] = useState<TeamMemberResponse[]>([]);
   const [teamLoading, setTeamLoading] = useState(true);
 
@@ -178,9 +180,9 @@ function AdminAttendanceDashboard() {
       present: 0, absent: 0, halfDay: 0, paidLeave: 0, weekOff: 0,
       overtime: 0, fine: 0, missedPunchOut: 0, markedDays: 0,
     };
-    const byMember = new Map<number, { name: string; present: number; absent: number; halfDay: number; leave: number; overtime: number; fine: number; missedPunchOut: number }>();
+    const byMember = new Map<number, { userId: number; name: string; present: number; absent: number; halfDay: number; leave: number; overtime: number; fine: number; missedPunchOut: number }>();
     for (const r of rows) {
-      const m = byMember.get(r.userId) ?? { name: r.memberName, present: 0, absent: 0, halfDay: 0, leave: 0, overtime: 0, fine: 0, missedPunchOut: 0 };
+      const m = byMember.get(r.userId) ?? { userId: r.userId, name: r.memberName, present: 0, absent: 0, halfDay: 0, leave: 0, overtime: 0, fine: 0, missedPunchOut: 0 };
       switch (r.code) {
         case "P": s.present++; m.present++; break;
         case "A": s.absent++; m.absent++; break;
@@ -279,18 +281,18 @@ function AdminAttendanceDashboard() {
 
         {/* ---- The selected day ---- */}
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
-          <StatCard label="On roll" value={active.length} accent="cyan" icon={Users} hint={notOnPayroll > 0 ? `${notOnPayroll} not on payroll` : undefined} />
-          <StatCard label="Present" value={totals.present} accent="green" icon={CircleCheck} hint={`${attendanceRate}% of roster`} />
-          <StatCard label="Absent" value={totals.absent} accent="rose" icon={CircleX} />
-          <StatCard label="Half Day" value={totals.halfDay} accent="amber" icon={Clock} />
-          <StatCard label="On Leave" value={totals.paidLeave} accent="blue" icon={Plane} />
-          <StatCard label="Not Marked" value={totals.notMarked} accent="gray" icon={TimerReset} hint="Needs marking" />
-          <StatCard label="Punched In" value={totals.punchedIn} accent="cyan" icon={LogIn} />
-          <StatCard label="Punched Out" value={totals.punchedOut} accent="cyan" icon={LogOut} />
-          <StatCard label="Missed Punch-Out" value={totals.missedPunchOut} accent="amber" icon={TriangleAlert} hint="Counts as half a day" />
-          <StatCard label="Week Off" value={totals.weekOff} accent="gray" />
-          <StatCard label="Overtime Hrs" value={totals.overtime.toFixed(1)} accent="green" icon={TimerReset} />
-          <StatCard label="Fine Hrs" value={totals.fine.toFixed(1)} accent="rose" icon={TriangleAlert} />
+          <StatCard label="On roll" value={active.length} accent="cyan" icon={Users} hint={notOnPayroll > 0 ? `${notOnPayroll} not on payroll` : undefined} href="/payroll/staff" />
+          <StatCard label="Present" value={totals.present} accent="green" icon={CircleCheck} hint={`${attendanceRate}% of roster`} href={att("present")} />
+          <StatCard label="Absent" value={totals.absent} accent="rose" icon={CircleX} href={att("absent")} />
+          <StatCard label="Half Day" value={totals.halfDay} accent="amber" icon={Clock} href={att("half")} />
+          <StatCard label="On Leave" value={totals.paidLeave} accent="blue" icon={Plane} href={att("leave")} />
+          <StatCard label="Not Marked" value={totals.notMarked} accent="gray" icon={TimerReset} hint="Needs marking" href={att("unmarked")} />
+          <StatCard label="Punched In" value={totals.punchedIn} accent="cyan" icon={LogIn} href={att("punched")} />
+          <StatCard label="Punched Out" value={totals.punchedOut} accent="cyan" icon={LogOut} href={att("punched")} />
+          <StatCard label="Missed Punch-Out" value={totals.missedPunchOut} accent="amber" icon={TriangleAlert} hint="Counts as half a day" href={att("punched")} />
+          <StatCard label="Week Off" value={totals.weekOff} accent="gray" href={att("all")} />
+          <StatCard label="Overtime Hrs" value={totals.overtime.toFixed(1)} accent="green" icon={TimerReset} href={att("ot")} />
+          <StatCard label="Fine Hrs" value={totals.fine.toFixed(1)} accent="rose" icon={TriangleAlert} href={att("fine")} />
         </div>
 
         <ThingsToDo />
@@ -425,6 +427,7 @@ function AdminAttendanceDashboard() {
                 icon={CircleX}
                 empty="Nobody was marked absent."
                 rows={monthStats.topAbsent.map((p) => ({
+                  href: `/payroll/attendance/${p.userId}`,
                   name: p.name,
                   value: `${p.absent}A${p.halfDay ? ` · ${p.halfDay}HD` : ""}`,
                   tone: "text-rose-600",
@@ -434,13 +437,13 @@ function AdminAttendanceDashboard() {
                 title="Most overtime this month"
                 icon={TrendingUp}
                 empty="No overtime logged."
-                rows={monthStats.topOvertime.map((p) => ({ name: p.name, value: `${p.overtime.toFixed(1)} hrs`, tone: "text-emerald-600" }))}
+                rows={monthStats.topOvertime.map((p) => ({ href: `/payroll/attendance/${p.userId}`, name: p.name, value: `${p.overtime.toFixed(1)} hrs`, tone: "text-emerald-600" }))}
               />
               <RankList
                 title="Missed punch-outs"
                 icon={TriangleAlert}
                 empty="Every punch pair is complete."
-                rows={monthStats.topMissed.map((p) => ({ name: p.name, value: `${p.missedPunchOut} day${p.missedPunchOut === 1 ? "" : "s"}`, tone: "text-amber-600" }))}
+                rows={monthStats.topMissed.map((p) => ({ href: `/payroll/attendance/${p.userId}`, name: p.name, value: `${p.missedPunchOut} day${p.missedPunchOut === 1 ? "" : "s"}`, tone: "text-amber-600" }))}
               />
             </div>
           </>
@@ -548,7 +551,7 @@ function RankList({
 }: {
   title: string;
   icon: React.ComponentType<{ size?: number; className?: string }>;
-  rows: { name: string; value: string; tone: string }[];
+  rows: { name: string; value: string; tone: string; href?: string }[];
   empty: string;
 }) {
   return (
@@ -562,12 +565,17 @@ function RankList({
       ) : (
         <ul className="divide-y divide-gray-50">
           {rows.map((r, i) => (
-            <li key={`${r.name}-${i}`} className="flex items-center gap-2.5 px-4 py-2.5">
-              <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-gray-100 text-[11px] font-semibold text-gray-500">
-                {i + 1}
-              </span>
-              <span className="min-w-0 flex-1 truncate text-sm text-gray-700">{r.name}</span>
-              <span className={`shrink-0 text-sm font-semibold ${r.tone}`}>{r.value}</span>
+            <li key={`${r.name}-${i}`}>
+              <Link
+                href={r.href ?? "/payroll/attendance"}
+                className="flex items-center gap-2.5 px-4 py-2.5 transition-colors hover:bg-gray-50"
+              >
+                <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-gray-100 text-[11px] font-semibold text-gray-500">
+                  {i + 1}
+                </span>
+                <span className="min-w-0 flex-1 truncate text-sm text-gray-700">{r.name}</span>
+                <span className={`shrink-0 text-sm font-semibold ${r.tone}`}>{r.value}</span>
+              </Link>
             </li>
           ))}
         </ul>

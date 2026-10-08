@@ -33,6 +33,7 @@ import { useAppStore } from "@/lib/store";
 import { useAuthStore } from "@/lib/authStore";
 import { useUiStore } from "@/lib/uiStore";
 import { useNotifications } from "@/lib/notifications";
+import { useCan } from "@/lib/permissions";
 import { useApprovalInboxCount } from "@/lib/approvals";
 import { projectAvatarColor, projectInitials } from "@/lib/projectHelpers";
 import { CompanySwitcher } from "@/components/CompanySwitcher";
@@ -79,6 +80,7 @@ export function Sidebar() {
   // Show a nav item only if the signed-in user's role has "<MODULE>:VIEW". No permission → the
   // item isn't rendered at all (e.g. no DASHBOARD:VIEW means no Dashboard link in the sidebar).
   const perms = authUser?.permissions ?? [];
+  const can = useCan();
   const navItems = authUser
     ? NAV_ITEMS.filter((item) => {
         const module = NAV_MODULE[item.href];
@@ -147,7 +149,7 @@ export function Sidebar() {
             const link = (
               <li key={item.href}>
                 <Link
-                  href={item.href}
+                  href={item.landing && can(item.landingFeature) ? item.landing : item.href}
                   title={collapsed ? item.label : undefined}
                   className={`relative flex items-center gap-3 rounded-r-lg border-l-[3px] py-2.5 pl-[9px] pr-3 text-sm transition-all duration-150 ease-out active:scale-[0.98] ${
                     active

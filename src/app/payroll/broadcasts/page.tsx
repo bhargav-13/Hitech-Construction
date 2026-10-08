@@ -7,8 +7,9 @@ import { Drawer, DrawerField } from "@/components/Drawer";
 import { ApiError, deleteBroadcast, getBroadcastAttachment, getBroadcasts, getPayrollPeople, sendBroadcast } from "@/lib/api";
 import type { BroadcastApi, UserResponse } from "@/lib/api";
 import { formatDateTimeIST } from "@/lib/datetime";
-import { MAX_ATTACHMENT_BYTES, readFileAsDataUrl, saveDataUrl } from "@/lib/dataUrlFile";
+import { MAX_ATTACHMENT_BYTES, readFileAsDataUrl } from "@/lib/dataUrlFile";
 import { Megaphone, Paperclip, Plus, Search, Send, Trash2 } from "lucide-react";
+import { previewFile } from "@/lib/filePreview";
 
 /**
  * Broadcasts — PagarBook's "Send Message": one message to all staff or a chosen few. Each
@@ -72,7 +73,7 @@ export default function BroadcastsPage() {
                       {b.createdByName && <span>by {b.createdByName}</span>}
                       {b.hasAttachment && (
                         <button
-                          onClick={async () => { const r = await getBroadcastAttachment(b.id); if (r.dataUrl) saveDataUrl(r.dataUrl, b.attachmentName ?? "attachment"); }}
+                          onClick={async () => { const r = await getBroadcastAttachment(b.id); if (r.dataUrl) previewFile({ name: b.attachmentName ?? "attachment", url: r.dataUrl }); }}
                           className="flex items-center gap-1 text-brand-accent hover:underline"
                         >
                           <Paperclip size={12} /> {b.attachmentName ?? "Attachment"}
