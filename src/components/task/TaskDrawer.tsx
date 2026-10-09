@@ -266,7 +266,18 @@ export function TaskDrawer({
   const authUser = useAuthStore((s) => s.user);
   const parties = useAppStore((s) => s.parties);
   const addParty = useAppStore((s) => s.addParty);
-  const { closing, requestClose } = useDrawerDismiss(onClose);
+  // Closing a new task that has something typed in asks first; closing anyway keeps it as a draft
+  // instead of throwing the work away. `closeConfirmed` lets the save's own close through.
+  const [confirmClose, setConfirmClose] = useState(false);
+  const confirmOpen = useRef(false);
+  const closeConfirmed = useRef(false);
+  const { closing, requestClose } = useDrawerDismiss(onClose, undefined, () => {
+    if (closeConfirmed.current || existing || createdId || !hasTypedSomething()) return true;
+    // Escape (or a second click outside) while the question is up just goes back to the form.
+    confirmOpen.current = !confirmOpen.current;
+    setConfirmClose(confirmOpen.current);
+    return false;
+  });
   const { active: statusRows, rowFor } = useTaskStatuses();
   const markTaskSeen = useTaskSeen((s) => s.markTaskSeen);
   const allTasks = useTaskStore((s) => s.tasks);
@@ -424,8 +435,33 @@ export function TaskDrawer({
   const currentStatusRow = rowFor({ status, statusId });
   const statusChoices = statusRows.filter((r) => r.base !== "Awaiting Approval");
 
-  function validate(asDraft: boolean): string | null {
-    if (!title.trim()) return "Task title is required.";
+  /** Anything worth keeping in a new task — the defaults alone (due today, assigned to me) aren't. */
+  function hasTypedSomething() {
+    return (
+      !!title.trim() ||
+      !!description.trim() ||
+      subtasks.length > 0 ||
+      followerIds.length > 0 ||
+      !!clientName ||
+      !!serviceName.trim() ||
+      draftComments.length > 0 ||
+      draftFiles.length > 0
+    );
+  }
+
+  function keepEditing() {
+    confirmOpen.current = false;
+    setConfirmClose(false);
+  }
+
+  /** "Close" on the question: keep the new task as a draft (titled "Untitled task" if blank). */
+  async function closeAsDraft() {
+    keepEditing();
+    await save(true, false, "Untitled task");
+  }
+
+  function validate(asDraft: boolean, taskTitle: string): string | null {
+    if (!taskTitle) return "Task title is required.";
     if (!dueDate) return "Due date is required.";
     if (chosenAssignees.filter(Boolean).length === 0) return "An assignee is required.";
     if (!existing && !asDraft && dueDate < todayIST()) return "The due date can't be in the past.";
@@ -444,8 +480,9 @@ export function TaskDrawer({
     return null;
   }
 
-  async function save(asDraft: boolean, overwrite = false) {
+  async function save(asDraft: boolean, overwrite = false, fallbackTitle = "") {
     lastAsDraft.current = asDraft;
+    const taskTitle = title.trim() || fallbackTitle;
     // An assignee may move the work along but not rewrite the record, so their save is a narrow
     // PATCH of just those two fields rather than a full PUT of the (disabled) form.
     if (existing && !rights.canEditAll) {
@@ -462,11 +499,11 @@ export function TaskDrawer({
       return;
     }
 
-    const problem = validate(asDraft);
+    const problem = validate(asDraft, taskTitle);
     if (problem) return setError(problem);
 
     const payload = {
-      title: title.trim(),
+      title: taskTitle,
       description: description.trim(),
       projectId: projectId || null,
       assigneeId: existing ? assigneeId : assigneeIds[0],
@@ -513,6 +550,7 @@ export function TaskDrawer({
       // Drafted chat and files can only be posted now that the task has an id. Sequential, because
       // each call returns the whole task and the store mirrors the last response.
       await flushDrafts(taskId);
+      closeConfirmed.current = true;
       requestClose();
     } catch (err) {
       if (err instanceof ApiError && err.status === 409) {
@@ -1320,6 +1358,40 @@ export function TaskDrawer({
 
       {previewId && legacyAttachments.length > 0 && (
         <AttachmentPreview attachments={legacyAttachments} startId={previewId} onClose={() => setPreviewId(null)} />
+      )}
+      {confirmClose && (
+        <div
+          className="animate-overlay-in fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4"
+          onClick={(e) => {
+            e.stopPropagation();
+            keepEditing();
+          }}
+        >
+          <div className="w-full max-w-sm rounded-xl bg-white p-5 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-sm font-semibold text-gray-800">Close this new task?</h3>
+            <p className="mt-1.5 text-sm text-gray-500">
+              It hasn&apos;t been submitted yet. If you close it, it will be saved as a <strong>draft</strong> so nothing
+              you typed is lost — you can open it from the task list and submit it later.
+            </p>
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={keepEditing}
+                autoFocus
+                className="rounded-lg border border-gray-200 px-4 py-2 text-sm font-medium text-gray-600 transition-all duration-150 hover:bg-gray-50 active:scale-95"
+              >
+                Keep editing
+              </button>
+              <button
+                type="button"
+                onClick={() => void closeAsDraft()}
+                className="rounded-lg bg-brand-accent px-4 py-2 text-sm font-medium text-white transition-all duration-150 hover:opacity-90 active:scale-95"
+              >
+                Close &amp; save draft
+              </button>
+            </div>
+          </div>
+        </div>
       )}
       {importingSubs && (
         <ImportSubtasksDialog

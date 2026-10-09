@@ -52,11 +52,17 @@ export function AppShell({
   }
 
   return (
-    <div className="flex h-screen w-full overflow-hidden">
+    // h-dvh, not h-screen: on mobile browsers 100vh is taller than the visible area (it ignores the
+    // address bar), which also lets the window itself scroll.
+    <div className="flex h-dvh w-full overflow-hidden">
       {!hideSidebar && <Sidebar />}
       <div className="flex min-w-0 flex-1 flex-col">
         <Topbar title={title} />
-        <main className="min-w-0 flex-1 overflow-x-hidden overflow-y-auto bg-background p-6">
+        {/* `relative` makes main the containing block for absolutely-positioned bits inside pages
+            (e.g. Tailwind's sr-only labels in long tables). Without it they anchor to the
+            viewport, escape main's scroll clipping and stretch the document, so the whole window
+            scrolls and drags the sidebar up — leaving a blank strip below it. */}
+        <main className="relative min-w-0 flex-1 overflow-x-hidden overflow-y-auto bg-background p-6">
           <div className={`animate-fade-in ${fill ? "h-full" : ""}`}>{children}</div>
         </main>
       </div>
