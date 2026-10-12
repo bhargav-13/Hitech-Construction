@@ -1,9 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { Link2, Pencil, Plus, Scale, Send, Trash2 } from "lucide-react";
+import { Link2, Pencil, Plus, Scale, Search, Send, Trash2 } from "lucide-react";
+import { Select } from "@/components/Select";
+import { useProjects } from "@/lib/useProjects";
 import { ProcurementShell, ProcurementEmpty, ProcurementHeader } from "@/components/procurement/ProcurementShell";
 import { SendRfqDialog } from "@/components/procurement/SendRfqDialog";
 import { QuoteDialog } from "@/components/procurement/QuoteDialog";
@@ -29,6 +31,39 @@ export default function RfqPage() {
   const router = useRouter();
   const { rfqs, loading, error, reload, splice } = useRfqs();
   const projectId = useVyaparProjectId();
+  const { projects } = useProjects();
+
+  // Newest-created first by default: the order Onsite opens its RFQ list in.
+  const [q, setQ] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [projectFilter, setProjectFilter] = useState("all");
+  const [sortBy, setSortBy] = useState("created-desc");
+  const shown = useMemo(() => {
+    const needle = q.trim().toLowerCase();
+    const list = rfqs.filter((r) => {
+      if (statusFilter !== "all" && r.status !== statusFilter) return false;
+      if (projectFilter !== "all" && String(r.projectId ?? "") !== projectFilter) return false;
+      if (!needle) return true;
+      return (
+        r.rfqNo.toLowerCase().includes(needle) ||
+        (r.title ?? "").toLowerCase().includes(needle) ||
+        r.lines.some((l) => (l.itemName ?? "").toLowerCase().includes(needle)) ||
+        r.quotes.some((x) => (x.vendorName ?? "").toLowerCase().includes(needle))
+      );
+    });
+    const created = (r: Rfq) => `${r.createdAt ?? ""}#${String(r.id).padStart(12, "0")}`;
+    const by: Record<string, (a: Rfq, b: Rfq) => number> = {
+      "created-desc": (a, b) => created(b).localeCompare(created(a)),
+      "created-asc": (a, b) => created(a).localeCompare(created(b)),
+      "date-desc": (a, b) => (b.rfqDate ?? "").localeCompare(a.rfqDate ?? ""),
+      "due-asc": (a, b) => (a.biddingEndDate || "9999").localeCompare(b.biddingEndDate || "9999"),
+      "replies-desc": (a, b) => b.quotes.length - a.quotes.length,
+      "number-asc": (a, b) => a.rfqNo.localeCompare(b.rfqNo, undefined, { numeric: true }),
+    };
+    return [...list].sort(by[sortBy] ?? by["created-desc"]);
+  }, [rfqs, q, statusFilter, projectFilter, sortBy]);
+  const statuses = useMemo(() => [...new Set(rfqs.map((r) => r.status))].sort(), [rfqs]);
+  const projectIds = useMemo(() => new Set(rfqs.map((r) => r.projectId).filter((p) => p != null)), [rfqs]);
 
   // Parties back the quote dialog; loaded once here rather than on every open.
   const [parties, setParties] = useState<Party[]>([]);
@@ -97,7 +132,54 @@ export default function RfqPage() {
         />
       ) : (
         <div className="space-y-3">
-          {rfqs.map((r) => {
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex min-w-[220px] flex-1 items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 focus-within:border-cyan-500">
+              <Search size={15} className="text-gray-400" />
+              <input
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+                placeholder="Search RFQ no., title, item or supplier…"
+                className="w-full bg-transparent text-sm outline-none"
+              />
+            </div>
+            <Select
+              value={statusFilter}
+              onChange={setStatusFilter}
+              size="sm"
+              className="w-44"
+              options={[{ value: "all", label: "All statuses" }, ...statuses.map((s) => ({ value: s, label: s }))]}
+            />
+            <Select
+              value={projectFilter}
+              onChange={setProjectFilter}
+              size="sm"
+              className="w-56"
+              options={[
+                { value: "all", label: "All projects" },
+                ...projects
+                  .filter((p) => projectIds.has(Number(p.id)))
+                  .map((p) => ({ value: String(p.id), label: p.name })),
+              ]}
+            />
+            <Select
+              value={sortBy}
+              onChange={setSortBy}
+              size="sm"
+              className="w-52"
+              options={[
+                { value: "created-desc", label: "Sort: Newest first" },
+                { value: "created-asc", label: "Sort: Oldest first" },
+                { value: "date-desc", label: "Sort: RFQ date, latest" },
+                { value: "due-asc", label: "Sort: Replies due soonest" },
+                { value: "replies-desc", label: "Sort: Most replies" },
+                { value: "number-asc", label: "Sort: Number" },
+              ]}
+            />
+            <span className="text-xs text-gray-500">
+              {shown.length} of {rfqs.length}
+            </span>
+          </div>
+          {shown.map((r) => {
             const decided = r.lines.filter((l) => l.awardedVendorPartyId != null).length;
             // The cheapest and dearest way to buy the whole enquiry, line by line.
             const range = r.lines.reduce(

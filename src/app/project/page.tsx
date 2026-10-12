@@ -9,7 +9,7 @@ import { useAuthStore } from "@/lib/authStore";
 import * as api from "@/lib/api";
 import type { ProjectResponse, ProjectStatus } from "@/lib/api";
 import { projectInitials } from "@/lib/projectHelpers";
-import { inr } from "@/lib/format";
+import { inr, pct } from "@/lib/format";
 import { useDrawerDismiss } from "@/lib/useDrawerDismiss";
 import {
   Building2,
@@ -349,9 +349,20 @@ function NewProjectDialog({ onClose }: { onClose: () => void }) {
 /* ---------- pieces ---------- */
 function Kpi({ icon, tint, label, value }: { icon: React.ReactNode; tint: string; label: string; value: string }) {
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+    // A container, so the figure can size itself to the tile rather than the viewport: a full rupee
+    // amount (₹41,38,68,596.000 — the client rejected Cr/L shorthand) shrinks just enough to fit,
+    // while short counts keep the full 1.5rem. A semibold digit is ~0.62em wide, so a value of n
+    // characters fits at 100 / (0.62·n) cqw. Ellipsis + title is only the last resort.
+    // min-w: a size container reports no intrinsic width, so without a floor the grid can squeeze it to 0.
+    <div className="@container min-w-[8.5rem] rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
       <span className={`flex h-9 w-9 items-center justify-center rounded-xl ${tint}`}>{icon}</span>
-      <div className="mt-3 text-2xl font-semibold tracking-tight text-slate-900">{value}</div>
+      <div
+        title={value}
+        style={{ fontSize: `clamp(0.8rem, ${(100 / (0.62 * Math.max(value.length, 1))).toFixed(2)}cqw, 1.5rem)` }}
+        className="mt-3 truncate font-semibold tabular-nums tracking-tight text-slate-900"
+      >
+        {value}
+      </div>
       <div className="mt-0.5 text-sm text-slate-500">{label}</div>
     </div>
   );
@@ -405,7 +416,7 @@ function ProjectCard({
         <div className="mt-4">
           <div className="mb-1 flex items-center justify-between text-xs">
             <span className="text-slate-400">Progress</span>
-            <span className="font-semibold text-slate-700">{p.progress}%</span>
+            <span className="font-semibold text-slate-700">{pct(p.progress)}</span>
           </div>
           <div className="h-1.5 w-full overflow-hidden rounded-full bg-slate-100">
             <div className={`h-full rounded-full ${s.bar}`} style={{ width: `${p.progress}%` }} />
@@ -501,7 +512,7 @@ function ProjectDrawer({ project, onClose }: { project: ProjectResponse; onClose
         <div className="border-b border-slate-100 px-6 py-4">
           <div className="mb-1.5 flex items-center justify-between text-sm">
             <span className="text-slate-500">Overall progress</span>
-            <span className="font-semibold text-slate-900">{full.progress}%</span>
+            <span className="font-semibold text-slate-900">{pct(full.progress)}</span>
           </div>
           <div className="h-2 w-full overflow-hidden rounded-full bg-slate-100">
             <div className={`h-full rounded-full ${s.bar}`} style={{ width: `${full.progress}%` }} />
@@ -514,7 +525,7 @@ function ProjectDrawer({ project, onClose }: { project: ProjectResponse; onClose
           <Field icon={<Layers3 size={14} />} label="Stage" value={full.stage} />
           <Field icon={<UserRound size={14} />} label="Client" value={full.customerName} />
           <Field icon={<Building2 size={14} />} label="Category" value={full.category} />
-          <Field icon={<MapPin size={14} />} label="Location" value={[full.address, full.city].filter(Boolean).join(", ")} />
+          <Field icon={<MapPin size={14} />} label="Location" value={[full.address, full.city, full.state].filter(Boolean).join(", ")} />
           <Field icon={<CalendarDays size={14} />} label="Start date" value={full.startDate} />
           <Field icon={<CalendarDays size={14} />} label="End date" value={full.endDate} />
           <Field icon={<UserRound size={14} />} label="Key personnel" value={full.keyPersonnel} />

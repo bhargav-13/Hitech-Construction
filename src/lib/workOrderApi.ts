@@ -126,6 +126,8 @@ export interface WorkOrder {
   bills: SubconBill[];
   materials: SubconMaterial[];
   materialSummary: SubconMaterialSummary[];
+  /** When the order was created (IST). The list opens newest-created first, as Onsite does. */
+  createdAt?: string | null;
 }
 
 export interface WorkOrderItemInput {

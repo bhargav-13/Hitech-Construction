@@ -7,9 +7,28 @@ import { Spinner } from "@/components/Spinner";
 import { Select } from "@/components/Select";
 import { ProcurementEmpty } from "@/components/procurement/ProcurementShell";
 import { PurchaseDocumentDrawer } from "@/components/procurement/PurchaseDocumentDrawer";
+import { SortTh } from "@/components/vyapar/SortTh";
 import { useAuthStore } from "@/lib/authStore";
 import { inr } from "@/lib/format";
+import { useProjects } from "@/lib/useProjects";
+import { useTableSort, type SortDir } from "@/lib/useTableSort";
 import type { Invoice } from "@/lib/vyaparApi";
+
+/**
+ * Newest-created first by default — the order Onsite opens its lists in, which is what the client's
+ * team is used to (it is not the document date: a PO typed today for last week still comes first).
+ */
+const SORT_OPTIONS: { value: string; label: string; key: string; dir: SortDir }[] = [
+  { value: "created-desc", label: "Newest first", key: "created", dir: "desc" },
+  { value: "created-asc", label: "Oldest first", key: "created", dir: "asc" },
+  { value: "date-desc", label: "Date: latest", key: "date", dir: "desc" },
+  { value: "date-asc", label: "Date: earliest", key: "date", dir: "asc" },
+  { value: "total-desc", label: "Amount: high to low", key: "total", dir: "desc" },
+  { value: "total-asc", label: "Amount: low to high", key: "total", dir: "asc" },
+  { value: "balance-desc", label: "Balance: high to low", key: "balance", dir: "desc" },
+  { value: "vendor-asc", label: "Vendor A–Z", key: "vendor", dir: "asc" },
+  { value: "number-asc", label: "Number", key: "number", dir: "asc" },
+];
 
 /** Vyapar's own paid/partial/unpaid wording, coloured to match the rest of Procurement. */
 export const DOC_STATUS_CLS: Record<string, string> = {
@@ -43,6 +62,11 @@ export function PurchaseDocumentList({
 }) {
   const [q, setQ] = useState("");
   const [status, setStatus] = useState("all");
+  const [vendor, setVendor] = useState("all");
+  const [project, setProject] = useState("all");
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
+  const { projects } = useProjects();
   /**
    * Whose documents to show.
    *
@@ -66,11 +90,21 @@ export function PurchaseDocumentList({
 
   const fromProcurement = useMemo(() => rows.filter((r) => r.sourceModule === "PROCUREMENT"), [rows]);
 
-  const visible = useMemo(() => {
+  const vendors = useMemo(
+    () => [...new Set(rows.map((r) => r.partyName ?? "").filter(Boolean))].sort((a, b) => a.localeCompare(b)),
+    [rows],
+  );
+  const projectIds = useMemo(() => new Set(rows.map((r) => r.projectId).filter((p) => p != null)), [rows]);
+
+  const filtered = useMemo(() => {
     const query = q.trim().toLowerCase();
     const pool = source === "procurement" ? fromProcurement : rows;
     return pool.filter((r) => {
       if (status !== "all" && r.status !== status) return false;
+      if (vendor !== "all" && (r.partyName ?? "") !== vendor) return false;
+      if (project !== "all" && String(r.projectId ?? "") !== project) return false;
+      if (from && (r.invoiceDate ?? "") < from) return false;
+      if (to && (r.invoiceDate ?? "") > to) return false;
       if (!query) return true;
       return (
         (r.invoiceNo ?? "").toLowerCase().includes(query) ||
@@ -78,7 +112,27 @@ export function PurchaseDocumentList({
         (r.notes ?? "").toLowerCase().includes(query)
       );
     });
-  }, [rows, fromProcurement, source, q, status]);
+  }, [rows, fromProcurement, source, q, status, vendor, project, from, to]);
+
+  const accessors = useMemo(
+    () => ({
+      // Created time, with the id as the tie-break for rows that predate the field.
+      created: (r: Invoice) => `${r.createdAt ?? ""}#${String(r.id).padStart(12, "0")}`,
+      number: (r: Invoice) => r.invoiceNo ?? "",
+      vendor: (r: Invoice) => r.partyName ?? r.billingName ?? "",
+      date: (r: Invoice) => r.invoiceDate ?? "",
+      total: (r: Invoice) => Number(r.total ?? 0),
+      balance: (r: Invoice) => Number(r.balance ?? 0),
+      status: (r: Invoice) => r.status ?? "",
+    }),
+    [],
+  );
+  const { sorted: visible, sortKey, sortDir, toggle, setSort } = useTableSort(filtered, accessors, {
+    key: "created",
+    dir: "desc",
+  });
+  const sortValue = SORT_OPTIONS.find((o) => o.key === sortKey && o.dir === sortDir)?.value ?? "custom";
+  const filtersOn = vendor !== "all" || project !== "all" || !!from || !!to || status !== "all" || !!q;
 
   const totals = useMemo(
     () => ({
@@ -127,6 +181,72 @@ export function PurchaseDocumentList({
           className="w-44"
           options={[{ value: "all", label: "All statuses" }, ...statuses.map((s) => ({ value: s, label: s }))]}
         />
+        <Select
+          value={vendor}
+          onChange={setVendor}
+          size="sm"
+          className="w-52"
+          options={[{ value: "all", label: "All vendors" }, ...vendors.map((v) => ({ value: v, label: v }))]}
+        />
+        <Select
+          value={project}
+          onChange={setProject}
+          size="sm"
+          className="w-56"
+          options={[
+            { value: "all", label: "All projects" },
+            ...projects
+              .filter((p) => projectIds.has(Number(p.id)))
+              .map((p) => ({ value: String(p.id), label: p.name })),
+          ]}
+        />
+        <label className="flex items-center gap-1 text-xs text-gray-500">
+          From
+          <input
+            type="date"
+            value={from}
+            onChange={(e) => setFrom(e.target.value)}
+            className="rounded-lg border border-gray-200 bg-white px-2 py-1.5 text-xs"
+          />
+        </label>
+        <label className="flex items-center gap-1 text-xs text-gray-500">
+          To
+          <input
+            type="date"
+            value={to}
+            onChange={(e) => setTo(e.target.value)}
+            className="rounded-lg border border-gray-200 bg-white px-2 py-1.5 text-xs"
+          />
+        </label>
+        <Select
+          value={sortValue}
+          onChange={(v) => {
+            const o = SORT_OPTIONS.find((x) => x.value === v);
+            if (o) setSort(o.key, o.dir);
+          }}
+          size="sm"
+          className="w-52"
+          options={[
+            ...SORT_OPTIONS.map((o) => ({ value: o.value, label: `Sort: ${o.label}` })),
+            ...(sortValue === "custom" ? [{ value: "custom", label: "Sort: by column" }] : []),
+          ]}
+        />
+        {filtersOn && (
+          <button
+            type="button"
+            onClick={() => {
+              setQ("");
+              setStatus("all");
+              setVendor("all");
+              setProject("all");
+              setFrom("");
+              setTo("");
+            }}
+            className="text-xs text-gray-500 underline-offset-2 hover:text-brand-accent hover:underline"
+          >
+            Clear filters
+          </button>
+        )}
         {canOpenVyapar && (
           <Link
             href={vyaparHref}
@@ -167,13 +287,13 @@ export function PurchaseDocumentList({
           <table className="min-w-full text-sm">
             <thead className="border-b border-gray-200 bg-gray-50 text-left text-[11px] font-semibold tracking-wide text-gray-500 uppercase">
               <tr>
-                <th className="px-4 py-3">Number</th>
-                <th className="px-4 py-3">Vendor</th>
-                <th className="px-4 py-3">Date</th>
-                <th className="px-4 py-3 text-right">Total</th>
+                <SortTh label="Number" sortKey="number" activeKey={sortKey} dir={sortDir} onSort={toggle} className="py-3" />
+                <SortTh label="Vendor" sortKey="vendor" activeKey={sortKey} dir={sortDir} onSort={toggle} className="py-3" />
+                <SortTh label="Date" sortKey="date" activeKey={sortKey} dir={sortDir} onSort={toggle} className="py-3" />
+                <SortTh label="Total" sortKey="total" align="right" activeKey={sortKey} dir={sortDir} onSort={toggle} className="py-3" />
                 <th className="px-4 py-3 text-right">Paid</th>
-                <th className="px-4 py-3 text-right">Balance</th>
-                <th className="px-4 py-3">Status</th>
+                <SortTh label="Balance" sortKey="balance" align="right" activeKey={sortKey} dir={sortDir} onSort={toggle} className="py-3" />
+                <SortTh label="Status" sortKey="status" activeKey={sortKey} dir={sortDir} onSort={toggle} className="py-3" />
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">

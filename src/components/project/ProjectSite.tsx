@@ -49,7 +49,7 @@ export function ProjectSite({ project }: { project: ProjectResponse }) {
             Address
           </div>
           <div className="mt-2 text-sm text-slate-600">
-            {[project.address, project.city].filter(Boolean).join(", ") || "No address set"}
+            {[project.address, project.city, project.state].filter(Boolean).join(", ") || "No address set"}
           </div>
           {project.companyBranch && (
             <div className="mt-1 text-xs text-slate-400">Branch: {project.companyBranch}</div>

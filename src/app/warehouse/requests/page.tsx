@@ -142,11 +142,21 @@ export default function WarehouseRequestsPage() {
                       <span className={`rounded-md px-2 py-0.5 text-[11px] font-medium ring-1 ring-inset ${meta.chip}`}>
                         {meta.label}
                       </span>
+                      {r.requestType === "PURCHASE" && (
+                        <span
+                          className="rounded-md bg-cyan-50 px-2 py-0.5 text-[11px] font-medium text-cyan-700 ring-1 ring-inset ring-cyan-600/20"
+                          title="Asks for this to be bought. It does not reserve store stock."
+                        >
+                          Purchase request
+                        </span>
+                      )}
                     </div>
                     <div className="mt-0.5 text-xs text-gray-500">
                       {projectName(r.projectId)} · raised {bookDate(r.raisedOn)}
+                      {r.requestedByName && ` by ${r.requestedByName}`}
                       {r.neededBy && ` · needed by ${bookDate(r.neededBy)}`}
                     </div>
+                    {r.note && <div className="mt-1 text-xs whitespace-pre-line text-gray-500">{r.note}</div>}
                     {r.decisionNote && <div className="mt-1 text-xs text-gray-400">“{r.decisionNote}”</div>}
                   </div>
 
@@ -203,6 +213,9 @@ export default function WarehouseRequestsPage() {
                   </div>
                 </div>
 
+                {r.requestType === "PURCHASE" ? (
+                  <PurchaseLines request={r} itemName={itemName} />
+                ) : (
                 <table className="w-full border-collapse text-sm">
                   <thead>
                     <tr className="border-b border-gray-100 bg-gray-50/60 text-left text-[11px] font-medium tracking-wide text-gray-500 uppercase">
@@ -259,6 +272,7 @@ export default function WarehouseRequestsPage() {
                     )}
                   </tbody>
                 </table>
+                )}
               </div>
             );
           })}
@@ -469,5 +483,62 @@ function RequestDialog({
         </DrawerField>
       </div>
     </Drawer>
+  );
+}
+
+/**
+ * The lines of a purchase request.
+ *
+ * A purchase request is fulfilled by purchase orders, not by issues from the store, so its columns
+ * are what was asked, what has been ordered and on which PO — and each line keeps its own state,
+ * because one line can be ordered while its neighbour is still waiting or was turned down.
+ */
+const LINE_STATUS_CHIP: Record<string, { label: string; chip: string }> = {
+  APPROVED: { label: "To order", chip: "bg-blue-50 text-blue-700 ring-blue-600/20" },
+  ORDERED: { label: "Ordered", chip: "bg-emerald-50 text-emerald-700 ring-emerald-600/20" },
+  REJECTED: { label: "Rejected", chip: "bg-rose-50 text-rose-700 ring-rose-600/20" },
+};
+
+function PurchaseLines({ request, itemName }: { request: MaterialRequest; itemName: (id: number) => string }) {
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full min-w-[720px] border-collapse text-sm">
+        <thead>
+          <tr className="border-b border-gray-100 bg-gray-50/60 text-left text-[11px] font-medium tracking-wide text-gray-500 uppercase">
+            <th className="px-4 py-2">Item</th>
+            <th className="w-24 px-3 py-2 text-right">Asked</th>
+            <th className="w-24 px-3 py-2 text-right">Ordered</th>
+            <th className="w-24 px-3 py-2">Status</th>
+            <th className="w-56 px-3 py-2">Purchase order</th>
+          </tr>
+        </thead>
+        <tbody>
+          {request.lines.map((l) => {
+            const st = LINE_STATUS_CHIP[l.lineStatus ?? ""] ?? null;
+            return (
+              <tr key={l.id} className="border-b border-gray-50 align-top last:border-b-0">
+                <td className="px-4 py-2 text-gray-800">
+                  {itemName(l.itemId)}
+                  {l.remark && <div className="mt-0.5 text-xs text-gray-500">{l.remark}</div>}
+                  {l.statusNote && <div className="mt-0.5 text-xs text-gray-400">“{l.statusNote}”</div>}
+                </td>
+                <td className="px-3 py-2 text-right text-gray-700 tabular-nums">{fmtQty(l.quantity)}</td>
+                <td className="px-3 py-2 text-right text-gray-500 tabular-nums">{fmtQty(l.orderedQuantity ?? 0)}</td>
+                <td className="px-3 py-2">
+                  {st ? (
+                    <span className={`rounded-md px-2 py-0.5 text-[11px] font-medium ring-1 ring-inset ${st.chip}`}>
+                      {st.label}
+                    </span>
+                  ) : (
+                    <span className="text-xs text-gray-400">—</span>
+                  )}
+                </td>
+                <td className="px-3 py-2 text-xs text-gray-600">{l.poRefs ?? "—"}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
   );
 }

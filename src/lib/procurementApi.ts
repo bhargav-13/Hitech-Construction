@@ -108,6 +108,8 @@ export interface Rfq {
   lines: RfqLine[];
   suppliers: RfqSupplier[];
   quotes: Quote[];
+  /** When the enquiry was created (IST). The list opens newest-created first, as Onsite does. */
+  createdAt?: string | null;
 }
 
 export interface RfqInput {

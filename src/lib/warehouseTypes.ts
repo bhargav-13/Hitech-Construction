@@ -95,6 +95,9 @@ export interface StockSetting {
   reorderLevel: number;
   /** Free text — "Rack B3", "Yard, north end". */
   binLocation: string | null;
+  /** The site's budgeted quantity (Onsite's "Estimated"). 0 when none was set. */
+  estimatedQuantity: number;
+  budgetRate: number;
 }
 
 /** An item resolved against one store: the catalogue record plus what is on hand there. */
@@ -110,6 +113,9 @@ export interface StockRow {
   binLocation: string | null;
   /** onHand × the item's purchase price. */
   value: number;
+  /** The site's budgeted quantity (Onsite's "Estimated"); 0 when none was set. */
+  estimatedQuantity: number;
+  budgetRate: number;
 }
 
 // ---------------------------------------------------------------- movements
@@ -193,7 +199,18 @@ export interface StockMovement {
  * the store cannot fill becomes an enquiry, and the client already runs sixty of these a month
  * through the tool they have.
  */
-export type RequestStatus = "DRAFT" | "PENDING" | "APPROVED" | "PARTIAL" | "ISSUED" | "REJECTED";
+export type RequestStatus =
+  | "DRAFT"
+  | "PENDING"
+  | "APPROVED"
+  | "PARTIAL"
+  | "ISSUED"
+  | "REJECTED"
+  | "PART_ORDERED"
+  | "ORDERED";
+
+/** ISSUE asks the store for what it holds; PURCHASE asks for something to be bought (never reserves stock). */
+export type RequestType = "ISSUE" | "PURCHASE";
 
 export const REQUEST_STATUS_META: Record<RequestStatus, { label: string; chip: string }> = {
   DRAFT: { label: "Draft", chip: "bg-gray-100 text-gray-600 ring-gray-500/20" },
@@ -202,6 +219,8 @@ export const REQUEST_STATUS_META: Record<RequestStatus, { label: string; chip: s
   PARTIAL: { label: "Part issued", chip: "bg-violet-50 text-violet-700 ring-violet-600/20" },
   ISSUED: { label: "Issued", chip: "bg-emerald-50 text-emerald-700 ring-emerald-600/20" },
   REJECTED: { label: "Rejected", chip: "bg-rose-50 text-rose-700 ring-rose-600/20" },
+  PART_ORDERED: { label: "Part ordered", chip: "bg-violet-50 text-violet-700 ring-violet-600/20" },
+  ORDERED: { label: "Ordered", chip: "bg-emerald-50 text-emerald-700 ring-emerald-600/20" },
 };
 
 export interface RequestLine {
@@ -210,6 +229,14 @@ export interface RequestLine {
   quantity: number;
   /** How much of it has actually left the store. */
   issuedQuantity: number;
+  /** Purchase requests: the line's own state (APPROVED / ORDERED / REJECTED). */
+  lineStatus?: string | null;
+  /** Purchase requests: how much is on purchase orders. */
+  orderedQuantity?: number;
+  poRefs?: string | null;
+  remark?: string | null;
+  statusNote?: string | null;
+  statusChangedOn?: string | null;
 }
 
 export interface MaterialRequest {
@@ -228,6 +255,9 @@ export interface MaterialRequest {
   decisionNote: string | null;
   note: string | null;
   lines: RequestLine[];
+  requestType: RequestType;
+  /** Shown when the requester is not an ERP user (e.g. carried over from Onsite). */
+  requestedByName: string | null;
 }
 
 // ---------------------------------------------------------------- checkouts

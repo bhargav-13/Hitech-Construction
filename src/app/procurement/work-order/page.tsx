@@ -34,6 +34,9 @@ export default function WorkOrderListPage() {
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("all");
   const [vendor, setVendor] = useState("all");
+  const [project, setProject] = useState("all");
+  // Newest-created first by default: the order Onsite opens its work-order list in.
+  const [sortBy, setSortBy] = useState("created-desc");
 
   const vendors = useMemo(
     () => [...new Set(workOrders.map((w) => w.vendorName))].sort((a, b) => a.localeCompare(b)),
@@ -42,13 +45,29 @@ export default function WorkOrderListPage() {
 
   const rows = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return workOrders.filter((w) => {
+    const list = workOrders.filter((w) => {
       if (status !== "all" && w.status !== status) return false;
       if (vendor !== "all" && w.vendorName !== vendor) return false;
+      if (project !== "all" && String(w.projectId ?? "") !== project) return false;
       if (!q) return true;
       return [w.woNo, w.title, w.vendorName].some((f) => f?.toLowerCase().includes(q));
     });
-  }, [workOrders, search, status, vendor]);
+    const created = (w: (typeof list)[number]) => `${w.createdAt ?? ""}#${String(w.id).padStart(12, "0")}`;
+    const by: Record<string, (a: (typeof list)[number], b: (typeof list)[number]) => number> = {
+      "created-desc": (a, b) => created(b).localeCompare(created(a)),
+      "created-asc": (a, b) => created(a).localeCompare(created(b)),
+      "date-desc": (a, b) => (b.woDate ?? "").localeCompare(a.woDate ?? ""),
+      "value-desc": (a, b) => b.orderValue - a.orderValue,
+      "billed-desc": (a, b) => b.billedValue - a.billedValue,
+      "progress-desc": (a, b) => b.physicalProgress - a.physicalProgress,
+      "number-desc": (a, b) => b.woNo.localeCompare(a.woNo, undefined, { numeric: true }),
+    };
+    return [...list].sort(by[sortBy] ?? by["created-desc"]);
+  }, [workOrders, search, status, vendor, project, sortBy]);
+  const projectIds = useMemo(
+    () => new Set(workOrders.map((w) => w.projectId).filter((p) => p != null)),
+    [workOrders],
+  );
 
   const totals = useMemo(
     () =>
@@ -137,6 +156,33 @@ export default function WorkOrderListPage() {
               size="sm"
               className="w-48"
               options={[{ value: "all", label: "All contractors" }, ...vendors.map((v) => ({ value: v, label: v }))]}
+            />
+            <Select
+              value={project}
+              onChange={setProject}
+              size="sm"
+              className="w-56"
+              options={[
+                { value: "all", label: "All projects" },
+                ...projects
+                  .filter((p) => projectIds.has(Number(p.id)))
+                  .map((p) => ({ value: String(p.id), label: p.name })),
+              ]}
+            />
+            <Select
+              value={sortBy}
+              onChange={setSortBy}
+              size="sm"
+              className="w-52"
+              options={[
+                { value: "created-desc", label: "Sort: Newest first" },
+                { value: "created-asc", label: "Sort: Oldest first" },
+                { value: "date-desc", label: "Sort: Order date, latest" },
+                { value: "value-desc", label: "Sort: Order value, high" },
+                { value: "billed-desc", label: "Sort: Billed, high" },
+                { value: "progress-desc", label: "Sort: Progress, high" },
+                { value: "number-desc", label: "Sort: Number" },
+              ]}
             />
           </div>
 

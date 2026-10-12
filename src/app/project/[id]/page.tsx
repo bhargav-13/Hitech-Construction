@@ -35,7 +35,7 @@ import * as api from "@/lib/api";
 import type { ProjectResponse, ProjectSummary } from "@/lib/api";
 import { projectInitials } from "@/lib/projectHelpers";
 import { useCan, type Need } from "@/lib/permissions";
-import { inr } from "@/lib/format";
+import { inr, pct } from "@/lib/format";
 
 // Deliberately NOT `runtime = "edge"`. This page is a client component, so edge bought nothing —
 // it only governs the server-rendered shell — while capping the bundle at Vercel's 1 MB edge
@@ -158,7 +158,7 @@ export default function ProjectDetailPage() {
     );
   }
 
-  const address = [project.address, project.city].filter(Boolean).join(", ");
+  const address = [project.address, project.city, project.state].filter(Boolean).join(", ");
 
   return (
     <AppShell title="Projects" hideSidebar>
@@ -307,7 +307,7 @@ function ProjectDashboard({ project }: { project: ProjectResponse }) {
           icon={<Activity size={16} />}
           tint="bg-cyan-50 text-cyan-600"
           label="Progress (reported)"
-          value={`${project.progress}%`}
+          value={pct(project.progress)}
           note={boq ? `${boqStats!.progressPct.toFixed(1)}% measured from targets` : undefined}
         />
         <StatCard
@@ -369,7 +369,7 @@ function ProjectDashboard({ project }: { project: ProjectResponse }) {
       <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
         <div className="mb-1.5 flex items-center justify-between text-sm">
           <span className="text-slate-500">Overall progress (as reported by the site)</span>
-          <span className="font-semibold text-slate-900">{project.progress}%</span>
+          <span className="font-semibold text-slate-900">{pct(project.progress)}</span>
         </div>
         <div className="h-2 w-full overflow-hidden rounded-full bg-slate-100">
           <div className="h-full rounded-full bg-cyan-500" style={{ width: `${project.progress}%` }} />

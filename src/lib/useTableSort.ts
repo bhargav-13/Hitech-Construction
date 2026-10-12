@@ -47,5 +47,11 @@ export function useTableSort<T>(
     }
   };
 
-  return { sorted, sortKey: key, sortDir: dir, toggle };
+  /** Jump straight to a sort — what a "Sort by" dropdown needs, where a header click only toggles. */
+  const setSort = (nextKey: string, nextDir: SortDir) => {
+    setKey(nextKey);
+    setDir(nextDir);
+  };
+
+  return { sorted, sortKey: key, sortDir: dir, toggle, setSort };
 }

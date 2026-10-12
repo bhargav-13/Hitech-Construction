@@ -78,6 +78,27 @@ export default function WarehouseStockPage() {
           reorderLevel: setting?.reorderLevel ?? 0,
           binLocation: setting?.binLocation ?? null,
           value: onHand * (item.purchasePrice ?? 0),
+          estimatedQuantity: setting?.estimatedQuantity ?? 0,
+          budgetRate: setting?.budgetRate ?? 0,
+        });
+      }
+      // A budgeted item belongs on the list before anything has arrived — "700 budgeted, 0 here"
+      // is exactly the row a site needs to see. Onsite lists it the same way.
+      for (const s of settings) {
+        if (s.warehouseId !== w.id || s.estimatedQuantity <= 0 || onHandByItem.has(s.itemId)) continue;
+        const item = itemById.get(s.itemId);
+        if (!item) continue;
+        out.push({
+          item,
+          warehouseId: w.id,
+          onHand: 0,
+          reserved: 0,
+          available: 0,
+          reorderLevel: s.reorderLevel,
+          binLocation: s.binLocation,
+          value: 0,
+          estimatedQuantity: s.estimatedQuantity,
+          budgetRate: s.budgetRate,
         });
       }
     }
@@ -206,6 +227,7 @@ export default function WarehouseStockPage() {
                 {warehouseId === "all" && (
                   <SortTh label="Store" sortKey="store" activeKey={sortKey} dir={sortDir} onSort={toggle} />
                 )}
+                <th className="px-3 py-2 text-right" title="The site's budgeted quantity of this item">Estimated</th>
                 <SortTh label="On hand" sortKey="onHand" align="right" activeKey={sortKey} dir={sortDir} onSort={toggle} />
                 <SortTh label="Reserved" sortKey="reserved" align="right" activeKey={sortKey} dir={sortDir} onSort={toggle} />
                 <SortTh label="Available" sortKey="available" align="right" activeKey={sortKey} dir={sortDir} onSort={toggle} />
@@ -233,6 +255,9 @@ export default function WarehouseStockPage() {
                     {warehouseId === "all" && (
                       <td className="px-3 py-2.5 text-gray-600">{storeCode(r.warehouseId)}</td>
                     )}
+                    <td className="px-3 py-2.5 text-right text-gray-500 tabular-nums" title={r.budgetRate ? `Budget rate ${inr(r.budgetRate)}` : undefined}>
+                      {r.estimatedQuantity ? fmtQty(r.estimatedQuantity) : "—"}
+                    </td>
                     <td className={`px-3 py-2.5 text-right tabular-nums ${low ? "font-semibold text-amber-700" : "text-gray-800"}`}>
                       {fmtQty(r.onHand)}
                     </td>
@@ -314,8 +339,8 @@ export default function WarehouseStockPage() {
         <ReorderDialog
           row={tuning}
           onClose={() => setTuning(null)}
-          onSave={(reorderLevel, binLocation) => {
-            setStockSetting(tuning.warehouseId, tuning.item.id, { reorderLevel, binLocation }).catch(reportRefusal);
+          onSave={(reorderLevel, binLocation, estimatedQuantity, budgetRate) => {
+            setStockSetting(tuning.warehouseId, tuning.item.id, { reorderLevel, binLocation, estimatedQuantity, budgetRate }).catch(reportRefusal);
             setTuning(null);
           }}
         />
@@ -369,14 +394,28 @@ function ReorderDialog({
 }: {
   row: StockRow;
   onClose: () => void;
-  onSave: (reorderLevel: number, binLocation: string | null) => void;
+  onSave: (reorderLevel: number, binLocation: string | null, estimatedQuantity: number, budgetRate: number) => void;
 }) {
   const [level, setLevel] = useState(String(row.reorderLevel || ""));
   const [bin, setBin] = useState(row.binLocation ?? "");
+  const [estimated, setEstimated] = useState(String(row.estimatedQuantity || ""));
+  const [budget, setBudget] = useState(String(row.budgetRate || ""));
 
   return (
-    <Drawer title={`Stock settings · ${row.item.name}`} onClose={onClose} onSave={() => onSave(Number(level) || 0, bin.trim() || null)} saveLabel="Save" width="max-w-md">
+    <Drawer
+      title={`Stock settings · ${row.item.name}`}
+      onClose={onClose}
+      onSave={() => onSave(Number(level) || 0, bin.trim() || null, Number(estimated) || 0, Number(budget) || 0)}
+      saveLabel="Save"
+      width="max-w-md"
+    >
       <div className="space-y-4">
+        <DrawerField label="Estimated quantity" hint="The quantity budgeted for this site. Zero means no budget set.">
+          <input type="number" value={estimated} onChange={(e) => setEstimated(e.target.value)} className="input text-right" />
+        </DrawerField>
+        <DrawerField label="Budget rate" hint="The rate the estimate was budgeted at, per unit.">
+          <input type="number" value={budget} onChange={(e) => setBudget(e.target.value)} className="input text-right" />
+        </DrawerField>
         <DrawerField
           label="Reorder level"
           hint="Flags the item as running low at or below this. Zero turns the warning off."

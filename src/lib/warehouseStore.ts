@@ -81,6 +81,8 @@ function toSetting(s: api.ApiStockSetting): StockSetting {
     itemId: s.itemId,
     reorderLevel: s.reorderLevel ?? 0,
     binLocation: s.binLocation,
+    estimatedQuantity: s.estimatedQuantity ?? 0,
+    budgetRate: s.budgetRate ?? 0,
   };
 }
 
@@ -119,11 +121,19 @@ function toRequest(r: api.ApiMaterialRequest): MaterialRequest {
     decidedByUserId: strOrNull(r.decidedByUserId),
     decisionNote: r.decisionNote,
     note: r.note,
+    requestType: r.requestType ?? "ISSUE",
+    requestedByName: r.requestedByName,
     lines: r.lines.map((l) => ({
       id: String(l.id),
       itemId: l.itemId,
       quantity: l.quantity,
       issuedQuantity: l.issuedQuantity,
+      lineStatus: l.lineStatus,
+      orderedQuantity: l.orderedQuantity ?? 0,
+      poRefs: l.poRefs,
+      remark: l.remark,
+      statusNote: l.statusNote,
+      statusChangedOn: l.statusChangedOn,
     })),
   };
 }
@@ -300,6 +310,8 @@ export const useWarehouseStore = create<WarehouseState>()((set, get) => ({
       itemId,
       reorderLevel: patch.reorderLevel ?? existing?.reorderLevel ?? 0,
       binLocation: patch.binLocation ?? existing?.binLocation ?? null,
+      estimatedQuantity: patch.estimatedQuantity ?? existing?.estimatedQuantity ?? null,
+      budgetRate: patch.budgetRate ?? existing?.budgetRate ?? null,
     });
     await get().load();
   },
@@ -434,6 +446,8 @@ export function reservedByItem(requests: MaterialRequest[], warehouseId: string)
   for (const r of requests) {
     if (r.warehouseId !== warehouseId) continue;
     if (r.status !== "APPROVED" && r.status !== "PARTIAL") continue;
+    // A purchase request asks for something to be bought; it has no claim on what is on the shelf.
+    if (r.requestType === "PURCHASE") continue;
     for (const l of r.lines) {
       const pending = Math.max(0, l.quantity - l.issuedQuantity);
       if (pending > 0) out.set(l.itemId, (out.get(l.itemId) ?? 0) + pending);
@@ -503,6 +517,8 @@ export function emptyRequest(warehouseId: string, projectId: string | null): Mat
     warehouseId,
     projectId,
     requestedByUserId: null,
+    requestedByName: null,
+    requestType: "ISSUE",
     raisedOn: today(),
     neededBy: null,
     status: "PENDING",

@@ -397,6 +397,7 @@ export interface ProjectResponse {
   keyPersonnel: string | null;
   address: string | null;
   city: string | null;
+  state: string | null;
   companyBranch: string | null;
   startDate: string | null;
   endDate: string | null;

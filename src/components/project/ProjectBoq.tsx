@@ -153,11 +153,14 @@ function BoqSheet({
   const totals = useMemo(() => {
     let value = 0;
     let cost = 0;
+    let gst = 0;
     for (const i of boq.items) {
       value += i.qty * i.saleRate;
       cost += i.qty * i.costRate;
+      gst += (i.qty * i.saleRate * (i.gstPercent ?? 0)) / 100;
     }
-    return { value, cost, markup: value - cost, pct: value > 0 ? ((value - cost) / value) * 100 : 0 };
+    // Margin is on the pre-tax value: GST is collected for the government, not earned.
+    return { value, cost, gst, total: value + gst, markup: value - cost, pct: value > 0 ? ((value - cost) / value) * 100 : 0 };
   }, [boq.items]);
 
   async function act(fn: () => Promise<unknown>) {
@@ -181,7 +184,11 @@ function BoqSheet({
   return (
     <div className="animate-fade-in space-y-4">
       <header className="grid grid-cols-2 divide-x divide-gray-100 rounded-xl border border-gray-200 bg-white lg:grid-cols-4">
-        <Stat label="Contract value" value={inr(totals.value)} sub={`${boq.items.length} lines`} />
+        <Stat
+          label="Contract value"
+          value={inr(totals.total)}
+          sub={totals.gst > 0 ? `${inr(totals.value)} + GST ${inr(totals.gst)}` : `${boq.items.length} lines`}
+        />
         <Stat label="Budgeted cost" value={inr(totals.cost)} sub="carried from the bid" />
         <Stat label="Margin" value={inr(totals.markup)} sub={`${totals.pct.toFixed(1)}%`} />
         <Stat label="Titles" value={String(families.length)} sub="headings on this BOQ" />
@@ -208,6 +215,7 @@ function BoqSheet({
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-xs text-gray-400">
           {boq.title ?? "BOQ"} · {boq.boqNo ?? "—"}
+          {boq.clientName && ` · ${boq.clientName}`}
         </span>
         <button
           type="button"
@@ -217,6 +225,10 @@ function BoqSheet({
           <FolderPlus size={13} /> New title
         </button>
       </div>
+
+      {boq.notes && (
+        <p className="rounded-lg bg-gray-50 px-3 py-2 text-xs whitespace-pre-line text-gray-600">{boq.notes}</p>
+      )}
 
       {families.length === 0 ? (
         <div className="rounded-xl border border-dashed border-gray-300 bg-white px-6 py-12 text-center">
@@ -320,6 +332,7 @@ function BoqSheet({
                             <th className="px-3 py-2 text-right font-medium">Qty</th>
                             <th className="px-3 py-2 text-left font-medium">Unit</th>
                             <th className="px-3 py-2 text-right font-medium">Rate</th>
+                            <th className="px-3 py-2 text-right font-medium">GST</th>
                             <th className="px-3 py-2 text-right font-medium">Amount</th>
                             <th className="px-3 py-2 text-right font-medium">Cost</th>
                             <th className="w-10" />
@@ -349,6 +362,9 @@ function BoqSheet({
                                 </td>
                                 <td className="px-3 py-2 text-xs text-gray-500">{i.unit}</td>
                                 <td className="px-3 py-2 text-right tabular-nums text-gray-600">{inr(i.saleRate)}</td>
+                                <td className="px-3 py-2 text-right text-xs tabular-nums text-gray-500">
+                                  {i.gstPercent ? `${Number(i.gstPercent.toFixed(2))}%` : "—"}
+                                </td>
                                 <td className="px-3 py-2 text-right font-medium tabular-nums text-gray-800">
                                   {inr(amount)}
                                 </td>
@@ -391,7 +407,7 @@ function BoqSheet({
                         </tbody>
                         <tfoot>
                           <tr>
-                            <td colSpan={8} className="px-3 py-2">
+                            <td colSpan={9} className="px-3 py-2">
                               <button
                                 type="button"
                                 onClick={() => setAdding(f)}
@@ -408,6 +424,23 @@ function BoqSheet({
               </section>
             );
           })}
+        </div>
+      )}
+
+      {boq.items.length > 0 && (
+        <div className="ml-auto w-full max-w-sm rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm">
+          <div className="flex justify-between py-1 text-gray-600">
+            <span>Item sub total</span>
+            <span className="tabular-nums">{inr(totals.value)}</span>
+          </div>
+          <div className="flex justify-between py-1 text-gray-600">
+            <span>GST</span>
+            <span className="tabular-nums">{inr(totals.gst)}</span>
+          </div>
+          <div className="mt-1 flex justify-between border-t border-gray-100 pt-2 font-semibold text-gray-900">
+            <span>Total amount</span>
+            <span className="tabular-nums">{inr(totals.total)}</span>
+          </div>
         </div>
       )}
         </>
@@ -1203,6 +1236,7 @@ function AddLineModal({
   const [qty, setQty] = useState("");
   const [saleRate, setSaleRate] = useState("");
   const [costRate, setCostRate] = useState("");
+  const [gstPercent, setGstPercent] = useState("");
   const [saving, setSaving] = useState(false);
 
   const matches = useMemo(() => {
@@ -1370,6 +1404,16 @@ function AddLineModal({
               className="mt-1 w-full rounded-lg border border-gray-200 px-2.5 py-2 text-sm tabular-nums focus:border-brand-accent focus:outline-none"
             />
           </label>
+          <label className="col-span-2 block">
+            <span className="text-[10px] font-semibold tracking-wide text-gray-400 uppercase">GST %</span>
+            <input
+              value={gstPercent}
+              onChange={(e) => setGstPercent(e.target.value)}
+              inputMode="decimal"
+              placeholder="0"
+              className="mt-1 w-full rounded-lg border border-gray-200 px-2.5 py-2 text-sm tabular-nums focus:border-brand-accent focus:outline-none"
+            />
+          </label>
         </div>
 
         {Number(qty) > 0 && Number(saleRate) > 0 && (
@@ -1393,6 +1437,7 @@ function AddLineModal({
               unit: unit.trim() || "No",
               saleRate: Number(saleRate) || 0,
               costRate: Number(costRate) || 0,
+              gstPercent: Number(gstPercent) || 0,
             });
             setSaving(false);
           }}
@@ -1423,6 +1468,10 @@ function EditLineModal({
   const [unit, setUnit] = useState(item.unit);
   const [saleRate, setSaleRate] = useState(String(item.saleRate));
   const [costRate, setCostRate] = useState(String(item.costRate));
+  // Shown rounded ("18"); the stored value can be exact (17.9986…) to reproduce an imported amount
+  // to the paisa, so it is only sent when someone actually changes it.
+  const shownGst = String(Number((item.gstPercent ?? 0).toFixed(2)));
+  const [gstPercent, setGstPercent] = useState(shownGst);
   const [saving, setSaving] = useState(false);
 
   return (
@@ -1492,6 +1541,15 @@ function EditLineModal({
               className="mt-1 w-full rounded-lg border border-gray-200 px-2.5 py-2 text-sm tabular-nums focus:border-brand-accent focus:outline-none"
             />
           </label>
+          <label className="col-span-2 block">
+            <span className="text-[10px] font-semibold tracking-wide text-gray-400 uppercase">GST %</span>
+            <input
+              value={gstPercent}
+              onChange={(e) => setGstPercent(e.target.value)}
+              inputMode="decimal"
+              className="mt-1 w-full rounded-lg border border-gray-200 px-2.5 py-2 text-sm tabular-nums focus:border-brand-accent focus:outline-none"
+            />
+          </label>
         </div>
 
         <p className="text-[11px] text-gray-400">
@@ -1512,6 +1570,7 @@ function EditLineModal({
               unit: unit.trim() || "No",
               saleRate: Number(saleRate) || 0,
               costRate: Number(costRate) || 0,
+              gstPercent: gstPercent === shownGst ? undefined : Number(gstPercent) || 0,
             });
             setSaving(false);
           }}

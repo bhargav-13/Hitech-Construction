@@ -38,6 +38,8 @@ export interface ApiBoqItem {
   costRate: number;
   overheadRate: number;
   sourceLineId: number | null;
+  /** GST on the line, in percent. The amount (qty × rate) is pre-tax; the BOQ total adds GST on. */
+  gstPercent: number;
 }
 
 export interface ApiTargetAssignee {
@@ -137,6 +139,7 @@ export interface ApiProjectBoq {
   targets: ApiTarget[];
   createdAt: string;
   updatedAt: string;
+  notes: string | null;
 }
 
 // ---------------------------------------------------------------- the BOQ
@@ -204,6 +207,7 @@ export interface BoqItemUpsert {
   costRate?: number | null;
   overheadRate?: number | null;
   sourceLineId?: number | null;
+  gstPercent?: number | null;
   /** Create the target measuring this line at the same time. Defaults to true server-side. */
   withTarget?: boolean;
 }

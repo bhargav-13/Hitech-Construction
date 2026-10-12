@@ -116,3 +116,9 @@ export function bookDate(value: string | null | undefined): string {
   }
   return v;
 }
+
+/** A percentage as Onsite shows it: up to two decimals, no trailing zeros — 20.06%, 49%, 0.05%. */
+export function pct(value: number | null | undefined): string {
+  const n = Number(value);
+  return `${Number.isFinite(n) ? Number(n.toFixed(2)) : 0}%`;
+}

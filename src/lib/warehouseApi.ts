@@ -107,6 +107,9 @@ export interface ApiStockRow {
   binLocation: string | null;
   rate: number;
   value: number;
+  /** The site's budgeted quantity of the item (Onsite's "Estimated"). */
+  estimatedQuantity: number;
+  budgetRate: number;
 }
 
 export const getStock = (warehouseId?: number) =>
@@ -125,6 +128,8 @@ export interface ApiStockSetting {
   itemId: number;
   reorderLevel: number | null;
   binLocation: string | null;
+  estimatedQuantity: number | null;
+  budgetRate: number | null;
 }
 
 export const getStockSettings = (warehouseId?: number) =>
@@ -137,6 +142,8 @@ export const saveStockSetting = (body: {
   itemId: number;
   reorderLevel: number;
   binLocation: string | null;
+  estimatedQuantity?: number | null;
+  budgetRate?: number | null;
 }) => apiRequest<void>(`${BASE}/stock/settings`, { method: "PUT", body });
 
 // ---------------------------------------------------------------- movements
@@ -218,7 +225,13 @@ export type ApiRequestStatus =
   | "APPROVED"
   | "PARTIAL"
   | "ISSUED"
-  | "REJECTED";
+  | "REJECTED"
+  // purchase requests: fulfilled by purchase orders rather than by issuing from the store
+  | "PART_ORDERED"
+  | "ORDERED";
+
+/** ISSUE asks the store for what it holds (and reserves it once approved); PURCHASE asks for it to be bought. */
+export type ApiRequestType = "ISSUE" | "PURCHASE";
 
 export interface ApiRequestLine {
   id: number;
@@ -229,6 +242,15 @@ export interface ApiRequestLine {
   issuedQuantity: number;
   /** What the store holds right now, so a decision can be made without leaving the screen. */
   onHand: number;
+  /** The line's own state on a purchase request: APPROVED / ORDERED / REJECTED. */
+  lineStatus: string | null;
+  /** How much has been put on purchase orders (purchase requests). */
+  orderedQuantity: number;
+  /** The purchase orders it went on, e.g. "PO/JKC/-4 (980)". */
+  poRefs: string | null;
+  remark: string | null;
+  statusNote: string | null;
+  statusChangedOn: string | null;
 }
 
 export interface ApiMaterialRequest {
@@ -247,6 +269,7 @@ export interface ApiMaterialRequest {
   decisionNote: string | null;
   note: string | null;
   lines: ApiRequestLine[];
+  requestType: ApiRequestType;
 }
 
 export interface ApiMaterialRequestInput {
@@ -255,6 +278,7 @@ export interface ApiMaterialRequestInput {
   neededBy: string | null;
   note: string | null;
   lines: { itemId: number; quantity: number }[];
+  requestType?: ApiRequestType;
 }
 
 export const getRequests = (warehouseId?: number) =>

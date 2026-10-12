@@ -221,6 +221,8 @@ export interface Invoice {
   lines: InvoiceLine[];
   /** Prices were entered "With Tax" — the form reopens in that mode. Absent on older backends. */
   priceIncludesTax?: boolean;
+  /** When the document was created (IST). Lists default to newest-created first. Absent on older backends. */
+  createdAt?: string | null;
 }
 
 export interface Payment {
