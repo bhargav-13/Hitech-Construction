@@ -435,8 +435,8 @@ export default function ItemsPage() {
           />
         ) : (
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-[320px_minmax(0,1fr)]">
-            {/* Master list */}
-            <div className="overflow-hidden rounded-xl border border-gray-200 bg-white">
+            {/* Master list — kept in view and sized to the screen while the item's ledger scrolls. */}
+            <div className="overflow-hidden rounded-xl border border-gray-200 bg-white lg:sticky lg:top-0 lg:flex lg:max-h-[calc(100dvh-7.5rem)] lg:flex-col lg:self-start">
               <div className="space-y-2 border-b border-gray-100 p-3">
                 <div className="flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 transition-colors duration-150 focus-within:border-cyan-500">
                   <Search size={15} className="text-gray-400" />
@@ -504,7 +504,7 @@ export default function ItemsPage() {
                 )}
               </div>
 
-              <div className="max-h-[560px] overflow-y-auto">
+              <div className="max-h-[560px] overflow-y-auto lg:max-h-none lg:min-h-0 lg:flex-1">
                 {filtered.map((i) => {
                   const active = i.id === selectedId;
                   return (

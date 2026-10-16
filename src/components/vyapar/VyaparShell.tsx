@@ -81,9 +81,11 @@ export function VyaparShell({ children }: { children: React.ReactNode }) {
   return (
     <AppShell title="Vyapar">
       <div className="animate-fade-in flex min-h-[calc(100vh-140px)] gap-4">
-        {/* Vyapar's left rail */}
+        {/* Vyapar's left rail. It sizes to its menu and stays in view while a long page scrolls
+            (sticky inside AppShell's scrolling <main>) — stretched to the page's height it became an
+            empty white column below the menu on every long ledger or list. */}
         <aside
-          className={`hidden shrink-0 rounded-xl border border-gray-200 bg-white p-2 transition-[width] duration-200 lg:block ${
+          className={`hidden shrink-0 self-start rounded-xl border border-gray-200 bg-white p-2 transition-[width] duration-200 lg:sticky lg:top-0 lg:block lg:max-h-[calc(100dvh-7.5rem)] lg:overflow-y-auto ${
             railCollapsed ? "w-14" : "w-56"
           }`}
         >

@@ -86,7 +86,7 @@ export default function VyaparSettingsPage() {
 
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-[200px_minmax(0,1fr)]">
           {/* Tab rail */}
-          <nav className="h-fit overflow-hidden rounded-xl border border-gray-200 bg-white p-1.5">
+          <nav className="h-fit overflow-hidden rounded-xl border border-gray-200 bg-white p-1.5 lg:sticky lg:top-0">
             {TABS.map((t) => (
               <button
                 key={t}

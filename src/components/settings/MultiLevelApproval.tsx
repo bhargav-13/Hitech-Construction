@@ -107,8 +107,8 @@ export function MultiLevelApproval() {
 
   return (
     <div className="grid gap-4 lg:grid-cols-[220px_minmax(0,1fr)]">
-      {/* Record types */}
-      <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+      {/* Record types — kept in view while a long chain editor scrolls. */}
+      <div className="overflow-hidden rounded-xl border border-slate-200 bg-white lg:sticky lg:top-0 lg:max-h-[calc(100dvh-7.5rem)] lg:self-start lg:overflow-y-auto">
         <ul className="divide-y divide-slate-100">
           {chains.map((c) => (
             <li key={c.entityType}>

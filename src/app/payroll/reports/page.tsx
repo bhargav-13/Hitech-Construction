@@ -125,7 +125,7 @@ export default function ReportsPage() {
           <CustomReport data={data} onPreview={(r) => setPreview({ name: "Custom report", report: r })} onDownload={(r, mode) => download(r, mode, "custom-report")} />
         ) : (
           <div className="grid gap-4 lg:grid-cols-[220px_1fr]">
-            <nav className="space-y-0.5 rounded-xl border border-gray-200 bg-white p-2">
+            <nav className="space-y-0.5 rounded-xl border border-gray-200 bg-white p-2 lg:sticky lg:top-0 lg:max-h-[calc(100dvh-7.5rem)] lg:self-start lg:overflow-y-auto">
               <RailItem active={view === "home"} onClick={() => setView("home")} icon={Home} label="Home" count={REPORT_COUNT} />
               <RailItem active={view === "bookmarked"} onClick={() => setView("bookmarked")} icon={Bookmark} label="Bookmarked" count={bookmarks.length} />
               <div className="px-2 pb-1 pt-3 text-[10px] font-semibold uppercase tracking-wide text-gray-400">Categories</div>
