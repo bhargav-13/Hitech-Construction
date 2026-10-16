@@ -292,6 +292,13 @@ export const getDashboard = (projectId?: number) =>
  */
 export const getParties = (type?: PartyType, projectId?: number, own?: boolean) =>
   apiRequest<Party[]>(`${BASE}/parties${qs({ type, projectId, own: own ? "true" : undefined })}`);
+/** Parties added to a project's directory (Onsite's project party members) — listed there even at ₹0. */
+export const getProjectPartyMembers = (projectId: number) =>
+  apiRequest<number[]>(`${BASE}/projects/${projectId}/party-members`);
+export const addPartyToProject = (projectId: number, partyId: number) =>
+  apiRequest<void>(`${BASE}/projects/${projectId}/party-members/${partyId}`, { method: "POST" });
+export const removePartyFromProject = (projectId: number, partyId: number) =>
+  apiRequest<void>(`${BASE}/projects/${projectId}/party-members/${partyId}`, { method: "DELETE" });
 export const createParty = (body: Partial<Party>) =>
   apiRequest<Party>(`${BASE}/parties`, { method: "POST", body });
 export const updateParty = (id: number, body: Partial<Party>) =>
