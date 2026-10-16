@@ -159,7 +159,9 @@ export function ProjectParties({ projectId }: { projectId: number }) {
                 <tr key={p.id} className="border-t border-slate-100 hover:bg-slate-50/60">
                   <td className="px-4 py-2.5">
                     <Link
-                      href={`/vyapar/parties?party=${p.id}`}
+                      // The Parties page opens the party named by ?open= (as reports and payroll link
+                      // it); ?party= was ignored, so it showed the first party in the list instead.
+                      href={`/vyapar/parties?open=${p.id}`}
                       className="font-medium text-slate-800 hover:text-brand-accent"
                     >
                       {p.name}
