@@ -14,6 +14,7 @@ export const NAV_ITEMS: NavItem[] = [
   { label: "Payroll", href: "/payroll" },
   { label: "Warehouse", href: "/warehouse" },
   { label: "Asset", href: "/asset" },
+  { label: "Equipment", href: "/equipment" },
   { label: "Audit", href: "/audit" },
   // Everyone has an inbox — it only ever shows requests waiting on (or raised by) you.
   { label: "Approvals", href: "/approvals" },
@@ -24,12 +25,11 @@ export const NAV_ITEMS: NavItem[] = [
   // { label: "Team Schedule", href: "/team-schedule" },
   // { label: "Finance", href: "/finance" },
   // { label: "CRM", href: "/crm" },
-  // { label: "Equipment", href: "/equipment" },
   // { label: "Services", href: "/services" },
 ];
 
 // Insert a visual gap in the sidebar after these items, matching Onsite's grouping.
-export const NAV_BREAK_AFTER = new Set(["Report", "Team Schedule", "Payroll", "Asset", "Audit"]);
+export const NAV_BREAK_AFTER = new Set(["Report", "Team Schedule", "Payroll", "Equipment", "Audit"]);
 
 // Maps each nav route to its backend module code. A sidebar item is only shown when the signed-in
 // user's role carries "<MODULE>:VIEW" — so e.g. a user without DASHBOARD:VIEW never sees Dashboard.

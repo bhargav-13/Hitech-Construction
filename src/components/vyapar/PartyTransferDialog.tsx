@@ -6,6 +6,7 @@ import { Drawer, DrawerField } from "@/components/Drawer";
 import { Select } from "@/components/Select";
 import { DatePicker } from "@/components/DatePicker";
 import { PartyDialog } from "@/components/vyapar/PartyDialog";
+import { ModuleAttachments } from "@/components/files/ModuleAttachments";
 import { useVyaparProjectId } from "@/lib/projectScope";
 import { inr } from "@/lib/format";
 import * as vyapar from "@/lib/vyaparApi";
@@ -175,6 +176,21 @@ export function PartyTransferDialog({
             className="input resize-none"
           />
         </DrawerField>
+
+        {/* The proof behind the transfer — a payment screenshot, a signed note. A new transfer has no
+            id to attach to yet, so this appears once it is saved. */}
+        {existing?.id ? (
+          <div>
+            <ModuleAttachments
+              module="VYAPAR"
+              type="PARTY_TRANSFER"
+              sourceId={existing.id}
+              projectId={existing.projectId ?? null}
+              label={`Party transfer ${existing.invoiceNo ?? ""}`.trim()}
+              party={existing.partyName ?? undefined}
+            />
+          </div>
+        ) : null}
       </div>
 
       {creating && (

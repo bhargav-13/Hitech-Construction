@@ -12,9 +12,11 @@ import { useProjects } from "@/lib/useProjects";
 import { GST_TYPES, STATES_OF_SUPPLY } from "@/lib/vyaparApi";
 import type { Party } from "@/lib/vyaparApi";
 import { usePartySettings } from "@/lib/usePartySettings";
+import { ModuleAttachments } from "@/components/files/ModuleAttachments";
 import { Info } from "lucide-react";
 
-const TABS = ["GST & Address", "Credit & Balance", "Additional Fields"] as const;
+// "Documents" only appears once the party exists: an attachment needs the party's id.
+const TABS = ["GST & Address", "Credit & Balance", "Additional Fields", "Documents"] as const;
 type Tab = (typeof TABS)[number];
 
 /**
@@ -199,7 +201,7 @@ export function PartyDialog({
 
         {/* Tabs */}
         <div className="flex gap-5 border-b border-gray-200">
-          {TABS.map((t) => (
+          {TABS.filter((t) => t !== "Documents" || existing?.id).map((t) => (
             <button
               key={t}
               onClick={() => setTab(t)}
@@ -370,6 +372,14 @@ export function PartyDialog({
                 No additional fields enabled yet — turn them on in Party Settings.
               </div>
             )}
+          </div>
+        )}
+
+        {tab === "Documents" && existing?.id && (
+          <div className="animate-fade-in max-w-xl space-y-2">
+            <p className="text-xs text-gray-500">KYC copies, GST certificate, cancelled cheque — kept with the party.</p>
+            {/* Its own module: under VYAPAR these would also show on the bill that shares this id. */}
+            <ModuleAttachments module="PARTY" type="PARTY" sourceId={existing.id} projectId={null} label={existing.name} party={existing.name} />
           </div>
         )}
 

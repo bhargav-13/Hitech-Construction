@@ -25,7 +25,7 @@ export type NodeKind = "FOLDER" | "FILE";
 export type Visibility = "ALL" | "MANAGERS_ONLY";
 
 /** Which module a file came from, when it wasn't a plain upload. */
-export type SourceModule = "VYAPAR" | "TASK" | "TENDER" | "PROCUREMENT" | "WAREHOUSE" | "PAYROLL";
+export type SourceModule = "VYAPAR" | "TASK" | "TENDER" | "PROCUREMENT" | "WAREHOUSE" | "PAYROLL" | "PARTY";
 
 export interface FileNode {
   /** Null for a module's file, which lives in the registry but not in anyone's folder tree. */
