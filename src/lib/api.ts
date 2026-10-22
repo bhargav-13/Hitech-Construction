@@ -962,6 +962,79 @@ export function updateLocation(id: number, body: LocationRequestApi) {
 export function deleteLocation(id: number) {
   return request<void>(`/api/v1/payroll/locations/${id}`, { method: "DELETE" });
 }
+
+// ---- Live staff location (backend V91/V92) ----
+
+/** What the phone last said about tracking. */
+export type TrackingState = "TRACKING" | "STOPPED" | "PERMISSION_DENIED" | "PERMISSION_FOREGROUND_ONLY" | "LOCATION_OFF";
+
+/** One person on the live map. Times are zone-less IST — read them through lib/datetime. */
+export interface LiveLocationApi {
+  userId: number;
+  name: string;
+  lat: number | null;
+  lng: number | null;
+  accuracy: number | null;
+  battery: number | null;
+  recordedAt: string | null;
+  punchedIn: boolean;
+  inTime: string | null;
+  outTime: string | null;
+  trackingEnabled: boolean;
+  trackingState: TrackingState | null;
+  stateAt: string | null;
+  /** Punched in with tracking on, but nothing heard for 15+ minutes. */
+  stale: boolean;
+}
+export interface TrailPointApi {
+  lat: number;
+  lng: number;
+  accuracy: number | null;
+  battery: number | null;
+  recordedAt: string;
+}
+/** One person on the Tracking tab: the admin's Yes/No and how their phone is doing. */
+export interface TrackingPersonApi {
+  userId: number;
+  name: string;
+  enabled: boolean;
+  deviceLinked: boolean;
+  deviceLastUsedAt: string | null;
+  lastSeenAt: string | null;
+  trackingState: TrackingState | null;
+}
+export interface LocationSettingsApi {
+  /** PUNCH = punch-in to punch-out; ALWAYS = whenever tracking is Yes. */
+  mode: "PUNCH" | "ALWAYS";
+  intervalSec: number;
+  distanceFilterM: number;
+  maxHours: number;
+}
+
+export function getLiveLocations() {
+  return request<LiveLocationApi[]>("/api/v1/payroll/attendance/live-locations");
+}
+export function getLocationTrail(userId: number, date: string) {
+  return request<TrailPointApi[]>(`/api/v1/payroll/attendance/location-trail/${userId}?date=${date}`);
+}
+export function getLocationTracking() {
+  return request<TrackingPersonApi[]>("/api/v1/payroll/attendance/location-tracking");
+}
+export function setLocationTracking(userIds: number[], enabled: boolean) {
+  return request<TrackingPersonApi[]>("/api/v1/payroll/attendance/location-tracking", {
+    method: "PUT",
+    body: { userIds, enabled },
+  });
+}
+export function unlinkTrackingDevice(userId: number) {
+  return request<void>(`/api/v1/payroll/attendance/location-tracking/${userId}/device`, { method: "DELETE" });
+}
+export function getLocationSettings() {
+  return request<LocationSettingsApi>("/api/v1/payroll/attendance/location-settings");
+}
+export function saveLocationSettings(body: LocationSettingsApi) {
+  return request<LocationSettingsApi>("/api/v1/payroll/attendance/location-settings", { method: "PUT", body });
+}
 /** Admin housekeeping — clear all attendance rows in a date range (e.g. to reset before a test). */
 export function clearAttendanceRange(from: string, to: string) {
   return request<void>(`/api/v1/payroll/attendance/range?from=${from}&to=${to}`, { method: "DELETE" });

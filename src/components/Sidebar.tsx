@@ -23,6 +23,7 @@ import {
   ScrollText,
   Receipt,
   MapPin,
+  LocateFixed,
   PanelLeftClose,
   PanelLeftOpen,
   LogOut,
@@ -47,6 +48,7 @@ const ICONS: Record<string, React.ComponentType<{ size?: number; className?: str
   "Team Schedule": CalendarCheck,
   Finance: Wallet,
   Payroll: CreditCard,
+  "Live Map": LocateFixed,
   CRM: Contact,
   Procurement: ClipboardList,
   Warehouse: Warehouse,
@@ -87,6 +89,11 @@ export function Sidebar() {
         return !module || perms.includes(`${module}:VIEW`);
       })
     : NAV_ITEMS;
+  // The one item to highlight: the longest href the path starts with, so /payroll/live lights up
+  // Live Map and not Payroll as well.
+  const activeHref = navItems
+    .filter((item) => (item.href === "/" ? pathname === "/" : pathname.startsWith(item.href)))
+    .reduce<string | null>((best, item) => (!best || item.href.length > best.length ? item.href : best), null);
   // Unread task-notification count, surfaced as a live badge on the Taskopad nav item.
   const { unread: taskUnread } = useNotifications();
   // Requests waiting on this user, across every approval chain.
@@ -142,8 +149,7 @@ export function Sidebar() {
         <ul className="space-y-1">
           {navItems.flatMap((item, idx) => {
             const Icon = ICONS[item.label] ?? LayoutGrid;
-            const active =
-              item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);
+            const active = item.href === activeHref;
             // Live unread count on Taskopad (task reminders / assignments / activity).
             const count = item.href === "/taskopad" ? taskUnread : item.href === "/approvals" ? approvalCount : 0;
             const link = (
@@ -178,7 +184,9 @@ export function Sidebar() {
                 </Link>
               </li>
             );
-            if (NAV_BREAK_AFTER.has(item.label) && idx < navItems.length - 1) {
+            const next = navItems[idx + 1];
+            const nextInGroup = !!next && next.href.startsWith(`${item.href}/`);
+            if (NAV_BREAK_AFTER.has(item.label) && next && !nextInGroup) {
               return [
                 link,
                 <li key={`${item.href}-divider`} aria-hidden className="my-2 border-t border-sidebar-border" />,

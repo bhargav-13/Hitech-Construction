@@ -25,6 +25,8 @@ export const PAYROLL_NAV: PayrollNavNode[] = [
   { label: "Locations", href: "/payroll/locations", feature: "PAYROLL_SETUP", icon: "pin" },
   // Combined Day + Month view (formerly two pages).
   { label: "Attendance", href: "/payroll/attendance", feature: "PAYROLL_ATTENDANCE", icon: "calendar" },
+  // Where staff are now (from the mobile app's background tracker), and who is tracked.
+  { label: "Live Map", href: "/payroll/live", feature: "PAYROLL_LIVE_LOCATION", icon: "live" },
   // All Requests + Approval Queue are now tabs on one page.
   { label: "Leave", href: "/payroll/leave", feature: "PAYROLL_LEAVE", icon: "calendar" },
   { label: "Payroll", href: "/payroll/run", feature: "PAYROLL_RUN", icon: "wallet" },

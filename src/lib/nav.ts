@@ -12,6 +12,8 @@ export const NAV_ITEMS: NavItem[] = [
   { label: "Vyapar", href: "/vyapar" },
   { label: "Procurement", href: "/procurement" },
   { label: "Payroll", href: "/payroll" },
+  // A shortcut into Payroll for the people who watch the map all day; gated on its own feature.
+  { label: "Live Map", href: "/payroll/live" },
   { label: "Warehouse", href: "/warehouse" },
   { label: "Asset", href: "/asset" },
   { label: "Equipment", href: "/equipment" },
@@ -28,8 +30,9 @@ export const NAV_ITEMS: NavItem[] = [
   // { label: "Services", href: "/services" },
 ];
 
-// Insert a visual gap in the sidebar after these items, matching Onsite's grouping.
-export const NAV_BREAK_AFTER = new Set(["Report", "Team Schedule", "Payroll", "Equipment", "Audit"]);
+// Insert a visual gap in the sidebar after these items, matching Onsite's grouping. A module's own
+// shortcut (Live Map under Payroll) stays inside its group: the gap moves below the shortcut.
+export const NAV_BREAK_AFTER = new Set(["Report", "Team Schedule", "Payroll", "Live Map", "Equipment", "Audit"]);
 
 // Maps each nav route to its backend module code. A sidebar item is only shown when the signed-in
 // user's role carries "<MODULE>:VIEW" — so e.g. a user without DASHBOARD:VIEW never sees Dashboard.
@@ -44,6 +47,7 @@ export const NAV_MODULE: Record<string, string> = {
   "/team-schedule": "TEAM_SCHEDULE",
   "/finance": "FINANCE",
   "/payroll": "PAYROLL",
+  "/payroll/live": "PAYROLL_LIVE_LOCATION",
   "/crm": "CRM",
   "/procurement": "PROCUREMENT",
   "/warehouse": "WAREHOUSE",
