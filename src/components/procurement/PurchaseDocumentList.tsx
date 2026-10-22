@@ -83,6 +83,14 @@ export function PurchaseDocumentList({
   // would get through — the whole reason these screens exist is that most buyers would not.
   const canOpenVyapar = (useAuthStore((s) => s.user?.permissions) ?? []).includes("VYAPAR:VIEW");
 
+  // `?open=<id>` opens that document once the list arrives — the comparison's "On PO" links land
+  // here. Read from the URL directly so the pages using this list need no Suspense boundary, and
+  // derived rather than copied into state, so it shows the moment the row loads.
+  const [wanted, setWanted] = useState(() =>
+    typeof window === "undefined" ? null : Number(new URLSearchParams(window.location.search).get("open")) || null,
+  );
+  const shown = open ?? (wanted != null ? (rows.find((r) => r.id === wanted) ?? null) : null);
+
   const statuses = useMemo(
     () => [...new Set(rows.map((r) => r.status).filter(Boolean))].sort() as string[],
     [rows],
@@ -341,13 +349,16 @@ export function PurchaseDocumentList({
         </div>
       )}
 
-      {open && (
+      {shown && (
         <PurchaseDocumentDrawer
-          documentId={open.id}
-          fallback={open}
+          documentId={shown.id}
+          fallback={shown}
           noun={noun}
           canOpenVyapar={canOpenVyapar}
-          onClose={() => setOpen(null)}
+          onClose={() => {
+            setOpen(null);
+            setWanted(null);
+          }}
         />
       )}
     </div>

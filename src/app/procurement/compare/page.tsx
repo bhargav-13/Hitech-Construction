@@ -2,8 +2,22 @@
 
 import { Suspense, useMemo, useState } from "react";
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
-import { AlertTriangle, ArrowLeft, ArrowRight, Check, Crown, FileDown, Pencil, Scale, Unlock, UserCheck, Zap } from "lucide-react";
+import { useSearchParams } from "next/navigation";
+import {
+  AlertTriangle,
+  ArrowLeft,
+  ArrowRight,
+  Check,
+  Crown,
+  FileDown,
+  FileText,
+  Pencil,
+  Plus,
+  Scale,
+  Unlock,
+  UserCheck,
+  Zap,
+} from "lucide-react";
 import { ProcurementShell, ProcurementEmpty, ProcurementHeader } from "@/components/procurement/ProcurementShell";
 import { Spinner } from "@/components/Spinner";
 import { RfqAiAnalysis } from "@/components/procurement/RfqAiAnalysis";
@@ -12,9 +26,7 @@ import { useRfqs } from "@/lib/useRfqs";
 import { useAuthStore } from "@/lib/authStore";
 import { downloadPdf } from "@/lib/vyaparExport";
 import { inr } from "@/lib/format";
-import { gstCodeForPercent } from "@/lib/gstRates";
-import { stashPoDraft, vyaparUnit, type PoDraft } from "@/lib/poHandoff";
-import type { Rfq, Quote } from "@/lib/procurementApi";
+import type { Rfq, Quote, RaisedPo } from "@/lib/procurementApi";
 
 /**
  * Comparative statement — the screen the whole module exists for.
@@ -25,7 +37,8 @@ import type { Rfq, Quote } from "@/lib/procurementApi";
  *
  * The decision it supports is per line, not per enquiry. A five-line RFQ routinely ends up split
  * across three suppliers — cheapest cement here, fastest steel there — so every row carries its own
- * winner. Awarding then produces one purchase order per winning vendor.
+ * winner. Awarding then produces one purchase order per winning vendor, raised from here in one
+ * click.
  *
  * Four judgements are deliberate:
  *
@@ -139,7 +152,7 @@ function RfqLinks({ rfqId }: { rfqId?: number }) {
 }
 
 function Compare() {
-  const { rfqs, loading, error, award, unlock } = useRfqs();
+  const { rfqs, loading, error, award, unlock, raisePo } = useRfqs();
   const params = useSearchParams();
   const asked = Number(params?.get("rfq")) || null;
 
@@ -205,7 +218,7 @@ function Compare() {
         }
       />
       <RfqAiAnalysis key={`ai-${rfq.id}`} rfq={rfq} onAward={award} />
-      <Matrix key={rfq.id} rfq={rfq} onAward={award} onUnlock={unlock} />
+      <Matrix key={rfq.id} rfq={rfq} onAward={award} onUnlock={unlock} onRaisePo={raisePo} />
     </ProcurementShell>
   );
 }
@@ -229,15 +242,19 @@ function Matrix({
   rfq,
   onAward,
   onUnlock,
+  onRaisePo,
 }: {
   rfq: Rfq;
   onAward: (rfqId: number, lineId: number, vendorPartyId: number | null, reason?: string) => void;
   onUnlock: (rfqId: number, quoteId: number) => void;
+  onRaisePo: (rfqId: number, vendorPartyId: number) => Promise<RaisedPo>;
 }) {
-  const router = useRouter();
-  // Raising a PO writes a Vyapar purchase document, so it needs Vyapar Purchases create. Reading the orders afterwards
-  // does not — that lives on Procurement's own Purchase Orders screen.
-  const canRaisePo = (useAuthStore((s) => s.user?.permissions) ?? []).includes("VYAPAR_PURCHASE_ORDER:CREATE");
+  // Ordering is part of the award, so it needs the same right as awarding — not Vyapar access,
+  // which most buyers do not hold. The order still runs the Purchase Order approval chain.
+  const canRaisePo = (useAuthStore((s) => s.user?.permissions) ?? []).includes("PROCUREMENT_RFQ:EDIT");
+  /** Vendors whose order is being written right now — a second click must not raise a second PO. */
+  const [raising, setRaising] = useState<Set<number>>(new Set());
+  const [poError, setPoError] = useState("");
   const totals = useMemo(() => rfq.quotes.map((q) => quoteTotals(rfq, q)), [rfq]);
 
   /** Focus one vendor's column. Twelve columns is a wall; one at a time is a comparison. */
@@ -319,97 +336,64 @@ function Matrix({
   /**
    * Awarding produces one purchase order per winning vendor.
    *
-   * Keyed by party id rather than name, and carrying the quote and the won lines, because this is
-   * what gets handed to Vyapar: the PO needs the vendor's id, their rate on each line and their
-   * tax rate, not a label to print.
+   * Only lines not yet on an order count here — those are what the next click will order. Keyed by
+   * party id, because that is what the server orders against.
    */
-  const byVendor = useMemo(() => {
-    const map = new Map<
-      number,
-      { name: string; quote: Quote | undefined; won: { line: Rfq["lines"][number]; rate: number }[]; value: number }
-    >();
+  const toOrder = useMemo(() => {
+    const map = new Map<number, { name: string; lines: number; value: number }>();
     rfq.lines.forEach((line) => {
       const vendorId = line.awardedVendorPartyId;
-      if (vendorId == null) return;
+      if (vendorId == null || line.poInvoiceId != null) return;
       const q = rfq.quotes.find((x) => x.vendorPartyId === vendorId);
       const rate = q?.lines.find((c) => c.rfqLineId === line.id)?.rate ?? 0;
-      const cur = map.get(vendorId) ?? {
-        name: line.awardedVendorName ?? q?.vendorName ?? "Vendor",
-        quote: q,
-        won: [],
-        value: 0,
-      };
-      cur.won.push({ line, rate });
+      const cur = map.get(vendorId) ?? { name: line.awardedVendorName ?? q?.vendorName ?? "Vendor", lines: 0, value: 0 };
+      cur.lines += 1;
       cur.value += rate * line.quantity;
       map.set(vendorId, cur);
     });
     return [...map.entries()];
   }, [rfq]);
 
-  /**
-   * Hand one vendor's award to Vyapar's purchase-order form, filled in.
-   *
-   * Everything below is already known by the time a line is awarded, and re-keying it off the
-   * screen you just left is where a rate gets typed wrong. The buyer still reviews and saves — this
-   * fills the form, it does not raise the order.
-   */
-  function raisePo(vendorPartyId: number, v: (typeof byVendor)[number][1]) {
-    const q = v.quote;
-    // A whole-quote discount or freight figure was quoted against the whole order. If this vendor
-    // only won part of it, applying those numbers unchanged would understate what we owe, so they
-    // are carried only on a clean sweep and otherwise handed over as a note for the buyer to judge.
-    const quotedLines = q?.lines.filter((l) => l.rate != null).length ?? 0;
-    const sweep = quotedLines > 0 && v.won.length === quotedLines;
-    const taxCode = gstCodeForPercent(q?.taxPercent);
+  /** Orders already raised from this enquiry, one entry per PO, read off the lines themselves. */
+  const ordered = useMemo(() => {
+    const map = new Map<number, { poNumber: string | null; vendor: string; lines: number }>();
+    rfq.lines.forEach((line) => {
+      if (line.poInvoiceId == null) return;
+      const cur = map.get(line.poInvoiceId) ?? {
+        poNumber: line.poNumber,
+        vendor: line.awardedVendorName ?? "Vendor",
+        lines: 0,
+      };
+      cur.lines += 1;
+      map.set(line.poInvoiceId, cur);
+    });
+    return [...map.entries()];
+  }, [rfq]);
 
-    const lines: PoDraft["lines"] = v.won.map(({ line, rate }) => ({
-      itemId: line.itemId,
-      itemName: line.itemName,
-      description: line.specification ?? "",
-      unit: vyaparUnit(line.unit),
-      quantity: line.quantity,
-      rate,
-      taxCode,
-    }));
-    if (sweep && q?.charges) {
-      // Freight is real money on the order, so it goes in as a line rather than a footnote —
-      // otherwise the PO total stops matching the quote that was accepted.
-      lines.push({
-        itemId: null,
-        itemName: "Freight / other charges",
-        description: `As quoted on ${rfq.rfqNo}`,
-        unit: "NONE",
-        quantity: 1,
-        rate: q.charges,
-        taxCode: "NONE",
+  /**
+   * Raise one vendor's order, straight into the books. No form, no trip into Vyapar: vendor,
+   * project, items, quantities, rates and tax are all settled by the award already.
+   */
+  async function raisePo(vendorPartyId: number) {
+    if (raising.has(vendorPartyId)) return;
+    setRaising((prev) => new Set(prev).add(vendorPartyId));
+    setPoError("");
+    try {
+      await onRaisePo(rfq.id, vendorPartyId);
+    } catch (err) {
+      setPoError(err instanceof Error ? err.message : "Couldn't raise that purchase order.");
+    } finally {
+      setRaising((prev) => {
+        const next = new Set(prev);
+        next.delete(vendorPartyId);
+        return next;
       });
     }
+  }
 
-    const notes = [
-      `Awarded from ${rfq.rfqNo} — ${rfq.title}.`,
-      q?.receivedOn ? `Quote v${q.version} received ${q.receivedOn}.` : null,
-      ...v.won.filter((w) => w.line.awardReason).map((w) => `${w.line.itemName}: ${w.line.awardReason}`),
-      !sweep && q?.discount ? `Vendor quoted a ${inr(q.discount)} discount on the full order.` : null,
-      !sweep && q?.charges ? `Vendor quoted ${inr(q.charges)} freight on the full order.` : null,
-      q?.note ? `Vendor note: ${q.note}` : null,
-    ]
-      .filter(Boolean)
-      .join("\n");
-
-    stashPoDraft({
-      rfqId: rfq.id,
-      rfqNo: rfq.rfqNo,
-      partyId: vendorPartyId,
-      partyName: v.name,
-      projectId: rfq.projectId,
-      orderDate: new Date().toISOString().slice(0, 10),
-      deliveryDate: rfq.deliveryDate,
-      terms: rfq.terms,
-      notes,
-      discountAmount: sweep ? (q?.discount ?? 0) : 0,
-      lines,
-    });
-    router.push("/vyapar/purchase-order?new=1&from=rfq");
+  /** One click for every vendor still to be ordered from. Sequential, so each gets its own number in turn. */
+  async function raiseAll() {
+    for (const [vendorPartyId] of toOrder) await raisePo(vendorPartyId);
   }
 
   function awardAllCheapest() {
@@ -613,12 +597,23 @@ function Matrix({
                         size="sm"
                         placeholder="Not decided"
                         className="w-full"
+                        // Ordered is committed: moving the line would leave a live PO behind it.
+                        disabled={line.poInvoiceId != null}
                         options={[
                           { value: "", label: "Not decided" },
                           ...offers.map((o) => ({ value: String(o.vendorPartyId), label: o.vendorName })),
                         ]}
                       />
                     </div>
+                    {line.poInvoiceId != null && (
+                      <Link
+                        href={`/procurement/purchase-order?open=${line.poInvoiceId}`}
+                        title="Already ordered — cancel or delete this PO to change the award"
+                        className="mt-1.5 inline-flex items-center gap-1 rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-800 hover:bg-emerald-200"
+                      >
+                        <FileText size={10} /> On PO {line.poNumber ?? ""}
+                      </Link>
+                    )}
                     {line.awardedVendorPartyId != null && (
                       <input
                         defaultValue={line.awardReason ?? ""}
@@ -776,40 +771,74 @@ function Matrix({
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            {byVendor.length === 0 ? (
-              <span className="text-sm text-gray-400">Decide at least one line to award.</span>
-            ) : (
+            {toOrder.length > 0 ? (
               <span className="text-sm text-gray-500">
-                {byVendor.length} purchase order{byVendor.length > 1 ? "s" : ""} to raise
+                {toOrder.length} purchase order{toOrder.length > 1 ? "s" : ""} to raise
               </span>
+            ) : ordered.length > 0 ? (
+              <span className="text-sm text-emerald-700">Every awarded line is on a purchase order.</span>
+            ) : (
+              <span className="text-sm text-gray-400">Decide at least one line to award.</span>
+            )}
+            {canRaisePo && toOrder.length > 1 && (
+              <button
+                onClick={raiseAll}
+                disabled={raising.size > 0}
+                className="flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white transition-opacity duration-150 hover:opacity-90 disabled:opacity-60"
+              >
+                {raising.size > 0 ? <Spinner size={14} /> : <Plus size={14} />} Create all {toOrder.length} POs
+              </button>
             )}
           </div>
         </div>
 
-        {/* One button per winning vendor — because that is one purchase order each, prefilled.
-            Raising one is a Vyapar write, so it stays behind VYAPAR_PURCHASE_ORDER:CREATE; reading the resulting
-            orders does not, and lives on Procurement's own Purchase Orders screen. */}
-        {byVendor.length > 0 && !canRaisePo && (
+        {poError && (
+          <p className="mt-3 rounded-lg bg-rose-50 px-3 py-2 text-xs text-rose-700">{poError}</p>
+        )}
+
+        {/* One button per vendor still to be ordered from — one purchase order each, created on the
+            spot. Gated on the award right (PROCUREMENT_RFQ:EDIT), not on Vyapar. */}
+        {toOrder.length > 0 && !canRaisePo && (
           <p className="mt-3 border-t border-gray-100 pt-3 text-xs text-amber-700">
-            {byVendor.length} vendor{byVendor.length === 1 ? " has" : "s have"} won lines here. Raising the purchase
-            order needs Vyapar access — ask someone who has it, then track the order under Purchase Orders.
+            {toOrder.length} vendor{toOrder.length === 1 ? " has" : "s have"} won lines here that are not ordered yet.
+            Creating the purchase order needs RFQ edit access — ask someone who has it.
           </p>
         )}
-        {byVendor.length > 0 && canRaisePo && (
+        {(ordered.length > 0 || (toOrder.length > 0 && canRaisePo)) && (
           <div className="mt-3 flex flex-wrap gap-2 border-t border-gray-100 pt-3">
-            {byVendor.map(([vendorPartyId, v]) => (
-              <button
-                key={vendorPartyId}
-                onClick={() => raisePo(vendorPartyId, v)}
-                title={`Open a purchase order for ${v.name}, filled in from this award`}
-                className="flex items-center gap-2 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white transition-opacity duration-150 hover:opacity-90"
+            {ordered.map(([invoiceId, o]) => (
+              <Link
+                key={`po-${invoiceId}`}
+                href={`/procurement/purchase-order?open=${invoiceId}`}
+                title="Open this purchase order"
+                className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-medium text-emerald-800 transition-colors duration-150 hover:border-emerald-400"
               >
+                <Check size={13} />
                 <span>
-                  Raise PO · {v.name} · {v.won.length} line{v.won.length > 1 ? "s" : ""} · {inr(v.value)}
+                  PO {o.poNumber ?? ""} · {o.vendor} · {o.lines} line{o.lines > 1 ? "s" : ""}
                 </span>
                 <ArrowRight size={13} />
-              </button>
+              </Link>
             ))}
+            {canRaisePo &&
+              toOrder.map(([vendorPartyId, v]) => {
+                const busy = raising.has(vendorPartyId);
+                return (
+                  <button
+                    key={vendorPartyId}
+                    onClick={() => raisePo(vendorPartyId)}
+                    disabled={busy}
+                    title={`Create the purchase order for ${v.name} now, from this award`}
+                    className="flex items-center gap-2 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white transition-opacity duration-150 hover:opacity-90 disabled:opacity-60"
+                  >
+                    {busy ? <Spinner size={13} /> : <Plus size={13} />}
+                    <span>
+                      {busy ? "Creating PO…" : "Create PO"} · {v.name} · {v.lines} line{v.lines > 1 ? "s" : ""} ·{" "}
+                      {inr(v.value)}
+                    </span>
+                  </button>
+                );
+              })}
           </div>
         )}
       </div>

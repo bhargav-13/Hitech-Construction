@@ -63,5 +63,18 @@ export function useRfqs() {
     [splice],
   );
 
-  return { rfqs, loading, error, reload: load, award, unlock, splice };
+  /**
+   * Raise one vendor's purchase order from their awarded lines. Unlike the others this rethrows:
+   * the screen shows the outcome next to the button that was pressed, not in the page banner.
+   */
+  const raisePo = useCallback(
+    async (rfqId: number, vendorPartyId: number) => {
+      const raised = await procurement.raisePurchaseOrder(rfqId, vendorPartyId);
+      splice(raised.rfq);
+      return raised;
+    },
+    [splice],
+  );
+
+  return { rfqs, loading, error, reload: load, award, unlock, raisePo, splice };
 }

@@ -38,6 +38,10 @@ export interface RfqLine {
   awardedVendorName: string | null;
   awardReason: string | null;
   sortOrder: number;
+  /** The live purchase order this line was ordered on; null until ordered (or if that order was cancelled). */
+  poInvoiceId: number | null;
+  /** That order's number as printed. Null when it belongs to the other company. */
+  poNumber: string | null;
 }
 
 export interface QuoteLine {
@@ -187,6 +191,25 @@ export const awardLine = (rfqId: number, lineId: number, vendorPartyId: number |
   apiRequest<Rfq>(`${BASE}/${rfqId}/lines/${lineId}/award`, {
     method: "PUT",
     body: { vendorPartyId, reason: reason ?? null },
+  });
+
+/** What raising a purchase order hands back: the enquiry as it now stands, and the order. */
+export interface RaisedPo {
+  rfq: Rfq;
+  invoiceId: number;
+  poNumber: string;
+  total: number;
+}
+
+/**
+ * Raise the purchase order for everything one vendor won on this enquiry that is not ordered yet.
+ * One click, straight into the books — no Vyapar access needed, and the order runs the Purchase
+ * Order approval chain like any other.
+ */
+export const raisePurchaseOrder = (rfqId: number, vendorPartyId: number) =>
+  apiRequest<RaisedPo>(`${BASE}/${rfqId}/purchase-orders`, {
+    method: "POST",
+    body: { vendorPartyId },
   });
 
 /**
