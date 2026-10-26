@@ -18,6 +18,8 @@ import { apiRequest, getActiveCompanyId } from "./api";
 import type { Company } from "./companyScope";
 import { getAmountDecimals } from "./format";
 import { gstRate } from "./gstRates";
+import { getTemplate, type DocKind, type DocTemplate } from "./docTemplates";
+import type { PrintModel } from "./docPdf";
 
 type Cell = string | number | null | undefined;
 
@@ -279,7 +281,7 @@ let appLogoCache: string | null | undefined;
  * Settings ▸ Firm Profile to upload one; falling back to the app's logo means a document looks
  * right on day one, and an uploaded logo still wins the moment there is one.
  */
-async function getAppLogo(): Promise<string | null> {
+export async function getAppLogo(): Promise<string | null> {
   if (appLogoCache !== undefined) return appLogoCache;
   try {
     appLogoCache = await new Promise<string>((resolve, reject) => {
@@ -308,7 +310,7 @@ async function getAppLogo(): Promise<string | null> {
 }
 
 /** Natural pixel size of a data-URL image, needed to draw a logo without distorting it. */
-function imageSize(dataUrl: string): Promise<{ width: number; height: number }> {
+export function imageSize(dataUrl: string): Promise<{ width: number; height: number }> {
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.onload = () => resolve({ width: img.naturalWidth, height: img.naturalHeight });
@@ -407,17 +409,42 @@ export async function downloadPdf(
   title: string,
   head: string[],
   rows: Cell[][],
-  opts?: { subtitle?: string; landscape?: boolean; rightAlignFrom?: number }
+  opts?: {
+    subtitle?: string;
+    landscape?: boolean;
+    rightAlignFrom?: number;
+    /** An unsaved design to draw with (the Templates preview); default = the saved REPORT design. */
+    template?: DocTemplate;
+    /** Return the document instead of downloading it. */
+    preview?: boolean;
+  }
 ) {
   // jsPDF's built-in fonts have no ₹ glyph — it printed as "¹" and broke the column widths. Every
   // caller passes `inr()` strings, so swap the symbol here once rather than at forty call sites.
   rows = rows.map((r) => r.map((c) => (typeof c === "string" ? c.replace(/₹\s?/g, "Rs. ") : c)));
-  const [{ jsPDF }, autoTableMod, firm] = await Promise.all([
+  const [{ jsPDF }, autoTableMod, firmProfile, tpl] = await Promise.all([
     import("jspdf"),
     import("jspdf-autotable"),
     getCachedFirmProfile(),
+    // Templates → Vyapar → "Reports & lists": colour, logo, letterhead name and footer of every list.
+    opts?.template ? Promise.resolve(opts.template) : getTemplate("REPORT"),
   ]);
   const autoTable = (autoTableMod as unknown as { default: (doc: unknown, o: unknown) => void }).default;
+  const firm = firmProfile
+    ? {
+        ...firmProfile,
+        businessName: tpl.companyName.trim() || firmProfile.businessName,
+        address: tpl.companyAddress.trim() || firmProfile.address,
+        logoDataUrl: tpl.showLogo ? firmProfile.logoDataUrl : null,
+        gstin: tpl.showGstin ? firmProfile.gstin : null,
+        footerNote: tpl.footerNote.trim() || firmProfile.footerNote,
+      }
+    : null;
+  const accentRgb = (() => {
+    const m = /^#?([0-9a-f]{6})$/i.exec(tpl.accent.trim());
+    const n = m ? parseInt(m[1], 16) : 0x212529;
+    return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+  })();
 
   const doc = new jsPDF({ orientation: opts?.landscape ? "landscape" : "portrait", unit: "pt", format: "a4" });
   const pageWidth = doc.internal.pageSize.getWidth();
@@ -480,7 +507,7 @@ export async function downloadPdf(
     body: rows.map((r) => r.map(clean)),
     startY: headerBottom + 30,
     styles: { fontSize: 8.5, cellPadding: 5, lineColor: [226, 232, 240], lineWidth: 0.5 },
-    headStyles: { fillColor: [241, 245, 249], textColor: [15, 23, 42], fontStyle: "bold" },
+    headStyles: { fillColor: accentRgb, textColor: [255, 255, 255], fontStyle: "bold" },
     alternateRowStyles: { fillColor: [248, 250, 252] },
     columnStyles,
     margin: { left: margin, right: margin, bottom: 46 },
@@ -497,6 +524,7 @@ export async function downloadPdf(
     },
   });
 
+  if (opts?.preview) return doc;
   doc.save(`${title.replace(/[^\w\-]+/g, "-").toLowerCase()}-${new Date().toISOString().slice(0, 10)}.pdf`);
 }
 
@@ -547,438 +575,155 @@ export function amountInWords(amount: number): string {
   return `${negative ? "Minus " : ""}Rupees ${parts.join(" ")}${tail} Only`;
 }
 
+/** Which saved design (Templates) prints each Vyapar document type. */
+export function templateKindFor(docType: string | null | undefined): DocKind {
+  switch (docType) {
+    case "SALE_ORDER":
+    case "ESTIMATE":
+    case "PROFORMA":
+    case "DELIVERY_CHALLAN":
+    case "SALE_RETURN":
+    case "PURCHASE":
+    case "PURCHASE_RETURN":
+    case "PURCHASE_ORDER":
+    case "EXPENSE":
+      return docType;
+    default:
+      return "SALE";
+  }
+}
+
 /**
- * Download one sale/purchase document as a proper GST tax-invoice PDF — bordered header meta,
- * bill-to panel, itemised table with tax split, a boxed totals summary and amount-in-words —
- * built to match how a real printed Vyapar invoice reads, not a plain export sheet.
+ * A Vyapar document as a print model for the shared renderer: party and details panels, Bill To /
+ * Ship To, the item table with HSN and tax, the boxed totals with the CGST/SGST/IGST split, the
+ * rate-wise tax summary, bank details and terms. Which of those actually print is the template's
+ * call (Templates screen); this only says what the document holds.
  */
-export async function downloadInvoicePdf(invoice: Invoice, party?: Party | null, items?: { id: number; hsn: string | null }[]) {
-  const [{ jsPDF }, autoTableMod, firm, bank] = await Promise.all([
-    import("jspdf"),
-    import("jspdf-autotable"),
-    getCachedFirmProfile(),
-    printableBankAccount(invoice),
+export async function invoicePrintModel(
+  invoice: Invoice,
+  party?: Party | null,
+  items?: { id: number; hsn: string | null }[],
+  firmOverride?: FirmProfile | null,
+): Promise<PrintModel> {
+  const [firm, bank] = await Promise.all([
+    firmOverride !== undefined ? Promise.resolve(firmOverride) : getCachedFirmProfile(),
+    invoice.id > 0 ? printableBankAccount(invoice) : Promise.resolve(null),
   ]);
-  const autoTable = (autoTableMod as unknown as { default: (doc: unknown, o: unknown) => void }).default;
-
-  const doc = new jsPDF({ unit: "pt", format: "a4" });
-  const pageWidth = doc.internal.pageSize.getWidth();
-  const margin = 40;
-  const contentWidth = pageWidth - margin * 2;
-  // Match the books' configured precision rather than rounding to whole rupees — their Vyapar
-  // runs 3 decimals, and a printed invoice that disagrees with the ledger is a support call.
   const places = getAmountDecimals();
-  // HSN lives on the item master, not on the invoice line, so it's resolved from whatever
-  // catalogue the caller had loaded. Absent catalogue simply prints "—".
-  const hsnOf = (itemId: number | null) =>
-    itemId == null ? null : (items?.find((i) => i.id === itemId)?.hsn ?? null);
-  const rs = (n: number) =>
-    `Rs. ${n.toLocaleString("en-IN", { minimumFractionDigits: places, maximumFractionDigits: places })}`;
-  const gray = (n: number) => doc.setTextColor(n, n, n);
-  const setFill = (c: readonly [number, number, number]) => doc.setFillColor(c[0], c[1], c[2]);
-  const setText = (c: readonly [number, number, number]) => doc.setTextColor(c[0], c[1], c[2]);
+  const rs = (n: number) => `Rs. ${n.toLocaleString("en-IN", { minimumFractionDigits: places, maximumFractionDigits: places })}`;
+  const hsnOf = (itemId: number | null) => (itemId == null ? null : (items?.find((i) => i.id === itemId)?.hsn ?? null));
+  const kind = templateKindFor(invoice.docType);
+  const isPo = invoice.docType === "PURCHASE_ORDER";
+  const dateLabel = isPo ? "PO Date:" : kind === "ESTIMATE" ? "Quotation Date:" : "Date:";
+  const noLabel = isPo ? "PO No:" : kind === "ESTIMATE" ? "Quotation No:" : `${DOC_LABEL[invoice.docType] ?? "Document"} No:`;
+  const dmy = (iso: string | null | undefined) => {
+    const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso ?? "");
+    if (!m) return iso ?? "";
+    const MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    return `${m[3]}-${MON[Number(m[2]) - 1]}-${m[1].slice(2)}`;
+  };
 
-  // ---- The ERP's own palette, so an invoice looks like it came from this product ----
-  const NAVY = [14, 42, 71] as const;        // --sidebar-bg
-  const NAVY_SOFT = [19, 53, 90] as const;   // --navy-soft
-  const CYAN = [8, 145, 178] as const;       // --brand-accent
-  const INK = [15, 23, 42] as const;
-  const HAIRLINE = [226, 232, 240] as const;
-
-  // ---- Branded header band ----
-  const bandH = 92;
-  setFill(NAVY);
-  doc.rect(0, 0, pageWidth, bandH, "F");
-  // A cyan keyline along the bottom of the band, echoing the sidebar's active accent.
-  setFill(CYAN);
-  doc.rect(0, bandH - 3, pageWidth, 3, "F");
-
-  let textX = margin;
-  const logo = firm?.logoDataUrl || (await getAppLogo());
-  if (logo) {
-    try {
-      const { width, height } = await imageSize(logo);
-      const logoH = 38;
-      const logoW = Math.min(78, logoH * (width / height));
-      // White plate behind the logo so dark-on-transparent marks stay legible on navy.
-      doc.setFillColor(255, 255, 255);
-      doc.roundedRect(margin - 4, 22, logoW + 8, logoH + 8, 4, 4, "F");
-      doc.addImage(logo, "PNG", margin, 26, logoW, logoH);
-      textX = margin + logoW + 16;
-    } catch {
-      // A broken logo shouldn't block the export.
-    }
-  }
-
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(15);
-  doc.setTextColor(255, 255, 255);
-  doc.text(firm?.businessName ?? "Tax Invoice", textX, 44);
-  const metaLine = [firm?.address, firm?.gstin ? `GSTIN ${firm.gstin}` : null, firm?.phone, firm?.email]
-    .filter(Boolean)
-    .join("   ·   ");
-  if (metaLine) {
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(7.5);
-    doc.setTextColor(186, 214, 235);
-    // Wrapped by hand and drawn line by line: `maxWidth` alone wraps the text but jsPDF still
-    // anchors every wrapped line at the same y, so a long address printed as a black smudge.
-    // Two lines is all the band has room for; the rest is dropped rather than run into the table.
-    const metaLines = doc.splitTextToSize(metaLine, pageWidth - textX - margin - 150) as string[];
-    metaLines.slice(0, 2).forEach((line, i) => doc.text(line, textX, 56 + i * 10));
-  }
-
-  // ---- Document title + number, right-aligned inside the band ----
-  const docTitle = (DOC_LABEL[invoice.docType] ?? "Document").toUpperCase();
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(17);
-  doc.setTextColor(255, 255, 255);
-  doc.text(docTitle, pageWidth - margin, 44, { align: "right" });
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(9);
-  doc.setTextColor(160, 228, 245);
-  doc.text(`# ${fullInvoiceNo(invoice)}`, pageWidth - margin, 60, { align: "right" });
-
-  let y = bandH + 22;
-
-  // ---- Bill To (left) + invoice meta (right), each in a titled panel ----
-  const panelTop = y;
-  const panelW = contentWidth / 2 - 8;
-  const billToX = margin;
-  const metaX = margin + panelW + 16;
-  const headerH = 20;
-
-  // Panel header strips.
-  setFill(NAVY_SOFT);
-  doc.rect(billToX, panelTop, panelW, headerH, "F");
-  doc.rect(metaX, panelTop, panelW, headerH, "F");
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(8);
-  doc.setTextColor(255, 255, 255);
-  doc.text("BILL TO", billToX + 10, panelTop + 13.5);
-  doc.text("INVOICE DETAILS", metaX + 10, panelTop + 13.5);
-
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(11.5);
-  setText(INK);
-  doc.text(party?.name ?? invoice.partyName ?? "Cash", billToX + 10, panelTop + headerH + 18);
-
-  let billLine = panelTop + headerH + 32;
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(8.5);
-  gray(90);
-  const billDetails = [
-    party?.billingAddress ?? invoice.billingAddress,
-    [party?.city, party?.state].filter(Boolean).join(", ") || null,
-    party?.gstin ? `GSTIN: ${party.gstin}` : null,
-    party?.phone ? `Phone: ${party.phone}` : null,
-  ].filter(Boolean) as string[];
-  for (const d of billDetails) {
-    // Same trap as the header band: `maxWidth` wraps but does not advance y, so a two-line address
-    // printed on top of the line beneath it. Split first, then advance once per wrapped line.
-    for (const line of doc.splitTextToSize(d, panelW - 20) as string[]) {
-      doc.text(line, billToX + 10, billLine);
-      billLine += 11;
-    }
-  }
-
-  let metaLine2 = panelTop + headerH + 16;
-  doc.setFontSize(9);
-  const metaRows: [string, string][] = [
-    ["Invoice Date", invoice.invoiceDate ?? "—"],
-    ...(invoice.dueDate ? ([["Due Date", invoice.dueDate]] as [string, string][]) : []),
-    ...(invoice.stateOfSupply ? ([["Place of Supply", invoice.stateOfSupply]] as [string, string][]) : []),
-    ["Payment Type", invoice.isCash || invoice.paidAmount > 0 ? invoice.paymentType : "Credit"],
+  const meta: [string, string][] = [
+    [noLabel, fullInvoiceNo(invoice) || "—"],
+    [dateLabel, dmy(invoice.invoiceDate) || "—"],
   ];
-  for (const [label, value] of metaRows) {
-    doc.setFont("helvetica", "normal");
-    gray(110);
-    doc.text(label, metaX + 10, metaLine2);
-    doc.setFont("helvetica", "bold");
-    setText(INK);
-    doc.text(value, metaX + panelW - 10, metaLine2, { align: "right" });
-    metaLine2 += 14;
-  }
+  if (invoice.dueDate) meta.push([isPo ? "Delivery By:" : "Due Date:", dmy(invoice.dueDate)]);
 
-  const panelBottom = Math.max(billLine, metaLine2) + 8;
-  doc.setDrawColor(HAIRLINE[0], HAIRLINE[1], HAIRLINE[2]);
-  doc.setLineWidth(0.75);
-  doc.rect(billToX, panelTop, panelW, panelBottom - panelTop);
-  doc.rect(metaX, panelTop, panelW, panelBottom - panelTop);
-  doc.setTextColor(0);
-  y = panelBottom + 20;
+  const partyRows: [string, string][] = [
+    [isPo || kind === "PURCHASE" || kind === "PURCHASE_RETURN" ? "Vendor:" : "Party:", party?.name ?? invoice.partyName ?? invoice.billingName ?? "Cash"],
+    ["GST:", party?.gstin ?? "N/A"],
+    ["Mobile:", party?.phone ?? "N/A"],
+    ["Address:", [party?.billingAddress ?? invoice.billingAddress, [party?.city, party?.state].filter(Boolean).join(", ")].filter(Boolean).join(", ") || "N/A"],
+  ];
+  const detailRows: [string, string][] = [];
+  if (invoice.stateOfSupply) detailRows.push(["Place of Supply:", invoice.stateOfSupply]);
+  detailRows.push(["Payment:", invoice.isCash || invoice.paidAmount > 0 ? invoice.paymentType : "Credit"]);
 
-  // ---- Bill To / Ship To, when the document carries them ----
-  // Only a purchase order does today. The panel above names the *party*; these two name places, and
-  // on an order they are routinely different ones — the bill comes to the office, the material goes
-  // to a site. Printing the delivery address is the whole point of capturing it.
-  const addressPanels: [string, string[]][] = [];
+  const addresses: { title: string; lines: string[] }[] = [];
   const place = (name: string | null, address: string | null, gstin: string | null) =>
     [name, address, gstin ? `GSTIN: ${gstin}` : null].filter(Boolean) as string[];
   const billPlace = place(invoice.billToName, invoice.billToAddress, invoice.billToGstin);
   const shipPlace = place(invoice.shipToName, invoice.shipToAddress, invoice.shipToGstin);
-  if (billPlace.length) addressPanels.push(["BILL TO", billPlace]);
-  if (shipPlace.length) addressPanels.push(["SHIP TO", shipPlace]);
+  if (billPlace.length) addresses.push({ title: "Bill To", lines: billPlace });
+  if (shipPlace.length) addresses.push({ title: "Ship To", lines: shipPlace });
 
-  if (addressPanels.length) {
-    const colW = addressPanels.length === 1 ? contentWidth : contentWidth / 2 - 8;
-    const top = y;
-    let deepest = top;
-    addressPanels.forEach(([title, details], i) => {
-      const x = margin + i * (colW + 16);
-      setFill(NAVY_SOFT);
-      doc.rect(x, top, colW, headerH, "F");
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(8);
-      doc.setTextColor(255, 255, 255);
-      doc.text(title, x + 10, top + 13.5);
-
-      doc.setFont("helvetica", "normal");
-      doc.setFontSize(8.5);
-      gray(90);
-      let line = top + headerH + 14;
-      for (const d of details) {
-        // Same wrap-then-advance rule as the Bill To panel above: `maxWidth` alone overprints.
-        for (const wrapped of doc.splitTextToSize(d, colW - 20) as string[]) {
-          doc.text(wrapped, x + 10, line);
-          line += 11;
-        }
-      }
-      deepest = Math.max(deepest, line);
-    });
-    const bottom = deepest + 4;
-    doc.setDrawColor(HAIRLINE[0], HAIRLINE[1], HAIRLINE[2]);
-    doc.setLineWidth(0.75);
-    addressPanels.forEach((_, i) => doc.rect(margin + i * (colW + 16), top, colW, bottom - top));
-    doc.setTextColor(0);
-    y = bottom + 20;
-  }
-
-  // ---- Line items — taxable value shown separately from the tax charged on it ----
   const tax = splitTax(invoice.lines, firm, party, invoice.stateOfSupply);
-  autoTable(doc, {
-    // Vyapar's printed item table carries HSN/SAC — a GST invoice is not compliant without it.
-    head: [["#", "Item", "HSN/SAC", "Qty", "Rate", "Taxable Value", "Tax", "GST Amt", "Amount"]],
-    body: invoice.lines.map((l, i) => {
-      // Derive the split from the line's own amount/tax% rather than trust a stored per-line
-      // taxAmount — it isn't always populated, and this stays exactly consistent with the total.
-      const taxable = l.taxPercent ? l.amount / (1 + l.taxPercent / 100) : l.amount;
-      const taxAmt = l.amount - taxable;
-      return [
-        String(i + 1),
-        l.itemName + (l.description ? `\n${l.description}` : ""),
-        // The line's own HSN wins; the item master is only a fallback for documents saved
-        // before the column existed.
-        l.hsn?.trim() || hsnOf(l.itemId) || "—",
-        `${l.quantity}${l.unit ? " " + l.unit : ""}`,
-        rs(l.rate),
-        rs(taxable),
-        // Name the levy, not just the rate: "18%" alone doesn't say whether it was one IGST
-        // charge or a CGST+SGST pair, and the two file into different GST return columns.
-        l.taxPercent ? `${gstRate(l.taxCode)?.kind === "IGST" ? "IGST" : "GST"} ${l.taxPercent}%` : "—",
-        taxAmt ? rs(taxAmt) : "—",
-        rs(l.amount),
-      ];
-    }),
-    startY: y,
-    styles: { fontSize: 8.5, cellPadding: 5, lineColor: [...HAIRLINE], lineWidth: 0.5, valign: "middle" },
-    headStyles: { fillColor: [...NAVY], textColor: [255, 255, 255], fontStyle: "bold" },
-    alternateRowStyles: { fillColor: [246, 251, 253] },
-    columnStyles: {
-      0: { cellWidth: 20, halign: "center" },
-      2: { cellWidth: 52, halign: "center" },
-      3: { halign: "right", cellWidth: 42 },
-      4: { halign: "right", cellWidth: 52 },
-      5: { halign: "right", cellWidth: 62 },
-      6: { halign: "center", cellWidth: 54 },
-      7: { halign: "right", cellWidth: 52 },
-      8: { halign: "right", cellWidth: 60 },
-    },
-    margin: { left: margin, right: margin },
-    didDrawPage: () => {
-      const page = doc.getNumberOfPages();
-      doc.setFontSize(8);
-      gray(150);
-      doc.text(`Page ${page}`, pageWidth - margin, doc.internal.pageSize.getHeight() - 20, { align: "right" });
-      doc.setTextColor(0);
-    },
-  });
+  const rows = invoice.lines.map((l, i) => [
+    String(i + 1),
+    l.itemName + (l.description ? `\n${l.description}` : ""),
+    l.hsn?.trim() || hsnOf(l.itemId) || "",
+    `${fmtQty(l.quantity)}${l.unit ? " " + l.unit : ""}`,
+    rs(l.rate),
+    l.taxPercent ? `${gstRate(l.taxCode)?.kind === "IGST" ? "IGST" : "GST"} ${l.taxPercent}%` : "0%",
+    rs(l.amount),
+  ]);
 
-  // ---- Rate-wise tax summary — a GST invoice is not compliant without one, and it is what
-  //      makes the CGST/SGST split visible instead of one undifferentiated tax figure ----
-  let summaryEnd = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY;
-  if (!tax.empty) {
-    const interStateDoc = tax.igst > 0 && tax.cgst === 0;
-    autoTable(doc, {
-      head: [
-        interStateDoc
-          ? ["Tax Rate", "Taxable Value", "IGST", "Total Tax"]
-          : ["Tax Rate", "Taxable Value", "CGST", "SGST", "Total Tax"],
-      ],
-      body: tax.buckets.map((b) =>
-        interStateDoc
-          ? [`${b.percent}%`, rs(b.taxable), rs(b.igst), rs(b.igst)]
-          : [`${b.percent}%`, rs(b.taxable), rs(b.cgst), rs(b.sgst), rs(b.cgst + b.sgst)]
-      ),
-      foot: [
-        interStateDoc
-          ? ["Total", rs(tax.buckets.reduce((t, b) => t + b.taxable, 0)), rs(tax.igst), rs(tax.igst)]
-          : [
-              "Total",
-              rs(tax.buckets.reduce((t, b) => t + b.taxable, 0)),
-              rs(tax.cgst),
-              rs(tax.sgst),
-              rs(tax.cgst + tax.sgst),
-            ],
-      ],
-      startY: summaryEnd + 12,
-      // Half-width, left-aligned: the totals box lands to its right, so the two read as a pair.
-      tableWidth: contentWidth / 2 + 20,
-      styles: { fontSize: 8, cellPadding: 4, lineColor: [...HAIRLINE], lineWidth: 0.5, halign: "right" },
-      headStyles: { fillColor: [...NAVY_SOFT], textColor: [255, 255, 255], fontStyle: "bold", halign: "right" },
-      footStyles: { fillColor: [240, 250, 253], textColor: [...INK], fontStyle: "bold", halign: "right" },
-      columnStyles: { 0: { halign: "left" } },
-      margin: { left: margin, right: margin },
-    });
-    summaryEnd = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY;
-  }
+  const totals: { label: string; value: string; strong?: boolean }[] = [{ label: "Item Subtotal", value: rs(invoice.subTotal) }];
+  if (invoice.discount > 0) totals.push({ label: "Discount", value: `- ${rs(invoice.discount)}` });
+  if (tax.cgst > 0) totals.push({ label: "CGST", value: rs(tax.cgst) });
+  if (tax.sgst > 0) totals.push({ label: "SGST", value: rs(tax.sgst) });
+  if (tax.igst > 0) totals.push({ label: "IGST", value: rs(tax.igst) });
+  if (invoice.roundOff) totals.push({ label: "Round Off", value: (invoice.roundOff >= 0 ? "+ " : "- ") + rs(Math.abs(invoice.roundOff)) });
+  totals.push({ label: "Total", value: rs(invoice.total), strong: true });
+  if (invoice.paidAmount) totals.push({ label: kind === "PURCHASE" ? "Paid" : "Received", value: rs(invoice.paidAmount) });
+  if (invoice.balance > 0) totals.push({ label: "Balance Due", value: rs(invoice.balance) });
 
-  // ---- Totals — boxed summary, GST split into CGST/SGST for an intra-state supply ----
-  const afterTable = summaryEnd + 14;
-  const boxW = 220;
-  const boxX = pageWidth - margin - boxW;
-  const rowH = 15;
-  const taxableAmount = invoice.subTotal;
-  const rows: [string, string, boolean][] = [
-    ["Taxable Amount", rs(taxableAmount), false],
-    ...(invoice.discount > 0 ? ([["Discount", `- ${rs(invoice.discount)}`, false]] as [string, string, boolean][]) : []),
-    // Each levy is listed only when it was actually charged, so a mixed document (some lines
-    // intra-state, some inter) shows all three rather than being forced into one or the other.
-    ...(tax.cgst > 0 ? ([["CGST", rs(tax.cgst), false]] as [string, string, boolean][]) : []),
-    ...(tax.sgst > 0 ? ([["SGST", rs(tax.sgst), false]] as [string, string, boolean][]) : []),
-    ...(tax.igst > 0 ? ([["IGST", rs(tax.igst), false]] as [string, string, boolean][]) : []),
-    ...(invoice.roundOff !== 0 ? ([["Round Off", (invoice.roundOff >= 0 ? "+ " : "- ") + rs(Math.abs(invoice.roundOff)), false]] as [string, string, boolean][]) : []),
-  ];
-  const grandH = 26;
-  const boxH = rowH * rows.length + 16 + grandH + (invoice.paidAmount || invoice.balance ? rowH * 2 : 0);
-  doc.setDrawColor(HAIRLINE[0], HAIRLINE[1], HAIRLINE[2]);
-  doc.setLineWidth(0.75);
-  doc.rect(boxX, afterTable, boxW, boxH);
+  const interState = tax.igst > 0 && tax.cgst === 0;
+  const taxSummary = tax.empty
+    ? undefined
+    : {
+        head: interState ? ["Tax Rate", "Taxable Value", "IGST", "Total Tax"] : ["Tax Rate", "Taxable Value", "CGST", "SGST", "Total Tax"],
+        body: tax.buckets.map((b) =>
+          interState
+            ? [`${b.percent}%`, rs(b.taxable), rs(b.igst), rs(b.igst)]
+            : [`${b.percent}%`, rs(b.taxable), rs(b.cgst), rs(b.sgst), rs(b.cgst + b.sgst)],
+        ),
+      };
 
-  let ty = afterTable + 16;
-  for (const [label, value] of rows) {
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(9);
-    gray(90);
-    doc.text(label, boxX + 12, ty);
-    setText(INK);
-    doc.text(value, boxX + boxW - 12, ty, { align: "right" });
-    ty += rowH;
-  }
+  const bankRows: [string, string][] = bank
+    ? ([
+        ["Bank", bank.bankName?.trim() || bank.name],
+        ["Name", bank.accountHolder?.trim() || ""],
+        ["A/c No.", bank.accountNumber?.trim() || ""],
+        ["IFSC", bank.ifsc?.trim() || ""],
+        ["UPI", bank.upiId?.trim() || ""],
+      ].filter(([, v]) => v) as [string, string][])
+    : [];
 
-  // Grand total sits in a navy band so it reads first.
-  const grandY = ty - 10;
-  setFill(NAVY);
-  doc.rect(boxX, grandY, boxW, grandH, "F");
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(11.5);
-  doc.setTextColor(255, 255, 255);
-  doc.text("Grand Total", boxX + 12, grandY + 17);
-  doc.text(rs(invoice.total), boxX + boxW - 12, grandY + 17, { align: "right" });
-  ty = grandY + grandH + 15;
-  if (invoice.paidAmount) {
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(9);
-    gray(90);
-    doc.text(invoice.docType === "PURCHASE" ? "Paid" : "Received", boxX + 12, ty);
-    doc.setTextColor(16, 129, 87);
-    doc.text(rs(invoice.paidAmount), boxX + boxW - 12, ty, { align: "right" });
-    ty += rowH;
-  }
-  if (invoice.balance > 0) {
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(9.5);
-    doc.setTextColor(190, 40, 40);
-    doc.text("Balance Due", boxX + 12, ty);
-    doc.text(rs(invoice.balance), boxX + boxW - 12, ty, { align: "right" });
-  }
-  doc.setTextColor(0);
+  return {
+    kind,
+    number: fullInvoiceNo(invoice) || DOC_LABEL[invoice.docType] || "document",
+    meta,
+    panels: [{ rows: partyRows }, ...(detailRows.length ? [{ rows: detailRows }] : [])],
+    addresses,
+    columns: [
+      { label: "S.No.", align: "center", width: 34 },
+      { label: "Item Name" },
+      { label: "HSN/SAC", align: "center", width: 60, key: "hsn" },
+      { label: "Qty", align: "right", width: 64 },
+      { label: "Rate", align: "right", width: 70 },
+      { label: "Tax", align: "right", width: 58, key: "tax" },
+      { label: "Amount", align: "right", width: 82 },
+    ],
+    rows,
+    totals,
+    taxSummary,
+    amountForWords: invoice.total,
+    bank: bankRows,
+    terms: invoice.terms,
+    notes: invoice.notes,
+  };
+}
 
-  // ---- Amount in words, in a tinted callout beside the totals ----
-  const wordsW = contentWidth - boxW - 16;
-  const wordsY = afterTable;
-  doc.setFillColor(240, 250, 253);
-  doc.setDrawColor(HAIRLINE[0], HAIRLINE[1], HAIRLINE[2]);
-  doc.rect(margin, wordsY, wordsW, 44, "FD");
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(7.5);
-  setText(CYAN);
-  doc.text("AMOUNT IN WORDS", margin + 10, wordsY + 15);
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(9);
-  setText(INK);
-  doc.text(amountInWords(invoice.total), margin + 10, wordsY + 30, { maxWidth: wordsW - 20 });
+function fmtQty(q: number): string {
+  return Number(q).toLocaleString("en-IN", { maximumFractionDigits: 3 });
+}
 
-  let noteY = Math.max(afterTable + boxH, wordsY + 44) + 26;
-
-  // ---- Bank details, so the customer knows where to pay ----
-  const sigXForBank = pageWidth - margin - 160;
-  if (bank) {
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(8);
-    setText(CYAN);
-    doc.text("BANK DETAILS", margin, noteY);
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(8.5);
-    gray(90);
-    let bankY = noteY + 12;
-    for (const line of [
-      bank.bankName?.trim() || bank.name,
-      bank.accountHolder?.trim() ? `A/c Name: ${bank.accountHolder.trim()}` : null,
-      bank.accountNumber?.trim() ? `A/c No: ${bank.accountNumber.trim()}` : null,
-      bank.ifsc?.trim() ? `IFSC: ${bank.ifsc.trim()}` : null,
-      bank.upiId?.trim() ? `UPI: ${bank.upiId.trim()}` : null,
-    ].filter(Boolean) as string[]) {
-      doc.text(line, margin, bankY, { maxWidth: sigXForBank - margin - 20 });
-      bankY += 11;
-    }
-    doc.setTextColor(0);
-    noteY = bankY + 14;
-  }
-
-  // ---- Terms (left) + signature block (right) ----
-  const sigX = pageWidth - margin - 160;
-  if (invoice.terms) {
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(8);
-    setText(CYAN);
-    doc.text("TERMS & CONDITIONS", margin, noteY);
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(8.5);
-    gray(90);
-    doc.text(invoice.terms, margin, noteY + 12, { maxWidth: sigX - margin - 20 });
-  }
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(8.5);
-  gray(90);
-  doc.text(`For ${firm?.businessName ?? ""}`.trim(), sigX, noteY, { align: "left" });
-  doc.setDrawColor(200, 200, 200);
-  doc.line(sigX, noteY + 44, pageWidth - margin, noteY + 44);
-  doc.setFontSize(8);
-  gray(120);
-  doc.text("Authorized Signatory", sigX, noteY + 56);
-  doc.setTextColor(0);
-  noteY += 76;
-
-  if (firm?.footerNote) {
-    doc.setDrawColor(HAIRLINE[0], HAIRLINE[1], HAIRLINE[2]);
-    doc.setLineWidth(0.75);
-    doc.line(margin, noteY - 12, pageWidth - margin, noteY - 12);
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(8);
-    gray(150);
-    doc.text(firm.footerNote, margin, noteY, { maxWidth: contentWidth });
-  }
-
-  doc.save(`${fullInvoiceNo(invoice).replace(/[\/:*?"<>|]/g, "-") || docTitle}-${new Date().toISOString().slice(0, 10)}.pdf`);
+/**
+ * Download one Vyapar document (invoice, bill, order, note) as a PDF in the company's saved design —
+ * Templates decides the look; the default follows the client's Onsite layout.
+ */
+export async function downloadInvoicePdf(invoice: Invoice, party?: Party | null, items?: { id: number; hsn: string | null }[]) {
+  const [{ renderDocPdf }, model] = await Promise.all([import("./docPdf"), invoicePrintModel(invoice, party, items)]);
+  await renderDocPdf(model, { save: true });
 }

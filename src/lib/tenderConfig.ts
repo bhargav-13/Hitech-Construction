@@ -18,7 +18,9 @@ export interface TenderNavNode {
    *   "emd"         — EMD sitting against decided tenders with no refund recorded
    *   "approvals"   — stage moves waiting on the signed-in user
    */
-  badge?: "due:SORTING" | "due:RESEARCH" | "due:APPLIED" | "emd" | "approvals";
+  badge?: "due:SORTING" | "due:RESEARCH" | "due:APPLIED" | "due:PIPELINE" | "emd" | "approvals";
+  /** Other routes that should light this item up (the pipeline's table views). */
+  activeAlso?: string[];
 }
 
 export const TENDER_NAV: TenderNavNode[] = [
@@ -27,16 +29,22 @@ export const TENDER_NAV: TenderNavNode[] = [
   // drawer, so an approver had no way to find what was waiting on them.
   { label: "Approvals", href: "/tender/approvals", feature: "TENDER_TENDERS", icon: "approval", badge: "approvals" },
 
-  // The pipeline, in flow order: Sorting → Research → Applied. A won tender then leaves this module
-  // entirely — it becomes a record in the existing Project module, reached from the tender itself.
-  // There is deliberately no Projects entry in this rail: Tender owns bidding, Project owns
-  // execution, and the handoff is a link on the won tender rather than a second project list.
-  { label: "Sorting", href: "/tender/sorting", feature: "TENDER_TENDERS", icon: "filter", section: "Pipeline", badge: "due:SORTING" },
-  { label: "Research", href: "/tender/research", feature: "TENDER_TENDERS", icon: "search", badge: "due:RESEARCH" },
+  // The pipeline is one kanban board — Sorting → Research → Applied → Won → Lost — instead of a rail
+  // entry per stage. The per-stage tables still exist (each column's "List" link) for bulk moves and
+  // exports. A won tender leaves this module entirely — it becomes a record in the existing Project
+  // module, reached from the tender itself; Tender owns bidding, Project owns execution.
+  {
+    label: "Pipeline",
+    href: "/tender/pipeline",
+    feature: "TENDER_TENDERS",
+    icon: "filter",
+    section: "Pipeline",
+    badge: "due:PIPELINE",
+    activeAlso: ["/tender/sorting", "/tender/research", "/tender/applied"],
+  },
   // Costing sits inside the pipeline rather than beside it: analysis *is* the research step, and
   // the bid percentage it produces is what the Applied stage records.
   { label: "Health Analysis", href: "/tender/analysis", feature: "TENDER_ANALYSIS", icon: "clipboard" },
-  { label: "Applied", href: "/tender/applied", feature: "TENDER_TENDERS", icon: "send" },
 
   // Time and money.
   { label: "Calendar", href: "/tender/calendar", feature: "TENDER_TENDERS", icon: "calendar", section: "Planning" },

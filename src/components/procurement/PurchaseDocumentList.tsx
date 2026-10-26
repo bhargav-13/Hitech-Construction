@@ -13,6 +13,16 @@ import { inr } from "@/lib/format";
 import { useProjects } from "@/lib/useProjects";
 import { useTableSort, type SortDir } from "@/lib/useTableSort";
 import type { Invoice } from "@/lib/vyaparApi";
+import { DOC_APPROVAL_TYPE, useApprovalStates } from "@/lib/approvals";
+import { ApprovalBadge, wasRecalled } from "@/components/approval/ApprovalBadge";
+import type { ApprovalState } from "@/lib/api";
+
+/** Onsite's "Approval Status" filter, read off the ladder state. */
+function approvalBucket(state: ApprovalState | undefined): string {
+  if (!state) return "none";
+  if (state.status === "CANCELLED") return wasRecalled(state) ? "recalled" : "none";
+  return state.status.toLowerCase();
+}
 
 /**
  * Newest-created first by default — the order Onsite opens its lists in, which is what the client's
@@ -78,6 +88,11 @@ export function PurchaseDocumentList({
    * away and the count says how many are being left out.
    */
   const [source, setSource] = useState<"procurement" | "all">("procurement");
+  const [approvalFilter, setApprovalFilter] = useState("all");
+  // Every row on one screen is the same document type, so one approval type covers the list.
+  const approvalType = rows[0] ? (DOC_APPROVAL_TYPE[rows[0].docType] ?? null) : null;
+  const rowIds = useMemo(() => rows.map((r) => r.id), [rows]);
+  const { states: approvals, reload: reloadApprovals } = useApprovalStates(approvalType, rowIds);
   const [open, setOpen] = useState<Invoice | null>(null);
   // Vyapar's screens are gated on VYAPAR:VIEW, so the handoff link is only shown to people who
   // would get through — the whole reason these screens exist is that most buyers would not.
@@ -109,6 +124,7 @@ export function PurchaseDocumentList({
     const pool = source === "procurement" ? fromProcurement : rows;
     return pool.filter((r) => {
       if (status !== "all" && r.status !== status) return false;
+      if (approvalFilter !== "all" && approvalBucket(approvals[r.id]) !== approvalFilter) return false;
       if (vendor !== "all" && (r.partyName ?? "") !== vendor) return false;
       if (project !== "all" && String(r.projectId ?? "") !== project) return false;
       if (from && (r.invoiceDate ?? "") < from) return false;
@@ -120,7 +136,7 @@ export function PurchaseDocumentList({
         (r.notes ?? "").toLowerCase().includes(query)
       );
     });
-  }, [rows, fromProcurement, source, q, status, vendor, project, from, to]);
+  }, [rows, fromProcurement, source, q, status, vendor, project, from, to, approvalFilter, approvals]);
 
   const accessors = useMemo(
     () => ({
@@ -140,7 +156,8 @@ export function PurchaseDocumentList({
     dir: "desc",
   });
   const sortValue = SORT_OPTIONS.find((o) => o.key === sortKey && o.dir === sortDir)?.value ?? "custom";
-  const filtersOn = vendor !== "all" || project !== "all" || !!from || !!to || status !== "all" || !!q;
+  const filtersOn =
+    vendor !== "all" || project !== "all" || !!from || !!to || status !== "all" || approvalFilter !== "all" || !!q;
 
   const totals = useMemo(
     () => ({
@@ -189,6 +206,22 @@ export function PurchaseDocumentList({
           className="w-44"
           options={[{ value: "all", label: "All statuses" }, ...statuses.map((s) => ({ value: s, label: s }))]}
         />
+        {approvalType && (
+          <Select
+            value={approvalFilter}
+            onChange={setApprovalFilter}
+            size="sm"
+            className="w-44"
+            options={[
+              { value: "all", label: "Any approval" },
+              { value: "pending", label: "Pending approval" },
+              { value: "approved", label: "Approved" },
+              { value: "rejected", label: "Rejected" },
+              { value: "recalled", label: "Recalled" },
+              { value: "none", label: "Not on approval" },
+            ]}
+          />
+        )}
         <Select
           value={vendor}
           onChange={setVendor}
@@ -245,6 +278,7 @@ export function PurchaseDocumentList({
             onClick={() => {
               setQ("");
               setStatus("all");
+              setApprovalFilter("all");
               setVendor("all");
               setProject("all");
               setFrom("");
@@ -302,6 +336,7 @@ export function PurchaseDocumentList({
                 <th className="px-4 py-3 text-right">Paid</th>
                 <SortTh label="Balance" sortKey="balance" align="right" activeKey={sortKey} dir={sortDir} onSort={toggle} className="py-3" />
                 <SortTh label="Status" sortKey="status" activeKey={sortKey} dir={sortDir} onSort={toggle} className="py-3" />
+                {approvalType && <th className="px-4 py-3">Approval</th>}
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
@@ -342,6 +377,11 @@ export function PurchaseDocumentList({
                       {d.status ?? "—"}
                     </span>
                   </td>
+                  {approvalType && (
+                    <td className="px-4 py-3">
+                      {approvals[d.id] ? <ApprovalBadge state={approvals[d.id]} /> : <span className="text-xs text-gray-300">—</span>}
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>
@@ -358,6 +398,8 @@ export function PurchaseDocumentList({
           onClose={() => {
             setOpen(null);
             setWanted(null);
+            // A decision or recall in the drawer changes this row's badge.
+            reloadApprovals();
           }}
         />
       )}

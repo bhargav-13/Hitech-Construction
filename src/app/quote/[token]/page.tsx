@@ -5,6 +5,7 @@ import { CheckCircle2, Clock, Lock, MapPin, Send, TriangleAlert } from "lucide-r
 import { Spinner } from "@/components/Spinner";
 import * as procurement from "@/lib/procurementApi";
 import type { PublicRfq } from "@/lib/procurementApi";
+import { resolveStorageUrl } from "@/lib/filesApi";
 
 /**
  * The supplier's quotation form. No login, opened from a link.
@@ -210,9 +211,15 @@ export default function PublicQuotePage({ params }: { params: Promise<{ token: s
               {rfq.lines.map((l) => (
                 <tr key={l.id} className={rates[l.id]?.trim() ? "" : "bg-gray-50/40"}>
                   <td className="px-4 py-2.5">
-                    <p className="font-medium text-gray-800">{l.itemName}</p>
-                    {l.specification && <p className="text-xs text-gray-500">{l.specification}</p>}
-                    {l.deliveryDate && <p className="text-xs text-amber-600">Wanted by {l.deliveryDate}</p>}
+                    <div className="flex gap-3">
+                      <LinePhoto url={l.imageUrl} />
+                      <div className="min-w-0">
+                        <p className="font-medium text-gray-800">{l.itemName}</p>
+                        {l.specification && <p className="text-xs text-gray-500">{l.specification}</p>}
+                        {l.description && <p className="mt-0.5 max-w-md text-xs whitespace-pre-line text-gray-600">{l.description}</p>}
+                        {l.deliveryDate && <p className="text-xs text-amber-600">Wanted by {l.deliveryDate}</p>}
+                      </div>
+                    </div>
                   </td>
                   <td className="px-4 py-2.5 font-mono text-xs text-gray-500">{l.hsnCode || "—"}</td>
                   <td className="px-4 py-2.5 text-right whitespace-nowrap text-gray-700">
@@ -240,8 +247,14 @@ export default function PublicQuotePage({ params }: { params: Promise<{ token: s
           <div className="divide-y divide-gray-100 sm:hidden">
             {rfq.lines.map((l) => (
               <div key={l.id} className="px-4 py-3">
-                <p className="text-sm font-medium text-gray-800">{l.itemName}</p>
-                {l.specification && <p className="text-xs text-gray-500">{l.specification}</p>}
+                <div className="flex gap-3">
+                  <LinePhoto url={l.imageUrl} />
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-gray-800">{l.itemName}</p>
+                    {l.specification && <p className="text-xs text-gray-500">{l.specification}</p>}
+                    {l.description && <p className="mt-0.5 text-xs whitespace-pre-line text-gray-600">{l.description}</p>}
+                  </div>
+                </div>
                 <div className="mt-2 flex items-center gap-3">
                   <span className="shrink-0 text-xs text-gray-500">
                     {l.quantity} {l.unit}
@@ -361,5 +374,17 @@ function SmallField({ label, children }: { label: string; children: React.ReactN
       <span className="mb-1 block text-[11px] text-gray-500">{label}</span>
       {children}
     </label>
+  );
+}
+
+/** The buyer's photo of the material, signed by the server for this link; opens full size. */
+function LinePhoto({ url: raw }: { url: string | null }) {
+  if (!raw) return null;
+  // Local-disk storage signs a path on the API, not the page's own origin.
+  const url = resolveStorageUrl(raw);
+  return (
+    <a href={url} target="_blank" rel="noreferrer" className="block h-14 w-14 shrink-0 overflow-hidden rounded-lg border border-gray-200 bg-gray-50">
+      <img src={url} alt="" className="h-full w-full object-cover" />
+    </a>
   );
 }

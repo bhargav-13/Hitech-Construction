@@ -2,10 +2,13 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { ExternalLink } from "lucide-react";
+import { Download, ExternalLink } from "lucide-react";
 import { Drawer } from "@/components/Drawer";
 import { Spinner } from "@/components/Spinner";
-import { getPurchaseDocument } from "@/lib/purchaseApi";
+import { getPurchaseDocument, getVendor } from "@/lib/purchaseApi";
+import { downloadInvoicePdf } from "@/lib/vyaparExport";
+import { DOC_APPROVAL_TYPE, useApprovalStates } from "@/lib/approvals";
+import { ApprovalPanel } from "@/components/approval/ApprovalBadge";
 import { inr } from "@/lib/format";
 import type { Invoice } from "@/lib/vyaparApi";
 import { DOC_STATUS_CLS } from "@/components/procurement/PurchaseDocumentList";
@@ -44,6 +47,26 @@ export function PurchaseDocumentDrawer({
   }, [documentId]);
 
   const lines = doc.lines ?? [];
+  // The PO's approval ladder, as on Onsite's PO screen: who raised it, each level's decision, and
+  // Recall for the person who raised it.
+  const approvalType = DOC_APPROVAL_TYPE[doc.docType] ?? null;
+  const { states: approvals, reload: reloadApproval } = useApprovalStates(approvalType, [documentId]);
+  const approval = approvals[documentId] ?? null;
+  const [pdfBusy, setPdfBusy] = useState(false);
+
+  async function downloadPdf() {
+    setPdfBusy(true);
+    try {
+      // The vendor's GSTIN and address belong on the order; the procurement endpoint serves them
+      // to buyers who can't open Vyapar's party screen.
+      const party = doc.partyId ? await getVendor(doc.partyId).catch(() => null) : null;
+      await downloadInvoicePdf(doc, party);
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Couldn't build the PDF.");
+    } finally {
+      setPdfBusy(false);
+    }
+  }
 
   return (
     <Drawer
@@ -75,14 +98,35 @@ export function PurchaseDocumentDrawer({
               {doc.dueDate && <> · due {doc.dueDate}</>}
             </div>
           </div>
-          <span
-            className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium ring-1 ring-inset ${
-              DOC_STATUS_CLS[doc.status ?? ""] ?? DOC_STATUS_CLS.Unpaid
-            }`}
-          >
-            {doc.status ?? "—"}
-          </span>
+          <div className="flex shrink-0 items-center gap-2">
+            <button
+              onClick={() => void downloadPdf()}
+              disabled={pdfBusy || loading}
+              className="flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-2.5 py-1 text-xs font-medium text-gray-600 transition-colors hover:border-brand-accent hover:text-brand-accent disabled:opacity-50"
+              title="Download in the design set under Templates"
+            >
+              <Download size={13} /> {pdfBusy ? "Preparing…" : "PDF"}
+            </button>
+            <span
+              className={`rounded-full px-2 py-0.5 text-[11px] font-medium ring-1 ring-inset ${
+                DOC_STATUS_CLS[doc.status ?? ""] ?? DOC_STATUS_CLS.Unpaid
+              }`}
+            >
+              {doc.status ?? "—"}
+            </span>
+          </div>
         </div>
+
+        {approvalType && approval && (
+          <ApprovalPanel
+            entityType={approvalType}
+            entityId={documentId}
+            state={approval}
+            onChanged={reloadApproval}
+            allowRecall
+            rejectHint="Rejecting cancels this document; it can be reopened after it's fixed."
+          />
+        )}
 
         <div className="grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-4">
           <Fig label="Sub total" value={inr(doc.subTotal)} />

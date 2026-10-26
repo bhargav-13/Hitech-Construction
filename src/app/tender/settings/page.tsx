@@ -5,9 +5,8 @@ import { TenderShell } from "@/components/tender/TenderShell";
 import { useCompanyProfile, DEFAULT_PROFILE } from "@/lib/tenderProfile";
 import { useTenderStore } from "@/lib/tenderStore";
 import { exportWorkbook } from "@/lib/tenderExcel";
-import { ConfirmDialog } from "@/components/tender/ConfirmDialog";
 import { inr } from "@/lib/format";
-import { Building2, Download, RotateCcw, Save } from "lucide-react";
+import { Building2, Download, Save } from "lucide-react";
 
 /**
  * Our own credentials, which turn the Sorting screen from a list into a go/no-go aid.
@@ -24,7 +23,6 @@ export default function TenderSettingsPage() {
   const hardcopy = useTenderStore((s) => s.hardcopy);
   const materials = useTenderStore((s) => s.materials);
   const handoffs = useTenderStore((s) => s.handoffs);
-  const resetData = useTenderStore((s) => s.reset);
 
   const [draft, setDraft] = useState({
     registrationClass: profile.registrationClass,
@@ -35,7 +33,6 @@ export default function TenderSettingsPage() {
     maxEstimatedCost: String(profile.maxEstimatedCost),
   });
   const [saved, setSaved] = useState(false);
-  const [confirmReset, setConfirmReset] = useState(false);
 
   function save() {
     update({
@@ -138,8 +135,8 @@ export default function TenderSettingsPage() {
         <section className="rounded-xl border border-gray-200 bg-white p-4">
           <h2 className="mb-1 text-sm font-semibold text-gray-700">Data</h2>
           <p className="mb-3 text-xs text-gray-400">
-            This module runs entirely in the browser — {tenders.length} tenders, {hardcopy.length} dispatches and{" "}
-            {materials.length} material parties are held in local storage until the backend exists.
+            {tenders.length} tenders, {hardcopy.length} dispatches and {materials.length} material parties. Export the lot
+            as the client&apos;s workbook layout.
             {handoffs.length > 0 && ` ${handoffs.length} tender(s) have been handed over to the Project module.`}
           </p>
           <div className="flex flex-wrap items-center gap-2">
@@ -149,34 +146,10 @@ export default function TenderSettingsPage() {
             >
               <Download size={15} /> Export full workbook
             </button>
-            <button
-              onClick={() => setConfirmReset(true)}
-              className="flex items-center gap-1.5 rounded-lg border border-rose-200 px-3.5 py-2 text-sm text-rose-600 transition-colors duration-150 hover:bg-rose-50"
-            >
-              <RotateCcw size={15} /> Reset demo data
-            </button>
           </div>
         </section>
       </div>
 
-      {confirmReset && (
-        <ConfirmDialog
-          title="Reset demo data"
-          tone="danger"
-          confirmLabel="Reset everything"
-          body={
-            <>
-              Every change made in this browser — stage moves, loss reasons, EMD releases, imports and attachments — is
-              discarded, and the module is reseeded from the client&apos;s workbook. This cannot be undone.
-            </>
-          }
-          onCancel={() => setConfirmReset(false)}
-          onConfirm={() => {
-            resetData();
-            setConfirmReset(false);
-          }}
-        />
-      )}
     </TenderShell>
   );
 }

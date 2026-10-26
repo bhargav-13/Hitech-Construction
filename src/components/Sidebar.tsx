@@ -23,13 +23,15 @@ import {
   ScrollText,
   Receipt,
   MapPin,
+  ListTodo,
   LocateFixed,
   PanelLeftClose,
   PanelLeftOpen,
   LogOut,
   BadgeCheck,
+  LayoutTemplate,
 } from "lucide-react";
-import { NAV_ITEMS, NAV_BREAK_AFTER, NAV_MODULE } from "@/lib/nav";
+import { NAV_ITEMS, NAV_BREAK_AFTER, NAV_MODULE, NAV_ANY_MODULE } from "@/lib/nav";
 import { useAppStore } from "@/lib/store";
 import { useAuthStore } from "@/lib/authStore";
 import { useUiStore } from "@/lib/uiStore";
@@ -61,6 +63,7 @@ const ICONS: Record<string, React.ComponentType<{ size?: number; className?: str
   Audit: ScrollText,
   Vyapar: Receipt,
   Approvals: BadgeCheck,
+  Templates: LayoutTemplate,
 };
 
 export function Sidebar() {
@@ -85,6 +88,8 @@ export function Sidebar() {
   const can = useCan();
   const navItems = authUser
     ? NAV_ITEMS.filter((item) => {
+        const any = NAV_ANY_MODULE[item.href];
+        if (any) return authUser.role.name === "Super Admin" || any.some((m) => perms.includes(`${m}:VIEW`));
         const module = NAV_MODULE[item.href];
         return !module || perms.includes(`${module}:VIEW`);
       })
@@ -197,13 +202,13 @@ export function Sidebar() {
         </ul>
       </nav>
 
-      {/* Punch is the one self-service action that must reach every signed-in staff member, not
-          just admins — they are the ones who punch in and out. "To Do" and "Chat" used to sit
-          beside it and were dropped: To Do duplicated Taskopad, and Chat was never wired to
-          anything. */}
+      {/* Self-service actions every signed-in person gets, not just admins: Punch, and a private
+          To-Do list (board, calendar, reminders) that nobody else can read — Taskopad stays the
+          team's task system. */}
       {(authUser || currentUser) && (
-        <div className="grid grid-cols-1 gap-2 border-t border-sidebar-border px-3 py-3">
-          <QuickAction icon={MapPin} label="Punch" href="/punch" collapsed={collapsed} />
+        <div className={`grid gap-2 border-t border-sidebar-border px-3 py-3 ${collapsed ? "grid-cols-1" : "grid-cols-2"}`}>
+          <QuickAction icon={MapPin} label="Punch" href="/punch" collapsed={collapsed} active={pathname.startsWith("/punch")} />
+          <QuickAction icon={ListTodo} label="To-Do" href="/todo" collapsed={collapsed} active={pathname.startsWith("/todo")} />
         </div>
       )}
 
@@ -248,14 +253,17 @@ function QuickAction({
   label,
   href,
   collapsed,
+  active = false,
 }: {
   icon: React.ComponentType<{ size?: number }>;
   label: string;
   href?: string;
   collapsed: boolean;
+  active?: boolean;
 }) {
-  const cls =
-    "flex flex-col items-center gap-1 rounded-lg border border-sidebar-border px-2 py-2 text-[11px] text-sidebar-text transition-all duration-150 hover:border-sidebar-active/40 hover:bg-sidebar-active/5 hover:text-sidebar-active active:scale-95";
+  const cls = `flex flex-col items-center gap-1 rounded-lg border px-2 py-2 text-[11px] transition-all duration-150 hover:border-sidebar-active/40 hover:bg-sidebar-active/5 hover:text-sidebar-active active:scale-95 ${
+    active ? "border-sidebar-active/50 bg-sidebar-active/10 text-sidebar-active" : "border-sidebar-border text-sidebar-text"
+  }`;
   const content = (
     <>
       <Icon size={16} />

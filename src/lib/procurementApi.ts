@@ -42,6 +42,10 @@ export interface RfqLine {
   poInvoiceId: number | null;
   /** That order's number as printed. Null when it belongs to the other company. */
   poNumber: string | null;
+  /** The fuller write-up sent to suppliers with the photo. */
+  description: string | null;
+  /** Photo of the material (file registry id); sign with filesApi.fileUrl to show it. */
+  imageFileId: number | null;
 }
 
 export interface QuoteLine {
@@ -149,6 +153,8 @@ export interface RfqInput {
     unit?: string | null;
     quantity: number;
     budgetRate?: number | null;
+    description?: string | null;
+    imageFileId?: number | null;
   }[];
   /** Party ids to invite; replaces the current list. Anyone who already quoted is kept. */
   supplierPartyIds?: number[];
@@ -243,6 +249,9 @@ export interface PublicRfqLine {
   /** Their own price from a previous submission, so the form reopens filled in. */
   rate: number | null;
   note: string | null;
+  description: string | null;
+  /** Short-lived signed link to the photo, or null. */
+  imageUrl: string | null;
 }
 
 export interface PublicRfq {
@@ -393,3 +402,20 @@ export const getRfqAnalysis = (rfqId: number) => apiRequest<RfqAnalysis>(`${BASE
 
 export const startRfqAnalysis = (rfqId: number, documents: QuoteDocumentInput[]) =>
   apiRequest<RfqAnalysis>(`${BASE}/${rfqId}/analysis`, { method: "POST", body: { documents } });
+
+/** A material's remembered description and photo — the defaults for its next RFQ line. */
+export interface ItemProfile {
+  itemId: number | null;
+  itemName: string;
+  description: string | null;
+  imageFileId: number | null;
+}
+
+export function getItemProfiles() {
+  return apiRequest<ItemProfile[]>("/api/v1/procurement/rfqs/item-profiles");
+}
+
+/** Same normalisation as the server: trimmed, spaces collapsed, lower-case. */
+export function itemProfileKey(name: string) {
+  return name.trim().replace(/\s+/g, " ").toLowerCase();
+}

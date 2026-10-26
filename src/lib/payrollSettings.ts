@@ -20,6 +20,9 @@ export interface PayslipTemplate {
   headerNote: string;
   footerNote: string;
   signatory: string;
+  /** Signature and company stamp images (small data URLs), drawn over the signatory line. */
+  signatureImage: string | null;
+  stampImage: string | null;
   /** Employee block. */
   fields: {
     staffCode: boolean;
@@ -47,6 +50,8 @@ export const DEFAULT_PAYSLIP_TEMPLATE: PayslipTemplate = {
   headerNote: "",
   footerNote: "This is a computer-generated salary slip and does not require a signature.",
   signatory: "Authorised Signatory",
+  signatureImage: null,
+  stampImage: null,
   fields: {
     staffCode: true, designation: true, department: true, joiningDate: true, payableDays: true,
     pan: true, uan: false, bank: true, ifsc: true,

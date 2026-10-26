@@ -74,13 +74,15 @@ export function TenderShell({ children }: { children: React.ReactNode }) {
       "due:SORTING": dueSoonCount(tenders, "SORTING"),
       "due:RESEARCH": dueSoonCount(tenders, "RESEARCH"),
       "due:APPLIED": dueSoonCount(tenders, "APPLIED"),
+      "due:PIPELINE": dueSoonCount(tenders, "SORTING") + dueSoonCount(tenders, "RESEARCH"),
       emd: recoverable > 0 ? tenders.filter((t) => t.emdState === "PAID" && !t.emdReleasedOn && (t.stage === "LOST")).length : 0,
       approvals: tenders.filter((t) => t.pendingStage && t.canActNow).length,
     };
   }, [tenders]);
 
-  const isActive = (href?: string) =>
-    !!href && (href === "/tender" ? pathname === "/tender" : pathname.startsWith(href));
+  const isActive = (href?: string, also?: string[]) =>
+    !!href &&
+    (href === "/tender" ? pathname === "/tender" : pathname.startsWith(href) || !!also?.some((a) => pathname.startsWith(a)));
 
   return (
     <AppShell title="Tender">
@@ -112,7 +114,7 @@ export function TenderShell({ children }: { children: React.ReactNode }) {
                 {node.section && railCollapsed && <div className="my-2 border-t border-gray-100" />}
                 <NavItem
                   node={node}
-                  active={isActive(node.href)}
+                  active={isActive(node.href, node.activeAlso)}
                   collapsed={railCollapsed}
                   count={node.badge ? badges[node.badge] : 0}
                 />

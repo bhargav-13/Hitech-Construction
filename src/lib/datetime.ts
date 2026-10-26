@@ -135,6 +135,14 @@ export function dateKeyIST(input: string | number | Date | null | undefined = ne
   return `${p.year}-${String(p.month).padStart(2, "0")}-${p.day}`;
 }
 
+/** `yyyy-MM-ddTHH:mm` — the IST wall clock of an instant, the shape a `datetime-local` value takes. */
+export function wallClockIST(input: string | number | Date | null | undefined = new Date()): string {
+  const d = parseIST(input);
+  if (!d) return "";
+  const p = istParts(d);
+  return `${p.year}-${String(p.month).padStart(2, "0")}-${p.day}T${p.hour}:${p.minute}`;
+}
+
 /**
  * Today's date in India as `yyyy-MM-dd`.
  *

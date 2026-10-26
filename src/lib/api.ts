@@ -1139,7 +1139,7 @@ export interface ApprovalAction {
   actorUserId: number | null;
   actorName: string | null;
   actorRole: string | null;
-  action: "SUBMITTED" | "APPROVED" | "REJECTED" | "CANCELLED";
+  action: "SUBMITTED" | "APPROVED" | "REJECTED" | "CANCELLED" | "RECALLED" | "SKIPPED";
   note: string | null;
   at: string | null;
 }
@@ -1303,6 +1303,19 @@ export function decideApproval(entityType: string, entityId: number, action: "AP
 
 export function withdrawApproval(entityType: string, entityId: number) {
   return request<ApprovalState | null>(`/api/v1/approvals/${entityType}/${entityId}/cancel`, { method: "POST" });
+}
+
+/** Onsite's Recall: pull a pending or approved request back to change the record. */
+export function recallApproval(entityType: string, entityId: number, note?: string) {
+  return request<ApprovalState | null>(`/api/v1/approvals/${entityType}/${entityId}/recall`, {
+    method: "POST",
+    body: { action: "RECALL", note: note ?? null },
+  });
+}
+
+/** Send a recalled or rejected record for approval again, once it has been changed. */
+export function resubmitApproval(entityType: string, entityId: number) {
+  return request<ApprovalState | null>(`/api/v1/approvals/${entityType}/${entityId}/resubmit`, { method: "POST" });
 }
 
 export interface LeaveBalanceApi {

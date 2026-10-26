@@ -13,6 +13,7 @@ import { UnitSelect } from "@/components/procurement/UnitSelect";
 import { TypeaheadPicker } from "@/components/vyapar/TypeaheadPicker";
 import { DatePicker } from "@/components/DatePicker";
 import { ScanButton } from "@/components/ScanButton";
+import { ItemPhotoPicker } from "@/components/procurement/ItemPhoto";
 import { filledNote, matchByNameOrGstin, type ScannedItemList } from "@/lib/docScan";
 import { Spinner } from "@/components/Spinner";
 import { inr, qty as formatQty } from "@/lib/format";
@@ -55,6 +56,9 @@ type DraftLine = {
   quantity: number;
   deliveryDate: string;
   budgetRate: string;
+  /** Fuller write-up for suppliers; defaults to what was sent last time for this material. */
+  description: string;
+  imageFileId: number | null;
 };
 
 function Builder() {
@@ -102,6 +106,36 @@ function Builder() {
 
   const [items, setItems] = useState<Item[]>([]);
   const [parties, setParties] = useState<Party[]>([]);
+  // Description + photo last used per material (keyed by normalised name, plus catalogue id).
+  const [profiles, setProfiles] = useState<procurement.ItemProfile[]>([]);
+
+  useEffect(() => {
+    procurement.getItemProfiles().then(setProfiles).catch(() => {
+      /* no memory yet - lines just start blank */
+    });
+  }, []);
+
+  /** The remembered description/photo for a material, matched by catalogue id first, then name. */
+  const remembered = useCallback(
+    (itemId: number | null, name: string): Pick<DraftLine, "description" | "imageFileId"> | null => {
+      const key = procurement.itemProfileKey(name);
+      const p =
+        (itemId != null ? profiles.find((x) => x.itemId === itemId) : undefined) ??
+        (key ? profiles.find((x) => procurement.itemProfileKey(x.itemName) === key) : undefined);
+      return p ? { description: p.description ?? "", imageFileId: p.imageFileId } : null;
+    },
+    [profiles],
+  );
+
+  /** Fill an empty line's description/photo from memory; never overwrite what's been typed. */
+  const withRemembered = useCallback(
+    (l: DraftLine): DraftLine => {
+      if (l.description.trim() || l.imageFileId) return l;
+      const r = remembered(l.itemId, l.itemName);
+      return r ? { ...l, ...r } : l;
+    },
+    [remembered],
+  );
 
   // Masters, and the firm's own details for the default Bill To.
   const loadMasters = useCallback(async () => {
@@ -161,6 +195,8 @@ function Builder() {
         quantity: l.quantity,
         deliveryDate: l.deliveryDate ?? "",
         budgetRate: l.budgetRate != null ? String(l.budgetRate) : "",
+        description: l.description ?? "",
+        imageFileId: l.imageFileId ?? null,
       })),
     );
     setSupplierIds(r.suppliers.map((s) => s.vendorPartyId));
@@ -220,7 +256,10 @@ function Builder() {
           quantity: 1,
           deliveryDate: "",
           budgetRate: it.purchasePrice ? String(it.purchasePrice) : "",
-        }));
+          description: "",
+          imageFileId: null,
+        }))
+        .map(withRemembered);
       return [...prev, ...fresh];
     });
     setLibraryOpen(false);
@@ -244,8 +283,11 @@ function Builder() {
           quantity: l.quantity && l.quantity > 0 ? l.quantity : 1,
           deliveryDate: "",
           budgetRate: l.rate ? String(l.rate) : it?.purchasePrice ? String(it.purchasePrice) : "",
+          description: "",
+          imageFileId: null,
         };
-      });
+      })
+      .map(withRemembered);
     if (read.length) setLines((prev) => [...prev.filter((l) => l.itemName.trim()), ...read]);
     const linked = read.filter((l) => l.itemId != null).length;
     return filledNote(
@@ -258,7 +300,7 @@ function Builder() {
   function addBlankLine() {
     setLines((prev) => [
       ...prev,
-      { itemId: null, itemName: "", specification: "", hsnCode: "", unit: "Nos", quantity: 1, deliveryDate: "", budgetRate: "" },
+      { itemId: null, itemName: "", specification: "", hsnCode: "", unit: "Nos", quantity: 1, deliveryDate: "", budgetRate: "", description: "", imageFileId: null },
     ]);
   }
 
@@ -294,6 +336,8 @@ function Builder() {
           unit: l.unit,
           quantity: Number(l.quantity) || 1,
           budgetRate: l.budgetRate === "" ? null : Number(l.budgetRate),
+          description: l.description.trim() || null,
+          imageFileId: l.imageFileId,
         })),
         supplierPartyIds: supplierIds,
       };
@@ -424,7 +468,7 @@ function Builder() {
             <ScanButton kind="ITEM_LIST" compact label="Scan indent with AI" hint="Site indent, handwritten list or BOQ page" onResult={applyIndent} />
           </div>
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[880px] border-collapse text-sm">
+            <table className="w-full min-w-[960px] border-collapse text-sm">
               <thead>
                 <tr className="border-b border-gray-100 bg-gray-50 text-left text-[11px] font-medium tracking-wide text-gray-500 uppercase">
                   <th className="w-12 px-3 py-2">S.No.</th>
@@ -441,38 +485,68 @@ function Builder() {
                   <tr key={i} className="border-b border-gray-50 align-top last:border-b-0">
                     <td className="px-3 py-2 text-xs text-gray-400">{i + 1}</td>
                     <td className="px-3 py-2">
-                      {/* Free text stays allowed — half of what a site enquires about has never
-                          been a catalogue item — but picking one fills the unit, HSN and budget
-                          rate that would otherwise be retyped from the item master by hand. */}
-                      <TypeaheadPicker<Item>
-                        value={l.itemName}
-                        onChange={(text) => setLine(i, { itemName: text, itemId: null })}
-                        rows={items}
-                        getKey={(it) => it.id}
-                        getLabel={(it) => it.name}
-                        columns={[
-                          { label: "Purchase Price", get: (it) => inr(it.purchasePrice) },
-                          { label: "Stock", get: (it) => formatQty(it.stockQty), align: "right" },
-                        ]}
-                        onPick={(it) =>
-                          setLine(i, {
-                            itemId: it.id,
-                            itemName: it.name,
-                            specification: it.description ?? "",
-                            hsnCode: it.hsn ?? "",
-                            unit: it.unit || "Nos",
-                            budgetRate: it.purchasePrice ? String(it.purchasePrice) : "",
-                          })
-                        }
-                        placeholder="Item name — or type anything"
-                      />
-                      {/* The brand/spec line their enquiries carry under the item name. */}
-                      <input
-                        value={l.specification}
-                        onChange={(e) => setLine(i, { specification: e.target.value })}
-                        placeholder="Make / specification (optional)"
-                        className="mt-1 w-full rounded-md border border-transparent px-2 py-0.5 text-xs text-gray-500 outline-none hover:border-gray-200 focus:border-cyan-500"
-                      />
+                      <div className="flex gap-2.5">
+                        <ItemPhotoPicker
+                          fileId={l.imageFileId}
+                          itemName={l.itemName}
+                          onChange={(imageFileId) => setLine(i, { imageFileId })}
+                        />
+                        <div
+                          className="min-w-0 flex-1"
+                          // A typed (non-catalogue) name picks up its remembered details once the
+                          // buyer leaves the row's fields.
+                          onBlur={() => setLines((prev) => prev.map((x, j) => (j === i ? withRemembered(x) : x)))}
+                        >
+                          {/* Free text stays allowed — half of what a site enquires about has never
+                              been a catalogue item — but picking one fills the unit, HSN and budget
+                              rate that would otherwise be retyped from the item master by hand. */}
+                          <TypeaheadPicker<Item>
+                            value={l.itemName}
+                            onChange={(text) => setLine(i, { itemName: text, itemId: null })}
+                            rows={items}
+                            getKey={(it) => it.id}
+                            getLabel={(it) => it.name}
+                            columns={[
+                              { label: "Purchase Price", get: (it) => inr(it.purchasePrice) },
+                              { label: "Stock", get: (it) => formatQty(it.stockQty), align: "right" },
+                            ]}
+                            onPick={(it) =>
+                              setLines((prev) =>
+                                prev.map((x, j) =>
+                                  j === i
+                                    ? withRemembered({
+                                        ...x,
+                                        itemId: it.id,
+                                        itemName: it.name,
+                                        specification: it.description ?? "",
+                                        hsnCode: it.hsn ?? "",
+                                        unit: it.unit || "Nos",
+                                        budgetRate: it.purchasePrice ? String(it.purchasePrice) : "",
+                                      })
+                                    : x,
+                                ),
+                              )
+                            }
+                            placeholder="Item name — or type anything"
+                          />
+                          {/* The brand/spec line their enquiries carry under the item name. */}
+                          <input
+                            value={l.specification}
+                            onChange={(e) => setLine(i, { specification: e.target.value })}
+                            placeholder="Make / specification (optional)"
+                            className="mt-1 w-full rounded-md border border-transparent px-2 py-0.5 text-xs text-gray-500 outline-none hover:border-gray-200 focus:border-cyan-500"
+                          />
+                          {/* Model, rating, size, finish - what suppliers otherwise phone to ask.
+                              Remembered per material and offered again on its next enquiry. */}
+                          <textarea
+                            value={l.description}
+                            onChange={(e) => setLine(i, { description: e.target.value })}
+                            placeholder="Description for suppliers (optional) - remembered for next time"
+                            rows={l.description ? Math.min(5, l.description.split("\n").length + 1) : 1}
+                            className="mt-1 w-full resize-y rounded-md border border-gray-100 px-2 py-1 text-xs text-gray-600 outline-none hover:border-gray-200 focus:border-cyan-500"
+                          />
+                        </div>
+                      </div>
                     </td>
                     <td className="px-3 py-2">
                       <input

@@ -11,7 +11,6 @@ import { useTableSort } from "@/lib/useTableSort";
 import { useTenderStore } from "@/lib/tenderStore";
 import { useTenderPrefs, DENSITY_CLASS } from "@/lib/tenderPrefs";
 import { useCompanyProfile, bidFlags, worstFlag, FLAG_TONE_CLASS } from "@/lib/tenderProfile";
-import * as api from "@/lib/api";
 import {
   STAGE_META,
   STATUS_META,
@@ -45,7 +44,7 @@ import { isSuperAdminRole } from "@/lib/taskPermissions";
 import { TenderHealthChip } from "@/components/tender/TenderHealthChip";
 import { HandoffDialog } from "@/components/tender/HandoffDialog";
 import { type HandoffOptions } from "@/lib/projectBoqStore";
-import { handoffToServer } from "@/lib/projectBoqHandoff";
+import { handoffTenderToProject } from "@/lib/tenderProjectHandoff";
 import { findAnalysis, useAnalysisStore } from "@/lib/tenderAnalysisStore";
 import { analysisTotals } from "@/lib/tenderAnalysisCalc";
 import { TenderEmpty } from "@/components/tender/TenderShell";
@@ -288,8 +287,6 @@ export function TenderPipeline({ variant }: { variant: PipelineVariant }) {
   const setStage = useTenderStore((s) => s.setStage);
   const setStatus = useTenderStore((s) => s.setStatus);
   const setStageBulk = useTenderStore((s) => s.setStageBulk);
-  const linkProject = useTenderStore((s) => s.linkProject);
-  const handoffPayloadFor = useTenderStore((s) => s.handoffPayloadFor);
   const lastUndo = useTenderStore((s) => s.lastUndo);
   const removeTender = useTenderStore((s) => s.removeTender);
   // Deleting a tender wipes its whole history, so only Super Admin is offered it.
@@ -505,79 +502,13 @@ export function TenderPipeline({ variant }: { variant: PipelineVariant }) {
     flash(message ?? `${ids.length} tender${ids.length === 1 ? "" : "s"} moved to ${STAGE_META[stage].label}.`);
   }
 
-  /**
-   * Convert the tender's analysis into the project's BOQ and targets. Returns a fragment for the
-   * flash message, so the user is told what actually landed rather than just "project created".
-   */
-  async function buildBoq(t: Tender, projectId: number, handoff: HandoffOptions | null): Promise<string> {
-    // Say what happened either way. Silently creating an empty project when the user ticked
-    // "create the BOQ" is the failure they cannot diagnose from the outside.
-    if (!handoff) return " — no BOQ, because this tender has no health analysis";
-    const analysis = findAnalysis(useAnalysisStore.getState().analyses, t);
-    if (!analysis) return " — but its health analysis could not be found, so the BOQ was not created";
-    if (analysis.boqLines.length === 0) return " — its health analysis has no items yet, so the BOQ is empty";
-    try {
-      const boq = await handoffToServer(projectId, analysis, handoff);
-      const targets = boq.targets.length;
-      return ` with ${boq.items.length} BOQ items${
-        targets > 0 ? ` and ${targets} targets` : " (no targets — add them on the project's Target tab)"
-      }`;
-    } catch (e) {
-      // The project landed and the BOQ did not. Naming that is the whole point: a silent failure
-      // here looks identical to a tender with no analysis, and the conversion is the reason anyone
-      // ran the handover.
-      return ` — but its BOQ did not save (${
-        e instanceof Error ? e.message : "the project module refused it"
-      }), so convert it again from the tender`;
-    }
-  }
-
-  /**
-   * Hand a won tender over to the **Project module** — this module does not keep its own project
-   * list. `createProject` only accepts name/address/city, so the commercial detail the client
-   * actually tracks (contract value, work order date, completion date, customer) goes across in a
-   * follow-up update. If that second call fails the handoff is marked unsynced rather than lost.
-   */
+  /** Hand a won tender to the Project module (shared with the pipeline board). */
   async function createProject(t: Tender, handoff: HandoffOptions | null) {
     setBusyId(t.id);
-    const payload = handoffPayloadFor(t.id);
     try {
-      const res = await api.createProject({
-        name: t.nameOfWork || `Tender ${t.tenderId}`,
-        address: t.officeAddress ?? undefined,
-        city: t.location ?? undefined,
-      });
-      let synced = false;
-      try {
-        await api.updateProject(res.id, {
-          customerName: t.department ?? null,
-          projectValue: payload?.contractValue ?? 0,
-          startDate: payload?.workOrderDate ?? null,
-          endDate: payload?.completionDate ?? null,
-          scopeOfWork: t.nameOfWork ?? null,
-          status: "ONGOING",
-        });
-        synced = true;
-      } catch {
-        // The project exists; only the commercial fields did not land. Keep it flagged.
-      }
-      linkProject(t.id, res.id, { synced });
-      setCreatedProjectId(res.id);
-      const built = await buildBoq(t, res.id, handoff);
-      flash(
-        synced
-          ? `Project #${res.id} created${built}.`
-          : `Project #${res.id} created${built}, but its contract details did not save — open it to finish.`,
-      );
-    } catch {
-      // No project backend reachable — keep the handoff locally so the conversion is not lost, and
-      // say so plainly rather than reporting a success that did not happen.
-      const localId = -Math.floor(Date.now() / 1000);
-      linkProject(t.id, localId, { synced: false });
-      // No BOQ is attempted here on purpose. The project never reached the server, so there is
-      // nothing for a BOQ to hang off — writing one to a negative placeholder id would produce a
-      // document that can never be found again.
-      flash("Project module unreachable — the handoff is saved locally and can be pushed later. Its BOQ has not been created.");
+      const { message, projectId } = await handoffTenderToProject(t, handoff);
+      if (projectId != null) setCreatedProjectId(projectId);
+      flash(message);
     } finally {
       setBusyId(null);
       setProjectPrompt(null);

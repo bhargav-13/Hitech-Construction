@@ -26,6 +26,9 @@ import { useRfqs } from "@/lib/useRfqs";
 import { useAuthStore } from "@/lib/authStore";
 import { downloadPdf } from "@/lib/vyaparExport";
 import { inr } from "@/lib/format";
+import { PdfButton, downloadRfqPdf } from "@/components/PdfButton";
+import { useProjects } from "@/lib/useProjects";
+import { ItemPhotoThumb } from "@/components/procurement/ItemPhoto";
 import type { Rfq, Quote, RaisedPo } from "@/lib/procurementApi";
 
 /**
@@ -492,6 +495,7 @@ function Matrix({
           >
             <Zap size={14} /> Award all to cheapest
           </button>
+          <RfqPdfButton rfq={rfq} />
           <button
             onClick={exportPdf}
             className="flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-600 transition-colors duration-150 hover:border-brand-accent hover:text-brand-accent"
@@ -585,11 +589,20 @@ function Matrix({
                 <tr key={i} className="border-b border-gray-100 align-top last:border-b-0">
                   {/* Spine: what was asked for, and who is getting it */}
                   <td className="sticky left-0 z-10 bg-white px-4 py-3">
-                    <div className="font-medium text-gray-800">{line.itemName}</div>
-                    <div className="mt-0.5 text-xs text-gray-400">
-                      {line.quantity} {line.unit ?? ""}
-                      {line.budgetRate != null && <> · budget {inr(line.budgetRate)}</>}
+                    <div className="flex gap-2.5">
+                      <ItemPhotoThumb fileId={line.imageFileId} size={44} />
+                      <div className="min-w-0">
+                        <div className="font-medium text-gray-800">{line.itemName}</div>
+                        {line.specification && <div className="text-xs text-gray-500">{line.specification}</div>}
+                        <div className="mt-0.5 text-xs text-gray-400">
+                          {line.quantity} {line.unit ?? ""}
+                          {line.budgetRate != null && <> · budget {inr(line.budgetRate)}</>}
+                        </div>
+                      </div>
                     </div>
+                    {line.description && (
+                      <p className="mt-1.5 max-w-[260px] text-xs whitespace-pre-line text-gray-500">{line.description}</p>
+                    )}
                     <div className="mt-2">
                       <Select
                         value={line.awardedVendorPartyId != null ? String(line.awardedVendorPartyId) : ""}
@@ -872,5 +885,17 @@ function Figure({
         </div>
       )}
     </div>
+  );
+}
+
+/** The enquiry itself as a PDF (what suppliers were sent), beside the comparison export. */
+function RfqPdfButton({ rfq }: { rfq: Rfq }) {
+  const { projects } = useProjects();
+  const p = projects.find((x) => rfq.projectId != null && x.id === String(rfq.projectId));
+  return (
+    <PdfButton
+      label="RFQ PDF"
+      build={() => downloadRfqPdf(rfq, p ? { name: p.name, address: [p.address, p.city].filter(Boolean).join(", ") || null } : null)}
+    />
   );
 }

@@ -18,6 +18,7 @@ import { stashPoDraft, vyaparUnit } from "@/lib/poHandoff";
 import * as wo from "@/lib/workOrderApi";
 import * as vyapar from "@/lib/vyaparApi";
 import { inr } from "@/lib/format";
+import { PdfButton, downloadWorkOrderPdf } from "@/components/PdfButton";
 
 /**
  * One subcontract: what was ordered, what has been billed, and what material he is holding.
@@ -195,6 +196,11 @@ export default function WorkOrderDetailPage({ params }: { params: Promise<{ id: 
               size="sm"
               className="w-36"
               options={wo.WORK_ORDER_STATUSES.map((s) => ({ value: s, label: s }))}
+            />
+            <PdfButton
+              build={() =>
+                downloadWorkOrderPdf(w, project ? { name: project.name, address: [project.address, project.city].filter(Boolean).join(", ") || null } : null)
+              }
             />
             <Link
               href={`/procurement/work-order/build?id=${w.id}`}

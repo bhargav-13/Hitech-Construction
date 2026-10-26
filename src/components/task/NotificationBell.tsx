@@ -10,6 +10,7 @@ import {
   MessageCircle,
   RefreshCw,
   BellRing,
+  ListTodo,
   ShieldCheck,
   CheckCheck,
 } from "lucide-react";
@@ -21,6 +22,7 @@ const KIND_META: Record<string, { icon: React.ComponentType<{ size?: number }>; 
   OVERDUE: { icon: AlarmClock, tone: "bg-rose-50 text-rose-600" },
   DUE_TODAY: { icon: CalendarClock, tone: "bg-amber-50 text-amber-600" },
   REMINDER: { icon: BellRing, tone: "bg-orange-50 text-orange-600" },
+  TODO_REMINDER: { icon: ListTodo, tone: "bg-orange-50 text-orange-600" },
   ASSIGNED: { icon: UserPlus, tone: "bg-cyan-50 text-brand-accent" },
   COMMENT: { icon: MessageCircle, tone: "bg-violet-50 text-violet-600" },
   STATUS: { icon: RefreshCw, tone: "bg-sky-50 text-sky-600" },

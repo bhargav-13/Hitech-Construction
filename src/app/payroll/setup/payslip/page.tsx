@@ -12,6 +12,7 @@ import { downloadPayslip, payslipColumns } from "@/lib/payslipExport";
 import { getCachedFirmProfile } from "@/lib/vyaparExport";
 import { inr } from "@/lib/format";
 import { ArrowLeft, Download, RotateCcw } from "lucide-react";
+import { readImage } from "@/lib/docTemplates";
 
 /** A believable slip to preview the template against. */
 const SAMPLE: PayslipApi = {
@@ -114,6 +115,8 @@ export default function PayslipDesignerPage() {
               </Card>
               <Card title="Footer">
                 <Text label="Signatory" value={t.signatory} onChange={(v) => set("signatory", v)} />
+                <SignatureImage label="Signature" value={t.signatureImage ?? null} onChange={(v) => set("signatureImage", v)} />
+                <SignatureImage label="Company stamp" value={t.stampImage ?? null} onChange={(v) => set("stampImage", v)} />
                 <Text label="Footer note" value={t.footerNote} multiline onChange={(v) => set("footerNote", v)} />
               </Card>
             </div>
@@ -147,7 +150,13 @@ export default function PayslipDesignerPage() {
                 {t.amountInWords && <div className="mt-2 text-[10px] text-gray-500">Amount in words: <span className="font-semibold text-gray-700">Twenty Six Thousand…</span></div>}
                 <div className="mt-6 flex items-end justify-between gap-4 text-[10px] text-gray-500">
                   <span className="max-w-[60%]">{t.footerNote}</span>
-                  <span className="border-t border-gray-300 pt-1">{t.signatory}</span>
+                  <span className="flex flex-col items-end">
+                    <span className="flex items-end gap-2">
+                      {t.stampImage && <img src={t.stampImage} alt="" className="h-10 w-auto object-contain" />}
+                      {t.signatureImage && <img src={t.signatureImage} alt="" className="h-10 w-auto object-contain" />}
+                    </span>
+                    <span className="border-t border-gray-300 pt-1">{t.signatory}</span>
+                  </span>
                 </div>
               </div>
             </div>
@@ -209,6 +218,42 @@ function Column({ title, rows, accent }: { title: string; rows: [string, number]
         <div key={n} className="flex justify-between px-2 py-0.5"><span className="text-gray-600">{n}</span><span>{inr(v)}</span></div>
       ))}
       <div className="flex justify-between border-t border-gray-200 px-2 py-1 font-bold"><span>Total</span><span>{inr(total)}</span></div>
+    </div>
+  );
+}
+
+function SignatureImage({ label, value, onChange }: { label: string; value: string | null; onChange: (v: string | null) => void }) {
+  return (
+    <div>
+      <span className="mb-1 block text-xs text-gray-500">{label}</span>
+      <div className="flex items-center gap-3">
+        <div className="flex h-12 w-28 items-center justify-center overflow-hidden rounded-lg border border-dashed border-gray-300 bg-white">
+          {value ? <img src={value} alt="" className="max-h-full max-w-full object-contain" /> : <span className="text-[11px] text-gray-400">None</span>}
+        </div>
+        <label className="cursor-pointer text-xs font-medium text-brand-accent hover:underline">
+          {value ? "Change" : "Upload"}
+          <input
+            type="file"
+            accept="image/png,image/jpeg"
+            className="hidden"
+            onChange={async (e) => {
+              const f = e.target.files?.[0];
+              e.target.value = "";
+              if (!f) return;
+              try {
+                onChange(await readImage(f));
+              } catch (err) {
+                alert(err instanceof Error ? err.message : "Couldn't use that image.");
+              }
+            }}
+          />
+        </label>
+        {value && (
+          <button type="button" onClick={() => onChange(null)} className="text-xs text-gray-500 hover:text-rose-600">
+            Remove
+          </button>
+        )}
+      </div>
     </div>
   );
 }

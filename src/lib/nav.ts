@@ -21,6 +21,8 @@ export const NAV_ITEMS: NavItem[] = [
   // Everyone has an inbox — it only ever shows requests waiting on (or raised by) you.
   { label: "Approvals", href: "/approvals" },
   { label: "Library", href: "/library" },
+  // Print designs for every PDF; shown to anyone who works in a module that prints documents.
+  { label: "Templates", href: "/templates" },
   { label: "Setting", href: "/settings" },
   // --- Not implemented yet ---
   // { label: "Report", href: "/report" },
@@ -33,6 +35,11 @@ export const NAV_ITEMS: NavItem[] = [
 // Insert a visual gap in the sidebar after these items, matching Onsite's grouping. A module's own
 // shortcut (Live Map under Payroll) stays inside its group: the gap moves below the shortcut.
 export const NAV_BREAK_AFTER = new Set(["Report", "Team Schedule", "Payroll", "Live Map", "Equipment", "Audit"]);
+
+// Routes visible when the user can open ANY of these modules (instead of one NAV_MODULE code).
+export const NAV_ANY_MODULE: Record<string, string[]> = {
+  "/templates": ["VYAPAR", "PROCUREMENT", "PAYROLL"],
+};
 
 // Maps each nav route to its backend module code. A sidebar item is only shown when the signed-in
 // user's role carries "<MODULE>:VIEW" — so e.g. a user without DASHBOARD:VIEW never sees Dashboard.

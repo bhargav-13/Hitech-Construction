@@ -14,6 +14,7 @@ import { Spinner } from "@/components/Spinner";
 import { useRfqs } from "@/lib/useRfqs";
 import { RFQ_STATUS_CLS } from "@/lib/procurementConfig";
 import { inr } from "@/lib/format";
+import { PdfButton, downloadRfqPdf } from "@/components/PdfButton";
 import { useVyaparProjectId } from "@/lib/projectScope";
 import * as procurement from "@/lib/procurementApi";
 import * as vyapar from "@/lib/vyaparApi";
@@ -231,6 +232,13 @@ export default function RfqPage() {
                     >
                       <Plus size={13} /> Enter quote
                     </button>
+                    <PdfButton
+                      size="sm"
+                      build={() => {
+                        const p = projects.find((x) => r.projectId != null && x.id === String(r.projectId));
+                        return downloadRfqPdf(r, p ? { name: p.name, address: [p.address, p.city].filter(Boolean).join(", ") || null } : null);
+                      }}
+                    />
                     <Link
                       href={`/procurement/rfq/build?id=${r.id}`}
                       className="flex items-center gap-1.5 rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-600 transition-colors duration-150 hover:border-brand-accent hover:text-brand-accent"

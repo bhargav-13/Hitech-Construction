@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, CircleDashed, Clock, FileText, Undo2, X } from "lucide-react";
+import { Check, CircleDashed, Clock, FileText, RotateCcw, SkipForward, Undo2, X } from "lucide-react";
 import type { ApprovalAction, ApprovalState } from "@/lib/api";
 
 /**
@@ -25,6 +25,8 @@ const ACTION_META: Record<ApprovalAction["action"], { icon: typeof Check; tint: 
   APPROVED: { icon: Check, tint: "bg-emerald-50 text-emerald-600", verb: "approved" },
   REJECTED: { icon: X, tint: "bg-rose-50 text-rose-600", verb: "rejected" },
   CANCELLED: { icon: Undo2, tint: "bg-slate-100 text-slate-500", verb: "withdrew the request" },
+  RECALLED: { icon: RotateCcw, tint: "bg-amber-50 text-amber-600", verb: "recalled it for changes" },
+  SKIPPED: { icon: SkipForward, tint: "bg-slate-100 text-slate-400", verb: "step skipped" },
 };
 
 export function ApprovalTrail({ approval }: { approval: ApprovalState | null }) {

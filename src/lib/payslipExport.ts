@@ -12,7 +12,7 @@
  * and the payroll register can never disagree.
  */
 
-import { getCachedFirmProfile, amountInWords } from "./vyaparExport";
+import { getCachedFirmProfile, amountInWords, imageSize } from "./vyaparExport";
 import { inr } from "./format";
 import type { PayslipApi, PayrollProfileResponse, UserResponse } from "./api";
 import { loadPayrollSetting } from "./payrollSettings";
@@ -337,6 +337,7 @@ export async function downloadPayslip(s: PayslipApi, memberName: string, ctx: Pa
   }
 
   // ---- Signature, and the note that makes an unsigned slip acceptable ----
+  await drawSignature(doc, t, pageWidth - margin - 160, y - 30);
   doc.setDrawColor(200, 200, 200);
   doc.line(pageWidth - margin - 160, y + 26, pageWidth - margin, y + 26);
   doc.setFont("helvetica", "normal");
@@ -470,6 +471,7 @@ export async function downloadPaymentVoucher(
   }
 
   y += 40;
+  await drawSignature(doc, t, pageWidth - margin - 160, y - 56);
   doc.setDrawColor(200, 200, 200);
   doc.line(margin, y, margin + 160, y);
   doc.line(pageWidth - margin - 160, y, pageWidth - margin, y);
@@ -481,4 +483,30 @@ export async function downloadPaymentVoucher(
 
   const safe = `${memberName}-${p.recordDate}`.replace(/[\/:*?"<>|]/g, "-");
   doc.save(`Voucher-${safe}.pdf`);
+}
+
+/**
+ * The signature (and stamp, left of it) from Payslip Design, scaled into the 160pt box that sits
+ * above the signatory line. Nothing drawn when neither was uploaded.
+ */
+async function drawSignature(
+  doc: import("jspdf").jsPDF,
+  t: Pick<PayslipTemplate, "signatureImage" | "stampImage">,
+  x: number,
+  top: number,
+) {
+  const place = async (data: string | null | undefined, bx: number, bw: number, bh: number) => {
+    if (!data) return;
+    try {
+      const { width, height } = await imageSize(data);
+      const k = Math.min(bw / width, bh / height);
+      const w = width * k;
+      const h = height * k;
+      doc.addImage(data, /^data:image\/jpe?g/i.test(data) ? "JPEG" : "PNG", bx + bw - w, top + (bh - h), w, h);
+    } catch {
+      /* a broken image never blocks the slip */
+    }
+  };
+  await place(t.stampImage, x - 70, 60, 54);
+  await place(t.signatureImage, x, 160, 54);
 }

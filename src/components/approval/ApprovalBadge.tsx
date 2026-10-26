@@ -1,15 +1,24 @@
 "use client";
 
 import { useState } from "react";
-import { Check, Hourglass, Undo2, X } from "lucide-react";
-import { decideApproval, withdrawApproval, type ApprovalState } from "@/lib/api";
+import { Check, Hourglass, RotateCcw, Send, Undo2, X } from "lucide-react";
+import { decideApproval, recallApproval, resubmitApproval, withdrawApproval, type ApprovalState } from "@/lib/api";
 import { useApprovalInboxCount } from "@/lib/approvals";
 import { ApprovalTrail } from "@/components/approval/ApprovalTrail";
 import { useAuthStore } from "@/lib/authStore";
 
 /** Compact ladder status for a list row. Nothing for records that never needed approval. */
 export function ApprovalBadge({ state }: { state: ApprovalState | null | undefined }) {
-  if (!state || state.status === "CANCELLED") return null;
+  if (!state) return null;
+  if (state.status === "CANCELLED") {
+    // A recalled record is waiting on its owner to change and resend it — worth flagging on the list.
+    if (!wasRecalled(state)) return null;
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold whitespace-nowrap text-slate-600 ring-1 ring-slate-400/30 ring-inset">
+        <RotateCcw size={10} /> Recalled
+      </span>
+    );
+  }
   const cls =
     state.status === "APPROVED"
       ? "bg-emerald-50 text-emerald-700 ring-emerald-600/20"
@@ -47,6 +56,7 @@ export function ApprovalPanel({
   state,
   onChanged,
   rejectHint,
+  allowRecall = false,
 }: {
   entityType: string;
   entityId: number;
@@ -54,6 +64,11 @@ export function ApprovalPanel({
   onChanged: () => void;
   /** What a rejection does to this record, said before anyone clicks it. */
   rejectHint?: string;
+  /**
+   * Offer Onsite's Recall (pending or approved → back to the raiser to change) and, once recalled or
+   * rejected, "Send for approval again". Purchase orders use it.
+   */
+  allowRecall?: boolean;
 }) {
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
@@ -62,6 +77,9 @@ export function ApprovalPanel({
   const pending = state.status === "PENDING";
   const myId = useAuthStore((s) => s.user?.id);
   const raisedByMe = state.trail.some((a) => a.action === "SUBMITTED" && a.actorUserId != null && a.actorUserId === myId);
+  const superAdmin = useAuthStore((s) => (s.user?.role?.name ?? "").toLowerCase() === "super admin");
+  const owner = raisedByMe || superAdmin;
+  const recalled = wasRecalled(state);
 
   async function run(fn: () => Promise<unknown>) {
     setBusy(true);
@@ -82,7 +100,9 @@ export function ApprovalPanel({
     ? "border-amber-200 bg-amber-50/60"
     : state.status === "APPROVED"
       ? "border-emerald-200 bg-emerald-50/50"
-      : "border-rose-200 bg-rose-50/50";
+      : state.status === "CANCELLED"
+        ? "border-slate-200 bg-slate-50/70"
+        : "border-rose-200 bg-rose-50/50";
 
   return (
     <div className={`rounded-xl border p-3 ${tone}`}>
@@ -128,7 +148,39 @@ export function ApprovalPanel({
           </div>
         </div>
       )}
-      {pending && !state.canActNow && raisedByMe && (
+      {allowRecall && owner && (pending || state.status === "APPROVED") && (
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => {
+            const why = window.prompt(
+              state.status === "APPROVED"
+                ? "Recall this approved document to change it? It will need approving again.\n\nReason (optional):"
+                : "Recall this request to change the document?\n\nReason (optional):",
+              "",
+            );
+            if (why === null) return;
+            void run(() => recallApproval(entityType, entityId, why.trim() || undefined));
+          }}
+          className="mt-3 mr-2 inline-flex items-center gap-1 rounded-lg border border-amber-300 bg-white px-2.5 py-1.5 text-xs font-medium text-amber-700 transition hover:bg-amber-50 disabled:opacity-50"
+        >
+          <RotateCcw size={13} /> Recall
+        </button>
+      )}
+      {allowRecall && owner && (recalled || state.status === "REJECTED") && (
+        <div className="mt-3">
+          {recalled && <p className="mb-2 text-xs text-slate-500">Recalled — make your changes, then send it for approval again.</p>}
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => run(() => resubmitApproval(entityType, entityId))}
+            className="inline-flex items-center gap-1 rounded-lg bg-brand-accent px-2.5 py-1.5 text-xs font-medium text-white transition hover:opacity-90 disabled:opacity-50"
+          >
+            <Send size={13} /> Send for approval again
+          </button>
+        </div>
+      )}
+      {!allowRecall && pending && !state.canActNow && raisedByMe && (
         <button
           type="button"
           disabled={busy}
@@ -141,4 +193,11 @@ export function ApprovalPanel({
       {error && <p className="mt-2 text-xs text-rose-600">{error}</p>}
     </div>
   );
+}
+
+/** True when the request was closed by a Recall rather than withdrawn or rejected. */
+export function wasRecalled(state: ApprovalState): boolean {
+  if (state.status !== "CANCELLED") return false;
+  const last = state.trail[state.trail.length - 1];
+  return last?.action === "RECALLED";
 }
