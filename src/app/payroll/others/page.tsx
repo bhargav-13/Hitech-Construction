@@ -1,20 +1,19 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useDiscardGuard } from "@/lib/formDirty";
 import { PayrollShell } from "@/components/payroll/PayrollShell";
 import { Spinner } from "@/components/Spinner";
-import { Select } from "@/components/Select";
 import { OTHERS_TILES } from "@/lib/payrollConfig";
 import { loadRows, saveRows, type RegisterRow } from "@/lib/localRegister";
 import { loadReportContext, buildReport } from "@/lib/payrollReports";
 import { getPayrollPeople, getPayrollProfiles } from "@/lib/api";
-import type { UserResponse } from "@/lib/api";
 import { inr } from "@/lib/format";
 import {
   CheckSquare, FileText, Gift, LayoutGrid, Plus, Shield, Trophy, Trash2, Users, Wallet, X,
 } from "lucide-react";
 import { ReportTable } from "@/components/payroll/ReportTable";
+import { EmploymentLetters } from "@/components/payroll/EmploymentLetters";
 
 const ICON: Record<string, React.ComponentType<{ size?: number; className?: string }>> = {
   file: FileText, shield: Shield, grid: LayoutGrid, wallet: Wallet, trophy: Trophy, check: CheckSquare, users: Users, gift: Gift,
@@ -75,7 +74,7 @@ export default function OthersPage() {
           {cfg.kind === "cashbook" && <Cashbook />}
           {cfg.kind === "scorecard" && <Scorecard />}
           {cfg.kind === "celebrations" && <Celebrations />}
-          {cfg.kind === "letters" && <Letters />}
+          {cfg.kind === "letters" && <EmploymentLetters />}
         </Modal>
       )}
     </PayrollShell>
@@ -250,59 +249,6 @@ function Celebrations() {
           <span className="text-xs font-medium text-brand-accent">{x.inDays === 0 ? "Today" : `in ${x.inDays} day${x.inDays === 1 ? "" : "s"}`}</span>
         </div>
       ))}
-    </div>
-  );
-}
-
-const LETTER_TYPES = ["Offer Letter", "Appointment Letter", "Experience Letter", "Relieving Letter"];
-
-/** Generate a printable employment letter for a member. */
-function Letters() {
-  const [users, setUsers] = useState<UserResponse[]>([]);
-  const [userId, setUserId] = useState("");
-  const [type, setType] = useState(LETTER_TYPES[0]);
-  useEffect(() => { getPayrollPeople().then((r) => setUsers(r.content)).catch(() => setUsers([])); }, []);
-  const member = useMemo(() => users.find((u) => String(u.id) === userId), [users, userId]);
-
-  function generate() {
-    if (!member) return;
-    const today = new Date().toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric" });
-    const body =
-      type === "Experience Letter" || type === "Relieving Letter"
-        ? `This is to certify that ${member.fullName} was employed with our organisation${member.departmentName ? ` in the ${member.departmentName} department` : ""}. During the tenure, their conduct and performance were found to be satisfactory. We wish them success in their future endeavours.`
-        : `Dear ${member.fullName},\n\nWe are pleased to offer you employment with our organisation${member.departmentName ? ` in the ${member.departmentName} department` : ""}. Please treat this letter as confirmation of the terms discussed. We look forward to a long and mutually rewarding association.`;
-    const w = window.open("", "_blank", "width=800,height=900");
-    if (!w) return;
-    const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-    w.document.write(`<!doctype html><html><head><title>${esc(type)} — ${esc(member.fullName)}</title>
-<style>body{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;color:#0f172a;margin:48px;line-height:1.7;font-size:14px}
-h1{font-size:18px;margin-bottom:4px}.date{color:#64748b;font-size:12px;margin-bottom:28px}.body{white-space:pre-wrap}.sign{margin-top:56px}@media print{body{margin:24mm}}</style>
-</head><body>
-<h1>${esc(type)}</h1><div class="date">Date: ${esc(today)}</div>
-<div class="body">${esc(body)}</div>
-<div class="sign">For and on behalf of the organisation,<br/><br/><br/>Authorised Signatory</div>
-<script>window.onload=()=>window.print()</script></body></html>`);
-    w.document.close();
-  }
-
-  return (
-    <div className="space-y-4">
-      <div className="grid gap-3 sm:grid-cols-2">
-        <label className="block">
-          <span className="mb-1 block text-xs font-medium text-gray-500">Member</span>
-          <Select value={userId} onChange={setUserId} placeholder="Select member" options={[{ value: "", label: "Select member" }, ...users.map((u) => ({ value: String(u.id), label: u.fullName }))]} />
-        </label>
-        <label className="block">
-          <span className="mb-1 block text-xs font-medium text-gray-500">Letter type</span>
-          <Select value={type} onChange={setType} options={LETTER_TYPES.map((t) => ({ value: t, label: t }))} />
-        </label>
-      </div>
-      <div className="flex justify-end">
-        <button onClick={generate} disabled={!member} className="flex items-center gap-1.5 rounded-lg bg-brand-accent px-4 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50">
-          <FileText size={15} /> Generate &amp; Print
-        </button>
-      </div>
-      <p className="text-xs text-gray-400">Opens a print-ready letter in a new tab; use your browser&apos;s “Save as PDF” to download.</p>
     </div>
   );
 }

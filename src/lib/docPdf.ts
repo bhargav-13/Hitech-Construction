@@ -80,48 +80,31 @@ async function drawImageFit(doc: JsPdf, dataUrl: string, x: number, y: number, m
 }
 
 /**
- * Draw a document. Returns the jsPDF instance so the designer can preview it in an iframe; pass
- * `save: true` to download it instead.
+ * The letterhead every designed document starts with: logo and firm block on the left, the title
+ * and its meta rows (number, date) on the right, then a hairline — or a colour band in the "band"
+ * style. Shared by documents and HR letters so the two can never drift apart. Returns the y to
+ * continue from.
  */
-export async function renderDocPdf(
-  model: PrintModel,
-  opts: { template?: DocTemplate; firm?: FirmProfile | null; save?: boolean } = {},
-): Promise<JsPdf> {
-  const [{ jsPDF }, autoTableMod, tpl, firmLoaded] = await Promise.all([
-    import("jspdf"),
-    import("jspdf-autotable"),
-    opts.template ? Promise.resolve(opts.template) : getTemplate(model.kind),
-    opts.firm !== undefined ? Promise.resolve(opts.firm) : getCachedFirmProfile(),
-  ]);
-  const autoTable = (autoTableMod as unknown as { default: (doc: unknown, o: unknown) => void }).default;
-  const lastY = (d: JsPdf) => (d as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY;
-
-  const firm = firmLoaded;
+async function drawLetterhead(
+  doc: JsPdf,
+  tpl: DocTemplate,
+  firm: FirmProfile | null,
+  meta: [string, string][],
+  titleText: string,
+): Promise<number> {
   const fs = FONT[tpl.fontScale] ?? 1;
   const accent = hexToRgb(tpl.accent);
-  const doc = new jsPDF({ unit: "pt", format: "a4" });
   const pageW = doc.internal.pageSize.getWidth();
-  const pageH = doc.internal.pageSize.getHeight();
   const M = 40;
   const contentW = pageW - M * 2;
-  const bottomLimit = pageH - 56;
-
   const firmName = tpl.companyName.trim() || firm?.businessName || "";
   const firmAddress = tpl.companyAddress.trim() || firm?.address || "";
   const ink = () => doc.setTextColor(33, 37, 41);
-  const grey = (n = 90) => doc.setTextColor(n, n, n);
   const font = (style: "normal" | "bold", size: number) => {
     doc.setFont("helvetica", style);
     doc.setFontSize(size * fs);
   };
-  /** Start a new page when `need` points won't fit. */
-  const ensure = (y: number, need: number) => {
-    if (y + need <= bottomLimit) return y;
-    doc.addPage();
-    return 50;
-  };
 
-  // ================= Header =================
   const band = tpl.style === "band";
   let y = 30;
   let textX = M;
@@ -150,10 +133,12 @@ export async function renderDocPdf(
     if (c) firmLines.push(c);
   }
   font("bold", 10.5);
-  band ? doc.setTextColor(255, 255, 255) : ink();
+  if (band) doc.setTextColor(255, 255, 255);
+  else ink();
   if (firmName) doc.text(clean(firmName), textX, y + 8);
   font("normal", 9);
-  band ? doc.setTextColor(214, 226, 240) : ink();
+  if (band) doc.setTextColor(214, 226, 240);
+  else ink();
   let fy = y + 22;
   for (const l of firmLines.slice(0, 5)) {
     doc.text(l, textX, fy);
@@ -166,12 +151,13 @@ export async function renderDocPdf(
   }
 
   // Title + meta, right side
-  const title = clean(tpl.title || "");
+  const title = clean(titleText);
   font("bold", 18);
-  band ? doc.setTextColor(255, 255, 255) : ink();
+  if (band) doc.setTextColor(255, 255, 255);
+  else ink();
   if (title) doc.text(title, pageW - M, y + 16, { align: "right" });
-  let my = y + 40;
-  for (const [label, value] of model.meta) {
+  let my = title ? y + 40 : y + 8;
+  for (const [label, value] of meta) {
     font("bold", 9);
     doc.text(clean(label), pageW - M - 150, my, { align: "right" });
     font("normal", 9);
@@ -184,7 +170,7 @@ export async function renderDocPdf(
   if (band) y = Math.max(y, 110);
   if (tpl.headerNote.trim()) {
     font("normal", 8.5);
-    grey(110);
+    doc.setTextColor(110, 110, 110);
     doc.text(doc.splitTextToSize(clean(tpl.headerNote), contentW) as string[], M, y + 4);
     y += 14;
   }
@@ -193,7 +179,52 @@ export async function renderDocPdf(
     doc.setLineWidth(1);
     doc.line(M, y, pageW - M, y);
   }
-  y += 18;
+  return y + 18;
+}
+
+/**
+ * Draw a document. Returns the jsPDF instance so the designer can preview it in an iframe; pass
+ * `save: true` to download it instead.
+ */
+export async function renderDocPdf(
+  model: PrintModel,
+  opts: { template?: DocTemplate; firm?: FirmProfile | null; save?: boolean } = {},
+): Promise<JsPdf> {
+  const [{ jsPDF }, autoTableMod, tpl, firmLoaded] = await Promise.all([
+    import("jspdf"),
+    import("jspdf-autotable"),
+    opts.template ? Promise.resolve(opts.template) : getTemplate(model.kind),
+    opts.firm !== undefined ? Promise.resolve(opts.firm) : getCachedFirmProfile(),
+  ]);
+  const autoTable = (autoTableMod as unknown as { default: (doc: unknown, o: unknown) => void }).default;
+  const lastY = (d: JsPdf) => (d as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY;
+
+  const firm = firmLoaded;
+  const fs = FONT[tpl.fontScale] ?? 1;
+  const accent = hexToRgb(tpl.accent);
+  const doc = new jsPDF({ unit: "pt", format: "a4" });
+  const pageW = doc.internal.pageSize.getWidth();
+  const pageH = doc.internal.pageSize.getHeight();
+  const M = 40;
+  const contentW = pageW - M * 2;
+  const bottomLimit = pageH - 56;
+
+  const firmName = tpl.companyName.trim() || firm?.businessName || "";
+  const ink = () => doc.setTextColor(33, 37, 41);
+  const grey = (n = 90) => doc.setTextColor(n, n, n);
+  const font = (style: "normal" | "bold", size: number) => {
+    doc.setFont("helvetica", style);
+    doc.setFontSize(size * fs);
+  };
+  /** Start a new page when `need` points won't fit. */
+  const ensure = (y: number, need: number) => {
+    if (y + need <= bottomLimit) return y;
+    doc.addPage();
+    return 50;
+  };
+
+  // ================= Header =================
+  let y = await drawLetterhead(doc, tpl, firm, model.meta, tpl.title || "");
 
   // ================= Detail panels =================
   const panels = tpl.show.partyPanel ? model.panels.filter((p) => p.rows.length) : [];
@@ -439,4 +470,162 @@ export function shortDate(iso: string | null | undefined): string {
 /** Indian-grouped figure with fixed places, "1,600.000". */
 export function fig(n: number | null | undefined, places = 2): string {
   return Number(n ?? 0).toLocaleString("en-IN", { minimumFractionDigits: places, maximumFractionDigits: places });
+}
+
+/**
+ * An HR letter (Templates → Payroll): the shared letterhead with Ref / Date on the right, the
+ * heading centred, the employee's "To" block, the subject, the wording, and the signature. Text
+ * arrives already filled; `{{placeholders}}` are resolved by the caller (see lib/letters.ts).
+ */
+export async function renderLetterPdf(
+  letter: {
+    kind: DocKind;
+    subject: string;
+    body: string;
+    date: string;
+    refNo?: string | null;
+    /** The "To" block — name, designation, address. Empty for to-whom-it-may-concern letters. */
+    to?: string[];
+    /** Employee name for the acceptance line on offer / appointment letters. */
+    acceptanceBy?: string | null;
+    fileName?: string;
+  },
+  opts: { template?: DocTemplate; firm?: FirmProfile | null; save?: boolean } = {},
+): Promise<JsPdf> {
+  const [{ jsPDF }, tpl, firm] = await Promise.all([
+    import("jspdf"),
+    opts.template ? Promise.resolve(opts.template) : getTemplate(letter.kind),
+    opts.firm !== undefined ? Promise.resolve(opts.firm) : getCachedFirmProfile(),
+  ]);
+  const fs = FONT[tpl.fontScale] ?? 1;
+  const doc = new jsPDF({ unit: "pt", format: "a4" });
+  const pageW = doc.internal.pageSize.getWidth();
+  const pageH = doc.internal.pageSize.getHeight();
+  const M = 56;
+  const contentW = pageW - M * 2;
+  const bottomLimit = pageH - 60;
+  const firmName = tpl.companyName.trim() || firm?.businessName || "";
+  const font = (style: "normal" | "bold", size: number) => {
+    doc.setFont("helvetica", style);
+    doc.setFontSize(size * fs);
+  };
+  const ink = () => doc.setTextColor(33, 37, 41);
+  const ensure = (y: number, need: number) => {
+    if (y + need <= bottomLimit) return y;
+    doc.addPage();
+    return 56;
+  };
+
+  const meta: [string, string][] = [];
+  if (letter.refNo?.trim()) meta.push(["Ref No:", letter.refNo.trim()]);
+  meta.push(["Date:", letter.date]);
+  let y = await drawLetterhead(doc, tpl, firm, meta, "");
+
+  // Heading, centred and underlined.
+  const heading = clean(tpl.title || "");
+  if (heading) {
+    font("bold", 14);
+    ink();
+    doc.text(heading, pageW / 2, y + 6, { align: "center" });
+    const w = doc.getTextWidth(heading);
+    doc.setDrawColor(33, 37, 41);
+    doc.setLineWidth(0.8);
+    doc.line(pageW / 2 - w / 2, y + 9, pageW / 2 + w / 2, y + 9);
+    y += 34;
+  }
+
+  // To block
+  if (tpl.show.partyPanel && letter.to?.length) {
+    font("normal", 10.5);
+    ink();
+    doc.text("To,", M, y);
+    y += 15;
+    letter.to.forEach((line, i) => {
+      font(i === 0 ? "bold" : "normal", 10.5);
+      for (const l of doc.splitTextToSize(clean(line), contentW / 1.6) as string[]) {
+        doc.text(l, M, y);
+        y += 14;
+      }
+    });
+    y += 10;
+  }
+
+  // Subject
+  if (letter.subject.trim()) {
+    y = ensure(y, 20);
+    font("bold", 10.5);
+    ink();
+    const subj = doc.splitTextToSize(`Subject: ${clean(letter.subject)}`, contentW) as string[];
+    doc.text(subj, M, y);
+    y += 15 * subj.length + 10;
+  }
+
+  // Body — paragraphs keep their blank lines; long lines wrap.
+  font("normal", 10.5);
+  ink();
+  const lineH = 15 * fs;
+  for (const para of clean(letter.body).split("\n")) {
+    if (!para.trim()) {
+      y += lineH * 0.6;
+      continue;
+    }
+    for (const l of doc.splitTextToSize(para, contentW) as string[]) {
+      y = ensure(y, lineH);
+      doc.text(l, M, y);
+      y += lineH;
+    }
+  }
+
+  // Signature, on the left as letters are signed; acceptance on the right where asked for.
+  y = ensure(y + 24, 130);
+  if (tpl.show.signature) {
+    font("normal", 10.5);
+    ink();
+    doc.text("Yours sincerely,", M, y);
+    y += 16;
+    if (tpl.forFirmLine && firmName) {
+      font("bold", 10.5);
+      doc.text(`For ${clean(firmName)}`, M, y);
+      y += 6;
+    }
+    const top = y;
+    if (tpl.signatureImage) await drawImageFit(doc, tpl.signatureImage, M, top, 150, 56);
+    if (tpl.stampImage) await drawImageFit(doc, tpl.stampImage, M + 160, top - 4, 70, 64);
+    const lineY = top + 62;
+    doc.setDrawColor(200, 204, 208);
+    doc.setLineWidth(0.8);
+    doc.line(M, lineY, M + 170, lineY);
+    font("bold", 10);
+    ink();
+    doc.text(clean(tpl.signatory || "Authorised Signatory"), M, lineY + 14);
+
+    if (letter.acceptanceBy) {
+      const x = pageW - M - 190;
+      doc.line(x, lineY, pageW - M, lineY);
+      font("normal", 9.5);
+      doc.text("Accepted by", x, lineY + 14);
+      font("bold", 10);
+      doc.text(clean(letter.acceptanceBy), x, lineY + 28);
+      font("normal", 9);
+      doc.setTextColor(120, 120, 120);
+      doc.text("Signature & date", x, lineY + 41);
+    }
+    y = lineY + 50;
+  }
+
+  const pages = doc.getNumberOfPages();
+  const footer = tpl.footerNote.trim() || firm?.footerNote || "";
+  for (let pg = 1; pg <= pages; pg++) {
+    doc.setPage(pg);
+    font("normal", 7.5);
+    doc.setTextColor(140, 140, 140);
+    if (footer) doc.text(doc.splitTextToSize(clean(footer), contentW - 70) as string[], M, pageH - 26);
+    if (tpl.show.pageNumbers && pages > 1) doc.text(`Page ${pg} of ${pages}`, pageW - M, pageH - 26, { align: "right" });
+  }
+
+  if (opts.save) {
+    const safe = (letter.fileName || tpl.title || "letter").replace(/[\/:*?"<>|\s]+/g, "-");
+    doc.save(`${safe}.pdf`);
+  }
+  return doc;
 }

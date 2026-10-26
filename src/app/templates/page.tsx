@@ -19,6 +19,8 @@ import {
 import { renderDocPdf } from "@/lib/docPdf";
 import { sampleModel } from "@/lib/docModels";
 import { downloadPdf } from "@/lib/vyaparExport";
+import { LETTER_FIELDS, SAMPLE_LETTER_VALUES, isLetterKind } from "@/lib/letters";
+import { printLetter } from "@/lib/letterPrint";
 
 /**
  * Templates — design every PDF the ERP prints, the way Payroll → Payslip Design works for salary
@@ -37,7 +39,9 @@ export default function TemplatesPage() {
 
   const kinds = TEMPLATE_KINDS.filter((k) => canView(k.module));
   const modules = [...new Set(kinds.map((k) => k.module))];
-  const [selected, setSelected] = useState<DocKind | null>(null);
+  const [selected, setSelected] = useState<DocKind | null>(() =>
+    typeof window === "undefined" ? null : ((new URLSearchParams(window.location.search).get("kind") as DocKind | null) ?? null),
+  );
   const active = kinds.find((k) => k.kind === selected) ?? kinds.find((k) => !k.externalHref) ?? null;
 
   return (
@@ -169,9 +173,16 @@ function DesignerForm({
   }
 
   const isReport = kind === "REPORT";
+  const isLetter = isLetterKind(kind);
   const SHOW_LABELS: [keyof DocTemplate["show"], string][] = isReport
     ? [["pageNumbers", "Page numbers"]]
-    : [
+    : isLetter
+      ? [
+          ["partyPanel", "\"To\" block (employee)"],
+          ["signature", "Signature block"],
+          ["pageNumbers", "Page numbers"],
+        ]
+      : [
         ["partyPanel", "Party / details panels"],
         ["addresses", "Bill To / Ship To"],
         ["hsn", "HSN column"],
@@ -219,7 +230,7 @@ function DesignerForm({
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-[380px_minmax(0,1fr)]">
           <fieldset disabled={!editable} className="min-w-0 space-y-3">
             <Card title="Header">
-              {!isReport && <Text label="Document title" value={t.title} onChange={(v) => set({ title: v })} />}
+              {!isReport && <Text label={isLetter ? "Letter heading" : "Document title"} value={t.title} onChange={(v) => set({ title: v })} />}
               <Text label="Company name" value={t.companyName} onChange={(v) => set({ companyName: v })} placeholder="From the firm profile" />
               <Text label="Address" value={t.companyAddress} onChange={(v) => set({ companyAddress: v })} placeholder="From the firm profile" multiline />
               {!isReport && <Text label="Line under the header" value={t.headerNote} onChange={(v) => set({ headerNote: v })} placeholder="e.g. Subject to Rajkot jurisdiction" />}
@@ -261,7 +272,29 @@ function DesignerForm({
               </div>
             </Card>
 
-            {!isReport && (
+            {isLetter && (
+              <Card title="Letter wording">
+                <Text label="Subject" value={t.subject} onChange={(v) => set({ subject: v })} />
+                <Text label="Body" value={t.body} onChange={(v) => set({ body: v })} multiline rows={16} />
+                <div>
+                  <div className="mb-1 text-xs text-gray-500">Placeholders — filled from the employee when the letter is made</div>
+                  <div className="flex flex-wrap gap-1">
+                    {LETTER_FIELDS.map((f) => (
+                      <span
+                        key={f.key}
+                        title={f.auto ? `${f.label} — from the payroll profile` : `${f.label} — asked when generating`}
+                        className={`rounded px-1.5 py-0.5 font-mono text-[10.5px] ${f.auto ? "bg-cyan-50 text-cyan-800" : "bg-amber-50 text-amber-800"}`}
+                      >
+                        {`{{${f.key}}}`}
+                      </span>
+                    ))}
+                  </div>
+                  <p className="mt-1 text-[11px] text-gray-400">Blue fill in automatically; amber are asked for on the generate screen.</p>
+                </div>
+              </Card>
+            )}
+
+            {!isReport && !isLetter && (
               <Card title="Terms & conditions">
                 <Text
                   label="Default terms"
@@ -337,6 +370,7 @@ function Preview({ kind, template }: { kind: DocKind; template: DocTemplate }) {
 }
 
 async function buildPreview(kind: DocKind, template: DocTemplate) {
+  if (isLetterKind(kind)) return printLetter(kind, SAMPLE_LETTER_VALUES, { template });
   if (kind === "REPORT") {
     return (await downloadPdf(
       "Party Statement",

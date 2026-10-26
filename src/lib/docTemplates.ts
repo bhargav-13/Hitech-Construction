@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { apiRequest, getActiveCompanyId } from "./api";
+import { LETTER_DEFS, isLetterKind, letterDef, type LetterKind } from "./letters";
 
 /**
  * Templates — the print design of every PDF the ERP produces.
@@ -27,7 +28,8 @@ export type DocKind =
   | "PURCHASE_ORDER"
   | "RFQ"
   | "WORK_ORDER"
-  | "PAYSLIP";
+  | "PAYSLIP"
+  | LetterKind;
 
 export type TemplateModule = "VYAPAR" | "PROCUREMENT" | "PAYROLL";
 
@@ -70,6 +72,9 @@ export interface DocTemplate {
   signatureImage: string | null;
   stampImage: string | null;
   fontScale: "small" | "normal" | "large";
+  /** HR letters only: the subject line and the wording, with {{placeholders}}. */
+  subject: string;
+  body: string;
 }
 
 export interface KindInfo {
@@ -96,6 +101,7 @@ export const TEMPLATE_KINDS: KindInfo[] = [
   { kind: "RFQ", module: "PROCUREMENT", label: "RFQ", hint: "Enquiry sent to suppliers" },
   { kind: "WORK_ORDER", module: "PROCUREMENT", label: "Work Order", hint: "Subcontract order" },
   { kind: "PAYSLIP", module: "PAYROLL", label: "Payslip", hint: "Monthly salary slip", externalHref: "/payroll/setup/payslip" },
+  ...LETTER_DEFS.map((d) => ({ kind: d.kind, module: "PAYROLL" as const, label: d.label, hint: d.hint })),
 ];
 
 export const MODULE_LABEL: Record<TemplateModule, string> = {
@@ -104,7 +110,7 @@ export const MODULE_LABEL: Record<TemplateModule, string> = {
   PAYROLL: "Payroll",
 };
 
-const TITLES: Record<DocKind, string> = {
+const TITLES: Record<Exclude<DocKind, LetterKind>, string> = {
   SALE: "TAX INVOICE",
   SALE_ORDER: "SALE ORDER",
   ESTIMATE: "QUOTATION",
@@ -124,9 +130,10 @@ const TITLES: Record<DocKind, string> = {
 /** The default design for a kind — Onsite's layout, in the same dark table header. */
 export function defaultTemplate(kind: DocKind): DocTemplate {
   const isRfq = kind === "RFQ";
+  const letter = isLetterKind(kind) ? letterDef(kind) : null;
   return {
     style: "classic",
-    title: TITLES[kind],
+    title: letter ? letter.title : TITLES[kind as Exclude<DocKind, LetterKind>],
     accent: "#212529",
     companyName: "",
     companyAddress: "",
@@ -155,6 +162,10 @@ export function defaultTemplate(kind: DocKind): DocTemplate {
     signatureImage: null,
     stampImage: null,
     fontScale: "normal",
+    subject: letter?.subject ?? "",
+    body: letter?.body ?? "",
+    // A letter is signed "For <company>" over the signature, as HR letters are.
+    ...(letter ? { forFirmLine: true } : {}),
   };
 }
 
