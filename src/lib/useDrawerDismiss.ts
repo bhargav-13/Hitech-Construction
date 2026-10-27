@@ -19,7 +19,9 @@ export function useDrawerDismiss(
    * Asked before every dismissal — return false to keep the panel open. Escape used to bypass the
    * caller's own guard entirely, so a half-filled form could still be lost to a stray key press.
    */
-  canClose?: () => boolean
+  canClose?: () => boolean,
+  /** Off while the drawer is minimized to a chip — Escape shouldn't close something you can't see. */
+  escapeEnabled: boolean = true,
 ) {
   const [closing, setClosing] = useState(false);
   // Guards against double-fires (Escape + overlay click, or a re-render mid-exit).
@@ -35,12 +37,13 @@ export function useDrawerDismiss(
   }, [onClose, exitMs, canClose]);
 
   useEffect(() => {
+    if (!escapeEnabled) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") requestClose();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [requestClose]);
+  }, [requestClose, escapeEnabled]);
 
   useEffect(() => {
     return () => {

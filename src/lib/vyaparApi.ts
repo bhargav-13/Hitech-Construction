@@ -290,6 +290,16 @@ export const getDashboard = (projectId?: number) =>
  *   (the Parties screen and reports). Leave off for pickers — a bill must be able to pick any shared
  *   party, or a new site could never reuse an existing supplier.
  */
+/**
+ * Vyapar-18: the parties a form on `projectId` may pick — that project's own plus shared ones
+ * (projectId null). Another site's own parties stay out. No project picked yet → everyone.
+ */
+export function partiesForProject<P extends { projectId: number | null }>(parties: P[], projectId: string | number | null | undefined): P[] {
+  if (projectId == null || projectId === "") return parties;
+  const pid = Number(projectId);
+  return parties.filter((p) => p.projectId == null || p.projectId === pid);
+}
+
 export const getParties = (type?: PartyType, projectId?: number, own?: boolean) =>
   apiRequest<Party[]>(`${BASE}/parties${qs({ type, projectId, own: own ? "true" : undefined })}`);
 /** Parties added to a project's directory (Onsite's project party members) — listed there even at ₹0. */
@@ -492,6 +502,20 @@ export interface VyaparSettings {
   /** Per-document-type prefixes as a JSON string, e.g. {"SALE":"GJ/RA/26-27/"}. */
   prefixes: string | null;
 }
+
+/** Expense category master (Vyapar-28). An expense still records its category by name. */
+export interface ExpenseCategory {
+  id: number;
+  name: string;
+  expenseCount: number;
+}
+export const getExpenseCategories = () => apiRequest<ExpenseCategory[]>(`${BASE}/expense-categories`);
+export const createExpenseCategory = (name: string) =>
+  apiRequest<ExpenseCategory>(`${BASE}/expense-categories`, { method: "POST", body: { name } });
+export const renameExpenseCategory = (id: number, name: string) =>
+  apiRequest<ExpenseCategory>(`${BASE}/expense-categories/${id}`, { method: "PUT", body: { name } });
+export const deleteExpenseCategory = (id: number) =>
+  apiRequest<void>(`${BASE}/expense-categories/${id}`, { method: "DELETE" });
 
 export const getVyaparSettings = () => apiRequest<VyaparSettings>(`${BASE}/settings`);
 export const updateVyaparSettings = (body: VyaparSettings) =>

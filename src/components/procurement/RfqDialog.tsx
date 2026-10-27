@@ -147,7 +147,7 @@ export function RfqDialog({
 
         {/* Lines */}
         <div className="overflow-x-auto rounded-xl border border-gray-200">
-          <table className="w-full min-w-[620px] border-collapse text-sm">
+          <table className="vy-grid w-full min-w-[620px] text-sm">
             <thead>
               <tr className="border-b border-gray-200 bg-gray-50 text-left text-[11px] font-medium tracking-wide text-gray-500 uppercase">
                 <th className="w-8 px-2 py-2 text-center">#</th>

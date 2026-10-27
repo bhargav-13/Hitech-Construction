@@ -719,7 +719,7 @@ function PaymentDrawer({
 }) {
   const [amount, setAmount] = useState(invoice.balance);
   const [mode, setMode] = useState("Cash");
-  const [reference, setReference] = useState("");
+  const [description, setDescription] = useState("");
   const [paymentDate, setPaymentDate] = useState(new Date().toISOString().slice(0, 10));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -734,7 +734,8 @@ function PaymentDrawer({
         invoiceId: invoice.id,
         amount: Number(amount) || 0,
         mode,
-        reference: reference || null,
+        reference: null,
+        notes: description.trim() || null,
         paymentDate,
       });
       onSaved();
@@ -765,8 +766,8 @@ function PaymentDrawer({
         <DrawerField label="Mode">
           <Select value={mode} onChange={setMode} options={PAYMENT_TYPES.map((t) => ({ value: t, label: t }))} />
         </DrawerField>
-        <DrawerField label="Reference">
-          <input value={reference} onChange={(e) => setReference(e.target.value)} className="input" placeholder="NEFT / cheque no" />
+        <DrawerField label="Description">
+          <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={2} className="input resize-none" placeholder="Cheque / UTR no., what it's for…" />
         </DrawerField>
       </div>
     </Drawer>

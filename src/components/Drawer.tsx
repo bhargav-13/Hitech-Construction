@@ -4,6 +4,11 @@ import { useCallback } from "react";
 import { X } from "lucide-react";
 import { useDrawerDismiss } from "@/lib/useDrawerDismiss";
 import { DISCARD_PROMPT, useDiscardGuard } from "@/lib/formDirty";
+import {
+  DrawerSizeButtons,
+  MinimizedDrawerChip,
+  useDrawerSize,
+} from "@/components/DrawerSize";
 
 /**
  * Right-side slide-over drawer — Onsite's standard "add / edit record" form pattern.
@@ -61,63 +66,89 @@ export function Drawer({
   // `dirty` forces the prompt on a drawer that opened already holding work.
   const canClose = useCallback(
     () => (guardOnClose && dirty ? confirm(DISCARD_PROMPT) : confirmDiscard()),
-    [dirty, guardOnClose, confirmDiscard]
+    [dirty, guardOnClose, confirmDiscard],
   );
 
-  const { closing, requestClose } = useDrawerDismiss(onClose, undefined, canClose);
+  const { maximized, toggleMaximized, minimized, setMinimized } =
+    useDrawerSize(width);
+  const { closing, requestClose } = useDrawerDismiss(
+    onClose,
+    undefined,
+    canClose,
+    !minimized,
+  );
 
   return (
-    <div
-      className={`fixed inset-0 z-50 flex justify-end bg-black/40 ${
-        closing ? "animate-overlay-out" : "animate-overlay-in"
-      }`}
-      onClick={requestClose}
-    >
+    <>
+      {/* Minimized: the panel stays mounted but hidden (so the form keeps its state) and the overlay
+        stops catching clicks, leaving the page behind fully usable. */}
+      {minimized && !closing && (
+        <MinimizedDrawerChip
+          title={title}
+          onRestore={() => setMinimized(false)}
+          onClose={requestClose}
+        />
+      )}
       <div
-        ref={panelRef}
-        className={`flex h-full w-full ${width} flex-col bg-white shadow-2xl ${
-          closing ? "animate-slide-out-right" : "animate-slide-in-right"
-        }`}
-        onClick={(e) => e.stopPropagation()}
+        className={`fixed inset-0 z-50 flex justify-end bg-black/40 ${
+          closing ? "animate-overlay-out" : "animate-overlay-in"
+        } ${minimized ? "hidden" : ""}`}
+        onClick={requestClose}
       >
-        <div className="h-1 w-full bg-gradient-to-r from-brand-accent to-cyan-400" />
-        <div className="flex items-center justify-between border-b border-gray-100 px-6 py-4">
-          <div className="flex items-center gap-3">
-            <button
-              onClick={requestClose}
-              className="rounded-full p-1 text-gray-400 transition-all duration-150 hover:bg-gray-100 hover:text-gray-600 active:scale-90"
-            >
-              <X size={18} />
-            </button>
-            <h2 className="text-sm font-bold tracking-wide text-gray-800 uppercase">{title}</h2>
-          </div>
-          <div className="flex items-center gap-2">
-            {onSaveAndNew && (
+        <div
+          ref={panelRef}
+          className={`flex h-full w-full ${maximized ? "max-w-none" : width} flex-col bg-white shadow-2xl transition-[max-width] duration-200 ${
+            closing ? "animate-slide-out-right" : "animate-slide-in-right"
+          }`}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="h-1 w-full bg-gradient-to-r from-brand-accent to-cyan-400" />
+          <div className="flex items-center justify-between border-b border-gray-100 px-6 py-4">
+            <div className="flex items-center gap-3">
               <button
-                onClick={onSaveAndNew}
-                className="rounded-lg border border-brand-accent px-4 py-2 text-sm font-medium text-brand-accent transition-all duration-150 hover:bg-cyan-50 active:scale-95"
+                onClick={requestClose}
+                title="Close"
+                className="rounded-full p-1 text-gray-400 transition-all duration-150 hover:bg-gray-100 hover:text-gray-600 active:scale-90"
               >
-                {saveAndNewLabel}
+                <X size={18} />
               </button>
-            )}
-            {onSave && (
-              <button
-                onClick={onSave}
-                className="rounded-lg bg-brand-accent px-5 py-2 text-sm font-medium text-white transition-all duration-150 hover:opacity-90 active:scale-95"
-              >
-                {saveLabel}
-              </button>
-            )}
+              <DrawerSizeButtons
+                maximized={maximized}
+                onToggleMaximized={toggleMaximized}
+                onMinimize={() => setMinimized(true)}
+              />
+              <h2 className="ml-1 text-sm font-bold tracking-wide text-gray-800 uppercase">
+                {title}
+              </h2>
+            </div>
+            <div className="flex items-center gap-2">
+              {onSaveAndNew && (
+                <button
+                  onClick={onSaveAndNew}
+                  className="rounded-lg border border-brand-accent px-4 py-2 text-sm font-medium text-brand-accent transition-all duration-150 hover:bg-cyan-50 active:scale-95"
+                >
+                  {saveAndNewLabel}
+                </button>
+              )}
+              {onSave && (
+                <button
+                  onClick={onSave}
+                  className="rounded-lg bg-brand-accent px-5 py-2 text-sm font-medium text-white transition-all duration-150 hover:opacity-90 active:scale-95"
+                >
+                  {saveLabel}
+                </button>
+              )}
+            </div>
           </div>
+          <div className="flex-1 overflow-y-auto px-6 py-5">{children}</div>
+          {footer && (
+            <div className="flex flex-wrap items-center justify-between gap-2 border-t border-gray-200 bg-gray-50 px-6 py-3">
+              {footer}
+            </div>
+          )}
         </div>
-        <div className="flex-1 overflow-y-auto px-6 py-5">{children}</div>
-        {footer && (
-          <div className="flex flex-wrap items-center justify-between gap-2 border-t border-gray-200 bg-gray-50 px-6 py-3">
-            {footer}
-          </div>
-        )}
       </div>
-    </div>
+    </>
   );
 }
 
@@ -145,7 +176,11 @@ export function DrawerField({
 }) {
   const Wrapper = group ? "div" : "label";
   return (
-    <Wrapper className={`block ${className}`} role={group ? "group" : undefined} aria-label={group ? label : undefined}>
+    <Wrapper
+      className={`block ${className}`}
+      role={group ? "group" : undefined}
+      aria-label={group ? label : undefined}
+    >
       <span className="mb-1.5 block text-[11px] font-medium tracking-wide text-gray-400 uppercase">
         {label}
         {required && <span className="text-rose-500"> *</span>}

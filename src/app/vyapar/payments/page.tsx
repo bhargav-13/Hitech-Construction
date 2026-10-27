@@ -52,7 +52,7 @@ export default function VyaparPaymentsPage() {
     return payments.filter((p) => {
       if (dir !== "All" && p.direction !== dir) return false;
       if (!q) return true;
-      return [p.partyName, p.reference, p.mode].some((f) => f?.toLowerCase().includes(q));
+      return [p.partyName, p.notes, p.reference, p.mode].some((f) => f?.toLowerCase().includes(q));
     });
   }, [payments, search, dir]);
 
@@ -105,7 +105,7 @@ export default function VyaparPaymentsPage() {
         <div className="flex flex-wrap items-center gap-2">
           <div className="flex min-w-[220px] flex-1 items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 transition-colors duration-150 focus-within:border-cyan-500">
             <Search size={15} className="text-gray-400" />
-            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search party, reference or mode…" className="w-full bg-transparent text-sm outline-none" />
+            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search party, description or mode…" className="w-full bg-transparent text-sm outline-none" />
           </div>
           {(["All", "IN", "OUT"] as const).map((d) => (
             <button
@@ -137,7 +137,7 @@ export default function VyaparPaymentsPage() {
                   <th className="px-4 py-2 font-medium">Party</th>
                   <th className="px-4 py-2 font-medium">Type</th>
                   <th className="px-4 py-2 font-medium">Mode</th>
-                  <th className="px-4 py-2 font-medium">Reference</th>
+                  <th className="px-4 py-2 font-medium">Description</th>
                   <th className="px-4 py-2 text-right font-medium">Amount</th>
                   <th className="w-10 px-4 py-2" />
                 </tr>
@@ -154,7 +154,7 @@ export default function VyaparPaymentsPage() {
                       </span>
                     </td>
                     <td className="px-4 py-2.5 text-gray-600">{p.mode}</td>
-                    <td className="px-4 py-2.5 text-gray-500">{p.reference || "—"}</td>
+                    <td className="px-4 py-2.5 text-gray-500">{p.notes || p.reference || "—"}</td>
                     <td className={`px-4 py-2.5 text-right font-semibold ${p.direction === "IN" ? "text-emerald-600" : "text-rose-600"}`}>
                       {p.direction === "IN" ? "+" : "−"}{inr(p.amount)}
                     </td>
@@ -216,7 +216,6 @@ function StandalonePaymentDrawer({
   const [partyId, setPartyId] = useState("");
   const [amount, setAmount] = useState(0);
   const [mode, setMode] = useState("Cash");
-  const [reference, setReference] = useState("");
   const [notes, setNotes] = useState("");
   const [paymentDate, setPaymentDate] = useState(new Date().toISOString().slice(0, 10));
   const [saving, setSaving] = useState(false);
@@ -237,7 +236,7 @@ function StandalonePaymentDrawer({
         partyId: partyId ? Number(partyId) : null,
         amount: Number(amount),
         mode,
-        reference: reference || null,
+        reference: null,
         notes: notes || null,
         paymentDate,
         projectId: projectId ?? null,
@@ -277,11 +276,8 @@ function StandalonePaymentDrawer({
         <DrawerField label="Mode">
           <Select value={mode} onChange={setMode} options={paymentTypeOptions} />
         </DrawerField>
-        <DrawerField label="Reference">
-          <input value={reference} onChange={(e) => setReference(e.target.value)} className="input" placeholder="NEFT / cheque no" />
-        </DrawerField>
-        <DrawerField label="Notes">
-          <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} className="input resize-none" />
+        <DrawerField label="Description">
+          <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} className="input resize-none" placeholder="Cheque / UTR no., what it's for…" />
         </DrawerField>
       </div>
     </Drawer>

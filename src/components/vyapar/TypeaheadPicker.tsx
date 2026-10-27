@@ -38,6 +38,7 @@ export function TypeaheadPicker<T>({
   placeholder,
   autoFocus,
   className = "",
+  inputClassName = "w-full rounded-md border border-gray-200 px-2 py-1 text-sm outline-none transition-colors duration-150 focus:border-cyan-500 disabled:bg-gray-50",
   disabled = false,
 }: {
   /** The text in the box. Free-form: a line may name something not in the catalogue. */
@@ -54,6 +55,8 @@ export function TypeaheadPicker<T>({
   placeholder?: string;
   autoFocus?: boolean;
   className?: string;
+  /** The box's own styling. Defaults to the compact grid-cell look; forms pass their field class. */
+  inputClassName?: string;
   disabled?: boolean;
 }) {
   const [open, setOpen] = useState(false);
@@ -125,7 +128,7 @@ export function TypeaheadPicker<T>({
         }}
         onFocus={() => setOpen(true)}
         onKeyDown={onKeyDown}
-        className="w-full rounded-md border border-gray-200 px-2 py-1 text-sm outline-none transition-colors duration-150 focus:border-cyan-500 disabled:bg-gray-50"
+        className={inputClassName}
       />
 
       {open && (matches.length > 0 || onCreate) && (

@@ -1,11 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Drawer } from "@/components/Drawer";
 import { Select } from "@/components/Select";
 import { DatePicker } from "@/components/DatePicker";
 import { useItemSettings, DEFAULT_UNITS, TAX_RATES } from "@/lib/useItemSettings";
-import type { ManagedUnit } from "@/lib/useItemMasters";
+import { useItemMasters, type ManagedUnit } from "@/lib/useItemMasters";
+import { ItemMasterDialog } from "@/components/vyapar/ItemMasterDialog";
 import * as vyapar from "@/lib/vyaparApi";
 import { useVyaparProjectId } from "@/lib/projectScope";
 import type { Item } from "@/lib/vyaparApi";
@@ -73,6 +74,13 @@ export function ItemDialog({
   const [hsn, setHsn] = useState(existing?.hsn ?? "");
   const [itemCode, setItemCode] = useState(existing?.itemCode ?? "");
   const [unit, setUnit] = useState(existing?.unit ?? settings.defaultUnit);
+  // Vyapar-6: a missing unit can be added right here instead of leaving the form for the master.
+  const { masters, addUnit } = useItemMasters();
+  const [addingUnit, setAddingUnit] = useState(false);
+  const unitList = useMemo(() => {
+    const seen = new Set<string>();
+    return [...units, ...masters.units].filter((u) => !seen.has(u.short) && seen.add(u.short));
+  }, [units, masters.units]);
   const [category, setCategory] = useState(existing?.category ?? "");
   const [description, setDescription] = useState(existing?.description ?? "");
 
@@ -205,7 +213,9 @@ export function ItemDialog({
             <Select
               value={unit}
               onChange={setUnit}
-              options={[{ value: "NONE", label: "Select Unit" }, ...units.map((u) => ({ value: u.short, label: `${u.name} (${u.short})` }))]}
+              options={[{ value: "NONE", label: "Select Unit" }, ...unitList.map((u) => ({ value: u.short, label: `${u.name} (${u.short})` }))]}
+              onCreate={() => setAddingUnit(true)}
+              createLabel="Add New Unit"
             />
           </Field>
         </div>
@@ -429,6 +439,19 @@ export function ItemDialog({
           </button>
         </div>
       </div>
+      {addingUnit && (
+        <ItemMasterDialog
+          kind="unit"
+          taken={unitList.map((u) => u.short)}
+          onClose={() => setAddingUnit(false)}
+          onSubmit={(value) => {
+            const u = value as ManagedUnit;
+            addUnit(u);
+            setUnit(u.short);
+            setAddingUnit(false);
+          }}
+        />
+      )}
     </Drawer>
   );
 }

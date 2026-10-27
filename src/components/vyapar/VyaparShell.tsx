@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { AppShell } from "@/components/AppShell";
@@ -21,6 +21,7 @@ import {
   Home,
   PanelLeftClose,
   PanelLeftOpen,
+  Pin,
   Plus,
   Search,
   Settings,
@@ -30,6 +31,41 @@ import {
 } from "lucide-react";
 import { AutoRefreshBadge } from "@/components/AutoRefreshBadge";
 import { useAutoRefreshClock } from "@/lib/autoRefresh";
+
+const QUICK_ADD_KEY = "hlt.vyapar.quickAdd";
+const DEFAULT_QUICK_ADD = ["SALE", "PURCHASE"];
+
+/** Sale and Purchase keep their familiar colours; anything else pinned gets a neutral chip. */
+const QUICK_ADD_TONE: Record<string, string> = {
+  SALE: "bg-rose-50 text-rose-600 hover:bg-rose-100",
+  PURCHASE: "bg-cyan-50 text-brand-accent hover:bg-cyan-100",
+};
+
+/** Shorter names for the top bar, where every character counts. */
+const QUICK_ADD_LABEL: Record<string, string> = { SALE: "Sale", PURCHASE: "Purchase", EXPENSE: "Expense" };
+
+/**
+ * Which documents get a button of their own on the top bar, chosen from the Add More panel. Kept
+ * in this browser: it's a personal layout preference, not something the firm shares.
+ */
+function useQuickAdd() {
+  const [pinned, setPinned] = useState<string[]>(DEFAULT_QUICK_ADD);
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(QUICK_ADD_KEY);
+      if (raw) setPinned(JSON.parse(raw));
+    } catch {}
+  }, []);
+  const toggle = (type: string) =>
+    setPinned((cur) => {
+      const next = cur.includes(type) ? cur.filter((t) => t !== type) : [...cur, type];
+      try {
+        localStorage.setItem(QUICK_ADD_KEY, JSON.stringify(next));
+      } catch {}
+      return next;
+    });
+  return { pinned, toggle };
+}
 
 const ICONS: Record<string, React.ComponentType<{ size?: number; className?: string }>> = {
   home: Home,
@@ -59,6 +95,11 @@ export function VyaparShell({ children }: { children: React.ReactNode }) {
   const canCreate = (type: string) => can(`${docFeature(type)}:CREATE`);
   const creatable = DOC_CONFIGS.filter((d) => canCreate(d.type));
   const [calcOpen, setCalcOpen] = useState(false);
+  const quickAdd = useQuickAdd();
+  // In pin order, so the newest pin lands at the end of the row.
+  const quickButtons = quickAdd.pinned
+    .map((t) => creatable.find((d) => d.type === t))
+    .filter((d): d is (typeof creatable)[number] => !!d);
   // Persisted alongside the main sidebar so both survive route changes.
   const railCollapsed = useUiStore((s) => s.vyaparRailCollapsed);
   const toggleRail = useUiStore((s) => s.toggleVyaparRail);
@@ -128,22 +169,17 @@ export function VyaparShell({ children }: { children: React.ReactNode }) {
               />
             </div>
 
-            {canCreate("SALE") && (
-            <Link
-              href="/vyapar/sale?new=1"
-              className="flex items-center gap-1 rounded-lg bg-rose-50 px-3 py-1.5 text-sm font-semibold text-rose-600 transition-all duration-150 hover:bg-rose-100 active:scale-95"
-            >
-              <Plus size={14} /> Add Sale
-            </Link>
-            )}
-            {canCreate("PURCHASE") && (
-            <Link
-              href="/vyapar/purchase?new=1"
-              className="flex items-center gap-1 rounded-lg bg-cyan-50 px-3 py-1.5 text-sm font-semibold text-brand-accent transition-all duration-150 hover:bg-cyan-100 active:scale-95"
-            >
-              <Plus size={14} /> Add Purchase
-            </Link>
-            )}
+            {quickButtons.map((d) => (
+              <Link
+                key={d.type}
+                href={`/vyapar/${d.slug}?new=1`}
+                className={`flex items-center gap-1 rounded-lg px-3 py-1.5 text-sm font-semibold transition-all duration-150 active:scale-95 ${
+                  QUICK_ADD_TONE[d.type] ?? "bg-gray-50 text-gray-700 ring-1 ring-gray-200 hover:bg-gray-100"
+                }`}
+              >
+                <Plus size={14} /> Add {QUICK_ADD_LABEL[d.type] ?? d.label}
+              </Link>
+            ))}
 
             <AutoRefreshBadge />
 
@@ -179,6 +215,9 @@ export function VyaparShell({ children }: { children: React.ReactNode }) {
                 <>
                   <div className="fixed inset-0 z-30" onClick={() => setAddOpen(false)} />
                   <div className="animate-menu-pop absolute right-0 top-10 z-40 w-[560px] origin-top-right rounded-xl border border-gray-100 bg-white p-4 shadow-2xl ring-1 ring-black/[0.04]">
+                    <p className="mb-3 flex items-center gap-1.5 text-xs text-gray-400">
+                      <Pin size={12} /> Pin an entry to keep it as a button on the top bar.
+                    </p>
                     <div className="grid grid-cols-3 gap-4">
                       {(["SALE", "PURCHASE", "OTHERS"] as const).map((group) => (
                         <div key={group}>
@@ -186,16 +225,34 @@ export function VyaparShell({ children }: { children: React.ReactNode }) {
                             {group}
                           </div>
                           <div className="space-y-0.5">
-                            {creatable.filter((d) => d.group === group).map((d) => (
-                              <Link
-                                key={d.type}
-                                href={`/vyapar/${d.slug}?new=1`}
-                                onClick={() => setAddOpen(false)}
-                                className="flex items-center rounded-lg px-2 py-1.5 text-sm text-gray-700 transition-colors duration-150 hover:bg-cyan-50 hover:text-brand-accent"
-                              >
-                                <span className="truncate">{d.label}</span>
-                              </Link>
-                            ))}
+                            {creatable.filter((d) => d.group === group).map((d) => {
+                              const isPinned = quickAdd.pinned.includes(d.type);
+                              return (
+                                <div key={d.type} className="group/qa flex items-center rounded-lg hover:bg-cyan-50">
+                                  <Link
+                                    href={`/vyapar/${d.slug}?new=1`}
+                                    onClick={() => setAddOpen(false)}
+                                    className="min-w-0 flex-1 truncate px-2 py-1.5 text-sm text-gray-700 transition-colors duration-150 group-hover/qa:text-brand-accent"
+                                  >
+                                    {d.label}
+                                  </Link>
+                                  <button
+                                    type="button"
+                                    onClick={() => quickAdd.toggle(d.type)}
+                                    title={isPinned ? "Remove from top bar" : "Pin to top bar"}
+                                    aria-label={isPinned ? `Unpin ${d.label}` : `Pin ${d.label}`}
+                                    aria-pressed={isPinned}
+                                    className={`mr-1 rounded p-1 transition-all duration-150 ${
+                                      isPinned
+                                        ? "text-brand-accent"
+                                        : "text-gray-300 opacity-0 group-hover/qa:opacity-100 hover:text-brand-accent"
+                                    }`}
+                                  >
+                                    <Pin size={13} className={isPinned ? "fill-current" : ""} />
+                                  </button>
+                                </div>
+                              );
+                            })}
                           </div>
                         </div>
                       ))}

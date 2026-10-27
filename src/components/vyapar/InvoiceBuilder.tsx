@@ -36,7 +36,10 @@ import { ApprovalPanel } from "@/components/approval/ApprovalBadge";
 import type { ApprovalState } from "@/lib/api";
 import { shareInvoice } from "@/components/vyapar/TxnRowActions";
 import { useVyaparSettings } from "@/lib/useVyaparSettings";
+import { useFormDraft } from "@/lib/formDraft";
+import { DraftBanner } from "@/components/vyapar/DraftBanner";
 import { useItemMasters, type ManagedUnit } from "@/lib/useItemMasters";
+import { DEFAULT_UNITS } from "@/lib/useItemSettings";
 import type { PoDraft } from "@/lib/poHandoff";
 import { useVyaparProjectId } from "@/lib/projectScope";
 import {
@@ -211,7 +214,9 @@ export function InvoiceBuilder({
   const bankAccountFor = useBankAccountResolver();
   // The form's shape follows Settings, as it does in Vyapar: due dates, round-off behaviour and
   // which grid columns exist are all switches, not hardcoded decisions.
-  const { settings } = useVyaparSettings();
+  const { settings, save: saveSettings } = useVyaparSettings();
+  /** Vyapar-7: a new prefix series typed straight from the number dropdown. null = closed. */
+  const [newPrefix, setNewPrefix] = useState<string | null>(null);
   // The unit picker reads the same Units master the Items screen manages, so a unit added here
   // shows up there and vice-versa — it used to be a hardcoded twelve, which is why the client
   // couldn't bill in anything the list didn't already know about.
@@ -230,7 +235,13 @@ export function InvoiceBuilder({
   // the two addresses — bill here, deliver there. The client asked for exactly that swap.
   const isPurchaseOrder = docType === "PURCHASE_ORDER";
   const showStateOfSupply = !isPurchaseOrder;
-  const showBillShip = isPurchaseOrder;
+  // Sales carry Bill To / Ship To as well (client ask, Vyapar-25): the buyer is billed at its
+  // office while the goods go to a site. State of supply stays on sales — they're taxed.
+  const isSaleSide = docType === "SALE" || docType === "ESTIMATE" || docType === "PROFORMA" || docType === "SALE_ORDER" || docType === "DELIVERY_CHALLAN";
+  const showBillShip = isPurchaseOrder || isSaleSide;
+  // Vyapar-23: the client doesn't put terms on purchase-side documents — they're the supplier's
+  // paper. Notes stay.
+  const showTerms = !isSupplierSide;
   const noPayment = isQuote || isOrder || isChallan;
   // Vyapar drives purchase paid/unpaid from a "Paid" amount, not a cash/credit toggle.
   const noToggle = noPayment || isReturn || isPurchase;
@@ -376,7 +387,8 @@ export function InvoiceBuilder({
   const [received, setReceived] = useState(existing?.paidAmount ?? 0);
   const [receivedTouched, setReceivedTouched] = useState(existing != null);
   /** Vyapar's ☑ next to Received — off books the document as fully outstanding. */
-  const [receiveOn, setReceiveOn] = useState(existing ? (existing.paidAmount ?? 0) > 0 : true);
+  // A new credit document starts unticked: nothing has been received, so nothing is owed back.
+  const [receiveOn, setReceiveOn] = useState(existing ? (existing.paidAmount ?? 0) > 0 : isCash);
   /** Cheque/NEFT number for the received portion. */
   const [paymentReference, setPaymentReference] = useState(existing?.paymentReference ?? "");
   // Payment mode for the received portion — Vyapar's "Payment Type" picker on a paid invoice.
@@ -690,6 +702,29 @@ export function InvoiceBuilder({
   const [initialSignature] = useState(prefill ? "" : signature);
   const dirty = signature !== initialSignature;
 
+  // Vyapar-10: a new document survives being closed (to change a setting, say) as a local draft.
+  const draftData = {
+    partyId, partyText, phone, billingAddress, selectedProjectId, invoicePrefix, invoiceNo, invoiceDate,
+    dueDate, stateOfSupply, addr, terms, termsTitle, notes, discountPercent, discountAmount, roundOffOn,
+    priceHasTax, received, receivedTouched, receiveOn, isCash, paymentMode, paymentReference, lines, description,
+  };
+  const draft = useFormDraft(existing || prefill ? null : `vyapar.${docType}`, draftData, dirty);
+
+  function restoreDraft() {
+    const d = draft.offered?.data;
+    if (!d) return;
+    setPartyId(d.partyId); setPartyText(d.partyText); setPhone(d.phone); setBillingAddress(d.billingAddress);
+    setSelectedProjectId(d.selectedProjectId); setInvoicePrefix(d.invoicePrefix); setInvoiceNo(d.invoiceNo);
+    setInvoiceDate(d.invoiceDate); setDueDate(d.dueDate); setStateOfSupply(d.stateOfSupply); setAddr(d.addr);
+    setTerms(d.terms); setTermsTitle(d.termsTitle); setNotes(d.notes); setDiscountPercent(d.discountPercent);
+    setDiscountAmount(d.discountAmount); setRoundOffOn(d.roundOffOn); setPriceHasTax(d.priceHasTax);
+    setReceived(d.received); setReceivedTouched(d.receivedTouched); setReceiveOn(d.receiveOn); setIsCash(d.isCash);
+    setPaymentMode(d.paymentMode); setPaymentReference(d.paymentReference); setLines(d.lines);
+    setDescription(d.description);
+    if (d.description) setShowDescription(true);
+    draft.dismiss();
+  }
+
   /** Mirrors the server's maths exactly so the on-screen preview always matches what gets saved. */
   const calc = useMemo(() => {
     let qty = 0;
@@ -740,8 +775,12 @@ export function InvoiceBuilder({
     settings.roundOffMode, settings.roundOffTo,
   ]);
 
-  // Received defaults to the full total on a cash bill and nothing on credit, until the user edits it.
-  const displayReceived = !receiveOn ? 0 : receivedTouched ? received : isCash ? calc.total : 0;
+  // Ticked and not typed over, Received follows the total. It used to freeze at whatever the total
+  // was when the box was ticked, so adding a line afterwards left a phantom "Balance Due" on a bill
+  // that was meant to be fully paid (Vyapar-16).
+  const displayReceived = !receiveOn ? 0 : receivedTouched ? received : calc.total;
+  /** Vyapar-15: with nothing received there is no payment, so no payment type either. */
+  const nothingReceived = displayReceived <= 0;
   const balanceDue = Math.max(0, calc.total - displayReceived);
   const selectedParty = parties.find((p) => String(p.id) === partyId) ?? null;
 
@@ -761,30 +800,43 @@ export function InvoiceBuilder({
   });
 
   /**
-   * The unit dropdown's options: NONE, the managed master, and anything already sitting on a line.
-   * That last part matters on an old document — a unit deleted from the master since it was billed
-   * would otherwise vanish from its own invoice the moment someone opened it to look.
+   * The unit dropdown's options. Vyapar-3: only the units that matter, not every unit Vyapar ships
+   * with — the ones the catalogue actually uses plus any the user added themselves. Anything already
+   * on a line stays too: on an old document, a unit deleted from the master since it was billed
+   * would otherwise vanish from its own invoice. A line on a catalogue item narrows further to that
+   * item's own unit (see `unitOptionsFor`).
    */
   const unitOptions = useMemo(() => {
+    const builtIn = new Set(DEFAULT_UNITS.map((u) => u.short));
+    const used = new Set(items.map((it) => (it.unit ?? "").trim()).filter((u) => u && u !== "NONE"));
     const seen = new Set(["NONE"]);
     const opts: { value: string; label: string; short?: string }[] = [{ value: "NONE", label: "Select Unit", short: "NONE" }];
     for (const u of masters.units) {
       const short = u.short.trim();
       if (!short || seen.has(short)) continue;
+      if (builtIn.has(short) && !used.has(short)) continue;
       seen.add(short);
       // The list reads "Bags (BAG)", as on the item form; the closed control shows just "BAG" so the
       // narrow grid cell doesn't overflow.
       const name = u.name.trim();
       opts.push({ value: short, label: name && name.toUpperCase() !== short.toUpperCase() ? `${name} (${short})` : short, short });
     }
-    for (const l of lines) {
-      const short = (l.unit ?? "").trim();
+    for (const short of [...used, ...lines.map((l) => (l.unit ?? "").trim())]) {
       if (!short || seen.has(short)) continue;
       seen.add(short);
       opts.push({ value: short, label: short, short });
     }
     return [...opts, { value: ADD_UNIT, label: "⊕ Add New Unit" }];
-  }, [masters.units, lines]);
+  }, [masters.units, lines, items]);
+
+  /** A line on a catalogue item offers that item's unit (and whatever the line already holds). */
+  function unitOptionsFor(l: LineDraft) {
+    const item = l.itemId != null ? items.find((it) => it.id === l.itemId) : undefined;
+    const own = (item?.unit ?? "").trim();
+    if (!own || own === "NONE") return unitOptions;
+    const keep = new Set([own, (l.unit ?? "").trim()]);
+    return unitOptions.filter((o) => keep.has(o.value) || o.value === ADD_UNIT);
+  }
 
   function setLine(idx: number, patch: Partial<LineDraft>) {
     setLines((prev) => prev.map((l, i) => (i === idx ? { ...l, ...patch } : l)));
@@ -801,12 +853,25 @@ export function InvoiceBuilder({
     });
   }
 
+  /**
+   * On a sale the customer is who gets billed, so an empty Bill To opens prefilled from the picked
+   * party — editable, and only saved if the dialog is saved.
+   */
+  function billShipWithParty(): BillShip {
+    if (!isSaleSide || addr.billToName.trim() || !partyId) return addr;
+    const p = parties.find((x) => String(x.id) === partyId);
+    if (!p) return addr;
+    return { ...addr, billToName: p.name, billToAddress: p.billingAddress ?? "", billToGstin: p.gstin ?? "" };
+  }
+
   /** Picking a party pulls in its phone and, for a sale, its state as the place of supply. */
   function pickParty(p: Party) {
     setPartyId(String(p.id));
     setPartyText(p.name);
     setPhone(p.phone ?? "");
-    if (p.state && STATES_OF_SUPPLY.includes(p.state)) changeSupplyState(p.state);
+    // A party saved with only a GSTIN still carries its state in the first two digits.
+    const st = p.state && STATES_OF_SUPPLY.includes(p.state) ? p.state : stateOfGstin(p.gstin);
+    if (st) changeSupplyState(st);
   }
 
   /** Choosing a catalogue item fills in its rate, unit and tax — the usual billing shortcut. */
@@ -887,7 +952,7 @@ export function InvoiceBuilder({
         shipToName: showBillShip ? addr.shipToName.trim() || null : null,
         shipToAddress: showBillShip ? addr.shipToAddress.trim() || null : null,
         shipToGstin: showBillShip ? addr.shipToGstin.trim() || null : null,
-        terms: terms || null,
+        terms: showTerms ? terms || null : existing?.terms ?? null,
         notes: notes || null,
         description: description.trim() || null,
         imageDataUrl,
@@ -996,6 +1061,7 @@ export function InvoiceBuilder({
         setDiscountAmount(0);
         setSaving(false);
       }
+      draft.clear();
       onSaved(again);
       return saved;
     } catch (err) {
@@ -1026,6 +1092,31 @@ export function InvoiceBuilder({
    * sorted first so the common case is still one keystroke away.
    */
   /**
+   * Saves a prefix into Settings → Transaction for this document type and selects it, so a new
+   * series no longer means abandoning the half-filled bill to go and set it up.
+   */
+  async function addPrefix() {
+    const clean = (newPrefix ?? "").trim();
+    if (!clean) return;
+    let byType: Record<string, string> = {};
+    try {
+      byType = settings.prefixes ? (JSON.parse(settings.prefixes) as Record<string, string>) : {};
+    } catch {}
+    const list = configuredPrefixes(settings.prefixes, docType);
+    if (!list.includes(clean)) {
+      byType[docType] = [...list, clean].join(",");
+      try {
+        await saveSettings({ ...settings, prefixes: JSON.stringify(byType) });
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Couldn't save the prefix.");
+        return;
+      }
+    }
+    setInvoicePrefix(clean);
+    setNewPrefix(null);
+  }
+
+  /**
    * Prefixes offered for this document type, plus whatever the document already carries (so
    * editing an old bill never silently rewrites its number) and a "None" escape.
    */
@@ -1041,11 +1132,13 @@ export function InvoiceBuilder({
   const partyOptions = useMemo(() => {
     const wanted = isSupplierSide ? "SUPPLIER" : "CUSTOMER";
     // Deactivated parties stay out of the picker — except one already on this document.
-    return parties.filter((p) => p.isActive !== false || String(p.id) === partyId).sort((a, b) => {
+    return vyapar.partiesForProject(parties, selectedProjectId)
+      .filter((p) => p.isActive !== false || String(p.id) === partyId)
+      .sort((a, b) => {
       const rank = (p: Party) => (p.partyType === wanted ? 0 : 1);
       return rank(a) - rank(b) || a.name.localeCompare(b.name);
     });
-  }, [parties, isSupplierSide, partyId]);
+  }, [parties, isSupplierSide, partyId, selectedProjectId]);
 
   return (
     <Drawer
@@ -1111,6 +1204,9 @@ export function InvoiceBuilder({
             rejectHint="Rejecting cancels this document — it keeps its number, stops counting in balances and stock, and can be reopened once fixed."
           />
         )}
+        {draft.offered && (
+          <DraftBanner what={docHeading.toLowerCase()} savedAt={draft.offered.savedAt} onRestore={restoreDraft} onDiscard={draft.clear} />
+        )}
         {error && (
           <div ref={errorRef} className="rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-600">
             {error}
@@ -1127,7 +1223,13 @@ export function InvoiceBuilder({
                 type="button"
                 role="switch"
                 aria-checked={isCash}
-                onClick={() => setIsCash((c) => !c)}
+                onClick={() => {
+                  // Cash means received in full; Credit means nothing received until typed in.
+                  const next = !isCash;
+                  setIsCash(next);
+                  setReceiveOn(next);
+                  setReceivedTouched(false);
+                }}
                 className={`relative h-6 w-11 rounded-full transition-colors duration-200 ${isCash ? "bg-brand-accent" : "bg-gray-300"}`}
               >
                 <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all duration-200 ${isCash ? "left-[22px]" : "left-0.5"}`} />
@@ -1254,6 +1356,8 @@ export function InvoiceBuilder({
                     size="sm"
                     className="w-36"
                     options={prefixOptions}
+                    onCreate={() => setNewPrefix("")}
+                    createLabel="Add new prefix"
                   />
                   <input
                     value={invoiceNo}
@@ -1262,6 +1366,39 @@ export function InvoiceBuilder({
                     className={`input flex-1 ${numberClash ? "border-rose-400 bg-rose-50/40" : ""}`}
                   />
                 </div>
+                {newPrefix !== null && (
+                  <div className="mt-2 flex items-center gap-2 rounded-lg border border-cyan-200 bg-cyan-50/50 p-2">
+                    <input
+                      value={newPrefix}
+                      onChange={(e) => setNewPrefix(e.target.value.toUpperCase())}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          void addPrefix();
+                        }
+                      }}
+                      placeholder="e.g. HTB/26-27/"
+                      autoFocus
+                      className="input flex-1 font-mono"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => void addPrefix()}
+                      disabled={!newPrefix.trim()}
+                      className="rounded-lg bg-brand-accent px-3 py-1.5 text-sm font-medium text-white transition-opacity duration-150 hover:opacity-90 disabled:opacity-40"
+                    >
+                      Add
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setNewPrefix(null)}
+                      aria-label="Cancel new prefix"
+                      className="rounded-lg p-1.5 text-gray-400 transition-colors duration-150 hover:bg-white hover:text-gray-600"
+                    >
+                      <X size={14} />
+                    </button>
+                  </div>
+                )}
               </Field>
             )}
             <div className={showDueDate ? "grid grid-cols-2 gap-3" : ""}>
@@ -1284,7 +1421,17 @@ export function InvoiceBuilder({
                 />
               </Field>
             )}
-            {showBillShip && (
+            {/* Vyapar-12: on a sale the shipping address is opt-in — a link until it's wanted. */}
+            {showBillShip && isSaleSide && !addr.billToName && !addr.shipToName && (
+              <button
+                type="button"
+                onClick={() => setAddrOpen(true)}
+                className="flex items-center gap-1 text-sm font-medium text-brand-accent transition-opacity duration-150 hover:opacity-80"
+              >
+                <Plus size={13} /> Add shipping address
+              </button>
+            )}
+            {showBillShip && (!isSaleSide || addr.billToName || addr.shipToName) && (
               <Field label="Bill To / Ship To">
                 <button
                   type="button"
@@ -1305,24 +1452,25 @@ export function InvoiceBuilder({
 
         {/* Line grid */}
         <div className="overflow-x-auto rounded-xl border border-gray-200">
-          <table className={`w-full ${isPurchase ? "min-w-[1220px]" : "min-w-[1100px]"} border-collapse text-sm`}>
+          <table className={`w-full ${isPurchase ? "min-w-[1220px]" : "min-w-[1100px]"} vy-grid text-sm`}>
             <thead>
               {/* Vyapar groups the grid header: DISCOUNT and TAX each span a % and an Amount
                   column, so the two pairs read as one concept rather than four loose columns. */}
               <tr className="border-b border-gray-100 bg-gray-50 text-center text-[11px] font-medium tracking-wide text-gray-500 uppercase">
-                <th colSpan={7} className="px-2 pt-2" />
+                <th colSpan={6} className="px-2 pt-2" />
                 <th colSpan={2} className="border-l border-gray-200 px-2 pt-2">Discount</th>
                 <th colSpan={2} className="border-l border-gray-200 px-2 pt-2">Tax</th>
                 <th colSpan={2} className="px-2 pt-2" />
               </tr>
               <tr className="border-b border-gray-200 bg-gray-50 text-left text-[11px] font-medium tracking-wide text-gray-500 uppercase">
                 <th className="w-8 px-2 py-2 text-center">#</th>
-                <th className="px-2 py-2">Item</th>
-                <th className="px-2 py-2">Description</th>
+                {/* Vyapar-8/9: the description sits on a second line under the item (as Vyapar
+                    prints it), so the item takes the width the Description column had. */}
+                <th className="min-w-[340px] px-2 py-2">Item / Description</th>
                 {/* HSN/SAC sits beside the description because that's where the person entering a
                     line is already looking, and a GST invoice is not compliant without it. */}
                 <th className="w-24 px-2 py-2">HSN/SAC</th>
-                <th className="w-20 px-2 py-2 text-right">Qty</th>
+                <th className="w-20 min-w-[72px] px-2 py-2 text-right">Qty</th>
                 <th className="w-24 px-2 py-2">Unit</th>
                 <th className="w-32 px-2 py-2 text-right">
                   <div className="flex flex-col items-end gap-1">
@@ -1388,12 +1536,11 @@ export function InvoiceBuilder({
                       createLabel="Add Item"
                       placeholder="Item name"
                     />
-                  </td>
-                  <td className="px-2 py-1.5">
                     <input
                       value={l.description}
                       onChange={(e) => setLine(idx, { description: e.target.value })}
-                      className="w-full rounded-md border border-gray-200 px-2 py-1 text-sm outline-none focus:border-cyan-500"
+                      placeholder="Add description"
+                      className="vy-sub w-full px-2 py-1 text-xs text-gray-500 outline-none"
                     />
                   </td>
                   <td className="px-2 py-1.5">
@@ -1410,7 +1557,7 @@ export function InvoiceBuilder({
                       value={l.unit}
                       onChange={(v) => (v === ADD_UNIT ? setCreatingUnit(idx) : setLine(idx, { unit: v }))}
                       size="sm"
-                      options={unitOptions}
+                      options={unitOptionsFor(l)}
                     />
                   </td>
                   <Num value={l.rate} onChange={(v) => setLine(idx, { rate: v })} />
@@ -1495,6 +1642,8 @@ export function InvoiceBuilder({
         {/* Vyapar's three columns under the grid: terms, then payment + attachments, then totals. */}
         <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
           <div className="rounded-xl border border-gray-200 p-4">
+            {showTerms && (
+            <>
             <div className="mb-2 text-sm font-semibold text-gray-700">Terms &amp; Conditions</div>
             {/* Vyapar titles the block, and the title prints on the document. */}
             <div className="mb-2">
@@ -1513,7 +1662,9 @@ export function InvoiceBuilder({
               rows={3}
               className="input resize-none"
             />
-            <div className="mt-3">
+            </>
+            )}
+            <div className={showTerms ? "mt-3" : ""}>
               <Field label="Notes">
                 <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} className="input resize-none" />
               </Field>
@@ -1527,16 +1678,22 @@ export function InvoiceBuilder({
             {!noPayment && (
               <>
                 <Field label="Payment Type">
-                  <Select value={paymentMode} onChange={setPaymentMode} options={paymentTypeOptions} />
+                  {nothingReceived ? (
+                    <Select value="" onChange={() => {}} disabled placeholder="None" options={[{ value: "", label: "None" }]} />
+                  ) : (
+                    <Select value={paymentMode} onChange={setPaymentMode} options={paymentTypeOptions} />
+                  )}
                 </Field>
-                <Field label="Reference No.">
-                  <input
-                    value={paymentReference}
-                    onChange={(e) => setPaymentReference(e.target.value)}
-                    placeholder="NEFT / cheque no"
-                    className="input"
-                  />
-                </Field>
+                {!nothingReceived && (
+                  <Field label="Reference No.">
+                    <input
+                      value={paymentReference}
+                      onChange={(e) => setPaymentReference(e.target.value)}
+                      placeholder="NEFT / cheque no"
+                      className="input"
+                    />
+                  </Field>
+                )}
 
                 {extraPayments.map((p, i) => (
                   <div key={i} className="space-y-2 rounded-lg border border-dashed border-gray-200 p-2.5">
@@ -1585,6 +1742,7 @@ export function InvoiceBuilder({
                   </div>
                 ))}
 
+                {!nothingReceived && (
                 <button
                   type="button"
                   onClick={() => setExtraPayments((prev) => [...prev, { mode: "Cash", reference: "", amount: 0 }])}
@@ -1592,6 +1750,7 @@ export function InvoiceBuilder({
                 >
                   <Plus size={13} /> Add Payment type
                 </button>
+                )}
               </>
             )}
 
@@ -1723,8 +1882,7 @@ export function InvoiceBuilder({
                     checked={receiveOn}
                     onChange={(e) => {
                       setReceiveOn(e.target.checked);
-                      setReceived(e.target.checked ? calc.total : 0);
-                      setReceivedTouched(true);
+                      setReceivedTouched(false);
                     }}
                     className="h-4 w-4 accent-cyan-600"
                   />
@@ -1742,7 +1900,9 @@ export function InvoiceBuilder({
                 </div>
               </div>
             )}
-            {!noPayment && (
+            {/* Balance Due only means something once part of the money has come in; on a plain
+                credit bill it would just repeat the total (Vyapar-16). */}
+            {!noPayment && !nothingReceived && (
               <div className="flex items-center justify-between">
                 <span className="text-gray-500">Balance Due</span>
                 <span className={`font-medium ${balanceDue > 0 ? "text-rose-600" : "text-emerald-600"}`}>{inr(balanceDue)}</span>
@@ -1750,7 +1910,11 @@ export function InvoiceBuilder({
             )}
             {!noPayment && (
               <p className="pt-1 text-[11px] text-gray-400">
-                {balanceDue <= 0 ? "Fully paid on save." : `${inr(balanceDue)} will stay outstanding.`}
+                {balanceDue <= 0
+                  ? "Fully paid on save."
+                  : nothingReceived
+                    ? `On credit — the full ${inr(calc.total)} stays outstanding.`
+                    : `${inr(balanceDue)} will stay outstanding.`}
               </p>
             )}
           </div>
@@ -1811,6 +1975,7 @@ export function InvoiceBuilder({
       {creatingParty !== null && (
         <PartyDialog
           initialName={creatingParty}
+          projectId={selectedProjectId ? Number(selectedProjectId) : null}
           onClose={() => setCreatingParty(null)}
           onSaved={(saved) => {
             onPartyCreated?.(saved);
@@ -1822,7 +1987,7 @@ export function InvoiceBuilder({
 
       {addrOpen && (
         <BillShipDialog
-          value={addr}
+          value={billShipWithParty()}
           projects={projects}
           projectId={selectedProjectId}
           onClose={() => setAddrOpen(false)}

@@ -28,6 +28,8 @@ import { downloadPdf } from "@/lib/vyaparExport";
 import { ImportDialog } from "@/components/vyapar/ImportDialog";
 import { paymentInImportConfig, paymentOutImportConfig } from "@/lib/vyaparImportConfigs";
 import * as vyapar from "@/lib/vyaparApi";
+import { useFormDraft } from "@/lib/formDraft";
+import { DraftBanner } from "@/components/vyapar/DraftBanner";
 import type { Party, Payment, PaymentLink } from "@/lib/vyaparApi";
 import { Download, FileText, Link2, Plus, Search, Upload, Wallet } from "lucide-react";
 import { isBackgroundRefresh, useAutoRefresh } from "@/lib/autoRefresh";
@@ -119,7 +121,7 @@ export function PaymentWorkspace({
     return payments.filter((p) => {
       if (!inRange(p.paymentDate, range)) return false;
       if (!q) return true;
-      return [p.partyName, p.reference, p.paymentDate, p.mode].some((f) => f?.toLowerCase().includes(q));
+      return [p.partyName, p.notes, p.reference, p.paymentDate, p.mode].some((f) => f?.toLowerCase().includes(q));
     });
   }, [payments, search, range]);
 
@@ -129,7 +131,7 @@ export function PaymentWorkspace({
       date: (p) => p.paymentDate,
       party: (p) => p.partyName,
       mode: (p) => p.mode,
-      reference: (p) => p.reference,
+      reference: (p) => descOf(p),
       amount: (p) => p.amount,
       unused: (p) => p.unusedAmount,
     },
@@ -157,8 +159,8 @@ export function PaymentWorkspace({
   function printOne(p: Payment) {
     downloadPdf(
       `${title} · ${p.partyName ?? "—"}`,
-      ["Date", "Party", "Payment Type", "Reference", "Amount"],
-      [[formatDate(p.paymentDate), p.partyName ?? "", p.mode, p.reference ?? "", inr(p.amount)]],
+      ["Date", "Party", "Payment Type", "Description", "Amount"],
+      [[formatDate(p.paymentDate), p.partyName ?? "", p.mode, descOf(p), inr(p.amount)]],
       { rightAlignFrom: 4 }
     );
   }
@@ -177,11 +179,10 @@ export function PaymentWorkspace({
       { key: "partyGstin", label: "Party GSTIN", value: (p) => partyOf(p)?.gstin ?? "" },
       { key: "amount", label: "Amount", value: (p) => p.amount },
       { key: "mode", label: "Payment Type", value: (p) => p.mode },
-      { key: "reference", label: "Reference", value: (p) => p.reference ?? "" },
       { key: "linked", label: "Settled Amount", value: (p) => p.linkedAmount },
       { key: "unused", label: "Unused / Advance", value: (p) => p.unusedAmount },
       { key: "project", label: "Project", value: (p) => projects.find((x) => x.id === String(p.projectId))?.name ?? "" },
-      { key: "notes", label: "Notes", value: (p) => p.notes ?? "" },
+      { key: "notes", label: "Description", value: (p) => descOf(p) },
     ];
   }, [parties, projects]);
 
@@ -210,8 +211,8 @@ export function PaymentWorkspace({
             onClick={() =>
               downloadPdf(
                 title,
-                ["Date", "Party", "Payment Type", "Reference", "Amount"],
-                rows.map((p) => [formatDate(p.paymentDate), p.partyName ?? "", p.mode, p.reference ?? "", inr(p.amount)]),
+                ["Date", "Party", "Payment Type", "Description", "Amount"],
+                rows.map((p) => [formatDate(p.paymentDate), p.partyName ?? "", p.mode, descOf(p), inr(p.amount)]),
                 { rightAlignFrom: 4 }
               )
             }
@@ -293,7 +294,7 @@ export function PaymentWorkspace({
                 <SortTh label="Date" sortKey="date" activeKey={sortKey} dir={sortDir} onSort={toggle} />
                 <SortTh label="Party Name" sortKey="party" activeKey={sortKey} dir={sortDir} onSort={toggle} />
                 <SortTh label="Payment Type" sortKey="mode" activeKey={sortKey} dir={sortDir} onSort={toggle} />
-                <SortTh label="Reference" sortKey="reference" activeKey={sortKey} dir={sortDir} onSort={toggle} />
+                <SortTh label="Description" sortKey="reference" activeKey={sortKey} dir={sortDir} onSort={toggle} />
                 <SortTh label="Amount" sortKey="amount" activeKey={sortKey} dir={sortDir} onSort={toggle} align="right" />
                 {/* What's still sitting unapplied against any bill. */}
                 <SortTh label="Unused" sortKey="unused" activeKey={sortKey} dir={sortDir} onSort={toggle} align="right" />
@@ -323,7 +324,7 @@ export function PaymentWorkspace({
                     </span>
                   </td>
                   <td className="px-4 py-2.5 text-gray-600">{p.mode}</td>
-                  <td className="px-4 py-2.5 text-gray-500">{p.reference || "—"}</td>
+                  <td className="max-w-[260px] truncate px-4 py-2.5 text-gray-500">{descOf(p) || "—"}</td>
                   <td className={`px-4 py-2.5 text-right font-semibold ${isIn ? "text-emerald-600" : "text-rose-600"}`}>
                     {inr(p.amount)}
                   </td>
@@ -333,7 +334,7 @@ export function PaymentWorkspace({
                   <td className="px-4 py-2.5" onClick={(ev) => ev.stopPropagation()}>
                     <TxnRowActions
                       kind="PAYMENT"
-                      label={p.reference || `${title} ${p.id}`}
+                      label={descOf(p) || `${title} ${p.id}`}
                       handlers={{
                         onEdit: () => setRelinking(p),
                         onLink: () => setRelinking(p),
@@ -445,7 +446,8 @@ function PaymentForm({
   const [partyId, setPartyId] = useState("");
   const [amount, setAmount] = useState(0);
   const [mode, setMode] = useState(initialMode || "Cash");
-  const [reference, setReference] = useState("");
+  // Vyapar-21: a free-text Description replaces Reference No. on payments (saved as `notes`).
+  const [description, setDescription] = useState("");
   const [paymentDate, setPaymentDate] = useState(new Date().toISOString().slice(0, 10));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -458,6 +460,20 @@ function PaymentForm({
   // Which bills this receipt settles. Empty = the whole amount sits as an advance ("Unused").
   const [links, setLinks] = useState<{ invoiceId: number; amount: number }[]>([]);
   const [linking, setLinking] = useState(false);
+
+  // Vyapar-10: survives being closed midway, like the document forms.
+  const draft = useFormDraft(
+    `vyapar.PAYMENT_${direction}`,
+    { partyId, amount, mode, description, paymentDate, selectedProjectId },
+    Boolean(partyId) || amount > 0 || Boolean(description)
+  );
+  function restoreDraft() {
+    const d = draft.offered?.data;
+    if (!d) return;
+    setPartyId(d.partyId); setAmount(d.amount); setMode(d.mode); setDescription(d.description);
+    setPaymentDate(d.paymentDate); setSelectedProjectId(d.selectedProjectId);
+    draft.dismiss();
+  }
 
   const selectedParty = parties.find((p) => String(p.id) === partyId) ?? null;
   const linkedTotal = links.reduce((s, l) => s + l.amount, 0);
@@ -491,10 +507,12 @@ function PaymentForm({
         // The account behind the chosen Payment Type. Without it the receipt is invisible to that
         // account's balance and statement, both of which key off bankAccountId. See bankScope.
         bankAccountId: bankAccountFor(mode),
-        reference: reference || null,
+        reference: null,
+        notes: description.trim() || null,
         paymentDate,
         projectId: selectedProjectId ? Number(selectedProjectId) : null,
       });
+      draft.clear();
       onSaved();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Couldn't record this payment.");
@@ -530,9 +548,9 @@ function PaymentForm({
       filled.push("date");
     }
     const ref = r.reference ?? (r.chequeNo ? `Cheque ${r.chequeNo}` : null);
-    if (ref && !reference.trim()) {
-      setReference(ref);
-      filled.push("reference");
+    if (ref && !description.trim()) {
+      setDescription(ref);
+      filled.push("description");
     }
     if (r.mode && /^cash$/i.test(r.mode)) {
       setMode("Cash");
@@ -553,60 +571,81 @@ function PaymentForm({
       onClose={onClose}
       onSave={save}
       saveLabel={saving ? "Saving…" : "Save"}
-      dirty={Boolean(partyId) || amount > 0 || Boolean(reference) || links.length > 0}
+      dirty={Boolean(partyId) || amount > 0 || Boolean(description) || links.length > 0}
+      width="max-w-4xl"
     >
       <div className="space-y-4">
+        {draft.offered && (
+          <DraftBanner what={title.toLowerCase()} savedAt={draft.offered.savedAt} onRestore={restoreDraft} onDiscard={draft.clear} />
+        )}
         {error && <div className="rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-600">{error}</div>}
 
         <ScanButton kind="PAYMENT" hint="UPI screenshot, bank advice, cheque or receipt" onResult={applyPayment} />
 
-        <DrawerField label="Project" required>
-          <Select
-            value={selectedProjectId}
-            onChange={setSelectedProjectId}
-            placeholder="Select project"
-            options={[{ value: "", label: "Select project" }, ...projects.map((p) => ({ value: p.id, label: p.name }))]}
-          />
-        </DrawerField>
+        {/* Vyapar's Payment-In/Out layout (Vyapar-24): who and how on the left, the date (Vyapar-27)
+            and the amount on the right. */}
+        <div className="grid grid-cols-1 gap-x-8 gap-y-4 lg:grid-cols-[minmax(0,1fr)_320px]">
+          <div className="space-y-4">
+            <DrawerField label="Project" required>
+              <Select
+                value={selectedProjectId}
+                onChange={setSelectedProjectId}
+                placeholder="Select project"
+                options={[{ value: "", label: "Select project" }, ...projects.map((p) => ({ value: p.id, label: p.name }))]}
+              />
+            </DrawerField>
 
-        <div>
-          <DrawerField label="Party" required>
-            <Select
-              value={partyId}
-              onChange={setPartyId}
-              placeholder="Search by name"
-              options={[
+            <div>
+              <DrawerField label="Party" required>
+                <Select
+                  value={partyId}
+                  onChange={setPartyId}
+                  placeholder="Search by name"
+                  options={[
                     { value: "", label: "Select party" },
                     // Deactivated parties are hidden unless this entry already uses one.
-                    ...parties
+                    ...vyapar.partiesForProject(parties, selectedProjectId)
                       .filter((p) => p.isActive !== false || String(p.id) === partyId)
                       .map((p) => ({ value: String(p.id), label: p.name })),
                   ]}
-            />
-          </DrawerField>
-          {selectedParty && (
-            <div className={`mt-1 text-xs font-medium ${selectedParty.balance >= 0 ? "text-emerald-600" : "text-rose-600"}`}>
-              Bal: {inr(Math.abs(selectedParty.balance))} {selectedParty.balance >= 0 ? "to receive" : "to pay"}
+                />
+              </DrawerField>
+              {selectedParty && (
+                <div className={`mt-1 text-xs font-medium ${selectedParty.balance >= 0 ? "text-emerald-600" : "text-rose-600"}`}>
+                  Bal: {inr(Math.abs(selectedParty.balance))} {selectedParty.balance >= 0 ? "to receive" : "to pay"}
+                </div>
+              )}
             </div>
-          )}
-        </div>
 
-        <div className="grid grid-cols-2 gap-3">
-          <DrawerField label={isIn ? "Received" : "Paid"} required>
-            <input type="number" value={amount} onChange={(e) => setAmount(Number(e.target.value))} className="input" autoFocus />
-          </DrawerField>
-          <DrawerField label="Date">
-            <DatePicker value={paymentDate} onChange={setPaymentDate} placeholder="Payment date" />
-          </DrawerField>
-        </div>
+            <DrawerField label="Payment Type">
+              <Select value={mode} onChange={setMode} options={paymentTypeOptions} />
+            </DrawerField>
 
-        <div className="grid grid-cols-2 gap-3">
-          <DrawerField label="Payment Type">
-            <Select value={mode} onChange={setMode} options={paymentTypeOptions} />
-          </DrawerField>
-          <DrawerField label="Reference No.">
-            <input value={reference} onChange={(e) => setReference(e.target.value)} className="input" placeholder="NEFT / cheque no" />
-          </DrawerField>
+            <DrawerField label="Description">
+              <textarea
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                rows={3}
+                className="input resize-none"
+                placeholder="What this payment is for — cheque / UTR no., bill details…"
+              />
+            </DrawerField>
+          </div>
+
+          <div className="space-y-4">
+            <DrawerField label="Date">
+              <DatePicker value={paymentDate} onChange={setPaymentDate} placeholder="Payment date" />
+            </DrawerField>
+            <DrawerField label={isIn ? "Received" : "Paid"} required>
+              <input
+                type="number"
+                value={amount}
+                onChange={(e) => setAmount(Number(e.target.value))}
+                className="input text-right text-lg font-semibold"
+                autoFocus
+              />
+            </DrawerField>
+          </div>
         </div>
 
         {/* Vyapar reveals LINK PAYMENT once a party is chosen — this is where a lump sum gets
@@ -715,10 +754,10 @@ function PaymentDetail({
         { label: "Date", value: formatDate(p.paymentDate) },
         { label: "Project", value: projectName ?? "—" },
         { label: "Payment type", value: p.mode || "—" },
-        { label: "Reference no.", value: p.reference || "—" },
         { label: "Settled", value: inr(p.linkedAmount) },
         { label: "Unused / advance", value: p.unusedAmount > 0 ? inr(p.unusedAmount) : "—" },
-        { label: "Notes", value: p.notes || "—" },
+        // Older payments kept this in Reference No. before Description replaced it.
+        { label: "Description", value: p.notes || p.reference || "—" },
       ]}
       linked={p.links.map((l) => ({
         key: `${l.invoiceId}`,
@@ -745,6 +784,11 @@ function PaymentDetail({
       onDelete={onDelete}
     />
   );
+}
+
+/** Description, falling back to the Reference No. older payments were saved with. */
+function descOf(p: Payment): string {
+  return p.notes?.trim() || p.reference?.trim() || "";
 }
 
 function formatDate(iso: string | null): string {

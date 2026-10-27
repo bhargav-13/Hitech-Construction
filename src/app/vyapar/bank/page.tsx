@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
 import { VyaparShell, VyaparEmpty } from "@/components/vyapar/VyaparShell";
 import { BankAccountDialog, CashBankEntryDialog } from "@/components/vyapar/CashBankDialogs";
 import { RowMenu, RowMenuDivider, RowMenuItem } from "@/components/RowMenu";
@@ -46,18 +45,9 @@ const ENTRY_LABELS: { kind: EntryKind; label: string }[] = [
   { kind: "ADJUST_BANK", label: "Adjust Bank Balance" },
 ];
 
-/**
- * Money moving between this account and an outside party — deliberately NOT a cash-bank entry.
- *
- * A bank-to-bank transfer only has to move a balance; paying a party has to move the party's
- * ledger too, and settle the bills it clears. That is exactly what a Payment-Out already is, so
- * these route to the payment form with this account preselected rather than duplicating the
- * posting logic. The account's balance follows because a payment carries `bankAccountId`.
- */
-const PARTY_ENTRIES: { href: "payment-out" | "payment-in"; label: string }[] = [
-  { href: "payment-out", label: "Bank to Party (Pay)" },
-  { href: "payment-in", label: "Party to Bank (Receive)" },
-];
+// Bank to Party / Party to Bank were dropped from the Deposit/Withdraw menu at the client's request:
+// paying or receiving from a party is done through Payment-Out / Payment-In, which already let you
+// pick the bank account as the Payment Type.
 
 /** Bank Accounts — Vyapar's master–detail with the Deposit/Withdraw menu. */
 export default function BankAccountsPage() {
@@ -77,7 +67,6 @@ export default function BankAccountsPage() {
   const [importing, setImporting] = useState(false);
   const [editing, setEditing] = useState<BankAccount | null>(null);
   const [exporting, setExporting] = useState(false);
-  const router = useRouter();
   const [entry, setEntry] = useState<EntryKind | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
 
@@ -307,21 +296,6 @@ export default function BankAccountsPage() {
                                 onClick={() => {
                                   setMenuOpen(false);
                                   setEntry(e.kind);
-                                }}
-                                className="block w-full rounded-lg px-3 py-2 text-left text-sm text-gray-700 transition-colors duration-150 hover:bg-cyan-50 hover:text-brand-accent"
-                              >
-                                {e.label}
-                              </button>
-                            ))}
-                            <div className="my-1 border-t border-gray-100" />
-                            {PARTY_ENTRIES.map((e) => (
-                              <button
-                                key={e.href}
-                                onClick={() => {
-                                  setMenuOpen(false);
-                                  router.push(
-                                    `/vyapar/${e.href}?new=1&account=${encodeURIComponent(selected.name)}`
-                                  );
                                 }}
                                 className="block w-full rounded-lg px-3 py-2 text-left text-sm text-gray-700 transition-colors duration-150 hover:bg-cyan-50 hover:text-brand-accent"
                               >

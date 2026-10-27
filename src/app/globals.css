@@ -264,3 +264,51 @@ body {
     animation: fade-out-scale 0.18s ease-in forwards;
   }
 }
+
+/*
+ * Vyapar-style entry grid — the line-item table inside a Sale / Purchase / Expense / RFQ / Quote
+ * form. Vyapar draws it as a spreadsheet: a gridline round every cell, inputs that sit flush in
+ * their cell with no box of their own, and a ring only on the cell being typed into. Separate boxed
+ * inputs inside a borderless table made a ten-line bill hard to scan across a row.
+ */
+/* Unlayered on purpose: it has to beat the inputs' own border/rounded utilities. */
+.vy-grid {
+  border-collapse: collapse;
+}
+.vy-grid > thead > tr > th {
+  background: #eef3f9;
+  color: #475569;
+  border: 1px solid #dbe3ec;
+}
+.vy-grid > tbody > tr > td {
+  border: 1px solid #e5e9f0;
+  padding: 0;
+  vertical-align: middle;
+}
+.vy-grid > tbody > tr:hover > td {
+  background: rgb(236 254 255 / 0.45);
+}
+/* Text that isn't an input (row no., computed amounts, totals) keeps its breathing room. */
+.vy-grid > tbody > tr > td:not(:has(input, button[aria-haspopup="listbox"])) {
+  padding: 6px 8px;
+}
+.vy-grid > tbody > tr > td input:not([type="checkbox"]):not([type="radio"]),
+.vy-grid > tbody > tr > td button[aria-haspopup="listbox"] {
+  min-height: 36px;
+  border-color: transparent;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.vy-grid > tbody > tr > td input:not([type="checkbox"]):not([type="radio"]):focus,
+.vy-grid > tbody > tr > td button[aria-haspopup="listbox"]:focus,
+.vy-grid > tbody > tr > td button[aria-haspopup="listbox"][aria-expanded="true"] {
+  background: #fff;
+  box-shadow: inset 0 0 0 1.5px #06b6d4;
+}
+/* The description line under an item (Vyapar-9): smaller, separated by a hairline. */
+.vy-grid > tbody > tr > td input.vy-sub:not([type="checkbox"]):not([type="radio"]) {
+  min-height: 26px;
+  font-size: 12px;
+  border-top: 1px dashed #e5e9f0;
+}

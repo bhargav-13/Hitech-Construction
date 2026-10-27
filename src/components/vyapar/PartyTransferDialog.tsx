@@ -8,6 +8,7 @@ import { DatePicker } from "@/components/DatePicker";
 import { PartyDialog } from "@/components/vyapar/PartyDialog";
 import { ModuleAttachments } from "@/components/files/ModuleAttachments";
 import { useVyaparProjectId } from "@/lib/projectScope";
+import { useProjects } from "@/lib/useProjects";
 import { inr } from "@/lib/format";
 import * as vyapar from "@/lib/vyaparApi";
 import type { Invoice, Party } from "@/lib/vyaparApi";
@@ -38,7 +39,14 @@ export function PartyTransferDialog({
   onSaved: (saved: Invoice) => void;
   onPartyCreated?: (created: Party) => void;
 }) {
-  const projectId = useVyaparProjectId();
+  const scopedProjectId = useVyaparProjectId();
+  const { projects } = useProjects();
+  // Vyapar-19: a transfer is booked on a project like every other entry — it used to inherit the
+  // header filter silently, so one made under "All Projects" landed on no project at all.
+  const [projectPick, setProjectPick] = useState(() => {
+    const id = existing ? existing.projectId : scopedProjectId;
+    return id != null ? String(id) : "";
+  });
   const [fromId, setFromId] = useState(existing?.partyId != null ? String(existing.partyId) : "");
   const [toId, setToId] = useState(existing?.transferToPartyId != null ? String(existing.transferToPartyId) : "");
   const [amount, setAmount] = useState(existing ? String(existing.total) : "");
@@ -51,14 +59,14 @@ export function PartyTransferDialog({
 
   const options = useMemo(
     () =>
-      [...parties]
+      vyapar.partiesForProject(parties, projectPick)
         .sort((a, b) => a.name.localeCompare(b.name))
         .map((p) => ({
           value: String(p.id),
           // The running balance is the whole reason for picking one party over another here.
           label: `${p.name} · ${inr(Math.abs(p.balance))} ${p.balance >= 0 ? "to receive" : "to pay"}`,
         })),
-    [parties],
+    [parties, projectPick],
   );
 
   const from = parties.find((p) => String(p.id) === fromId) ?? null;
@@ -66,6 +74,7 @@ export function PartyTransferDialog({
   const value = Number(amount) || 0;
 
   async function save() {
+    if (!projectPick) return setError("Select a project.");
     if (!fromId) return setError("Which party is the balance moving from?");
     if (!toId) return setError("Which party is it moving to?");
     if (fromId === toId) return setError("Pick two different parties — a transfer to the same party moves nothing.");
@@ -85,7 +94,7 @@ export function PartyTransferDialog({
         paymentType: "Credit",
         isCash: false,
         notes: notes.trim() || null,
-        projectId: projectId ?? null,
+        projectId: Number(projectPick),
         lines: [
           {
             itemId: null,
@@ -114,6 +123,15 @@ export function PartyTransferDialog({
     >
       <div className="space-y-5">
         {error && <div className="rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-600">{error}</div>}
+
+        <DrawerField label="Project" required>
+          <Select
+            value={projectPick}
+            onChange={setProjectPick}
+            placeholder="Select project"
+            options={[{ value: "", label: "Select project" }, ...projects.map((p) => ({ value: p.id, label: p.name }))]}
+          />
+        </DrawerField>
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <DrawerField label="Transfer from" required hint="What this party owes falls by the amount.">
@@ -195,6 +213,7 @@ export function PartyTransferDialog({
 
       {creating && (
         <PartyDialog
+          projectId={projectPick ? Number(projectPick) : null}
           onClose={() => setCreating(null)}
           onSaved={(created) => {
             onPartyCreated?.(created);

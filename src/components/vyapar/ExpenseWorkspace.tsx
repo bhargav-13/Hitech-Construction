@@ -8,6 +8,10 @@ import { Select } from "@/components/Select";
 import { Spinner } from "@/components/Spinner";
 import { DatePicker } from "@/components/DatePicker";
 import { ScanButton } from "@/components/ScanButton";
+import { TypeaheadPicker } from "@/components/vyapar/TypeaheadPicker";
+import { useFormDraft } from "@/lib/formDraft";
+import { DraftBanner } from "@/components/vyapar/DraftBanner";
+import { ExpenseCategoryManager } from "@/components/vyapar/ExpenseCategoryManager";
 import {
   fileToAttachment,
   filledNote,
@@ -35,7 +39,7 @@ import { ImportDialog } from "@/components/vyapar/ImportDialog";
 import { documentImportConfig } from "@/lib/vyaparImportConfigs";
 import * as vyapar from "@/lib/vyaparApi";
 import type { Invoice, InvoiceLine, Party } from "@/lib/vyaparApi";
-import { Download, FileText, Plus, Receipt, Search, Upload, X } from "lucide-react";
+import { Download, FileText, Plus, Receipt, Search, Tags, Upload, X } from "lucide-react";
 import { previewFile } from "@/lib/filePreview";
 import { isBackgroundRefresh, useAutoRefresh } from "@/lib/autoRefresh";
 const UNCATEGORISED = "Uncategorised";
@@ -72,6 +76,12 @@ export function ExpenseWorkspace() {
    * (a cash payment for food is not a catalogue item), so a failed fetch changes nothing.
    */
   const [items, setItems] = useState<vyapar.Item[]>([]);
+  // Vyapar-28: the category master. Expenses still carry their category by name.
+  const [masterCats, setMasterCats] = useState<vyapar.ExpenseCategory[]>([]);
+  const [managingCats, setManagingCats] = useState(false);
+  const loadCategories = useCallback(() => {
+    vyapar.getExpenseCategories().then(setMasterCats).catch(() => {});
+  }, []);
 
   const load = useCallback(async () => {
     if (!isBackgroundRefresh()) setLoading(true);
@@ -84,12 +94,13 @@ export function ExpenseWorkspace() {
       setExpenses(inv);
       setParties(pty);
       vyapar.getItems(projectId).then(setItems).catch(() => {});
+      loadCategories();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Couldn't load expenses.");
     } finally {
       setLoading(false);
     }
-  }, [projectId]);
+  }, [projectId, loadCategories]);
   useAutoRefresh(load);
 
   useEffect(() => {
@@ -256,6 +267,12 @@ export function ExpenseWorkspace() {
           </p>
         </div>
         <div className="flex gap-2">
+          <button
+            onClick={() => setManagingCats(true)}
+            className="flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-600 transition-all duration-150 hover:bg-gray-50 active:scale-95"
+          >
+            <Tags size={14} /> Categories
+          </button>
           <button
             onClick={() => setExporting(true)}
             disabled={expenses.length === 0}
@@ -515,10 +532,22 @@ export function ExpenseWorkspace() {
       {(creating || editing) && (
         <ExpenseForm
           parties={parties}
-          categories={catNames.filter((c) => c !== UNCATEGORISED)}
+          categories={[...new Set([...masterCats.map((c) => c.name), ...catNames.filter((c) => c !== UNCATEGORISED)])]}
+          onCategoryAdded={loadCategories}
           existing={editing ?? undefined}
           onClose={() => { setCreating(false); setEditing(null); }}
           onSaved={() => { setCreating(false); setEditing(null); load(); }}
+        />
+      )}
+
+      {managingCats && (
+        <ExpenseCategoryManager
+          categories={masterCats}
+          onChanged={() => {
+            loadCategories();
+            load();
+          }}
+          onClose={() => setManagingCats(false)}
         />
       )}
 
@@ -567,12 +596,15 @@ const emptyLine = (): LineDraft => ({ itemName: "", description: "", qty: 1, rat
 function ExpenseForm({
   parties,
   categories,
+  onCategoryAdded,
   existing,
   onClose,
   onSaved,
 }: {
   parties: Party[];
   categories: string[];
+  /** A category typed into the picker is saved to the master straight away. */
+  onCategoryAdded?: () => void;
   existing?: Invoice;
   onClose: () => void;
   onSaved: () => void;
@@ -583,6 +615,23 @@ function ExpenseForm({
     existing != null && (existing.partyId != null || existing.taxAmount > 0)
   );
   const [category, setCategory] = useState(existing?.notes?.trim() ?? "");
+  // Added from the picker during this form — shown before the master reloads.
+  const [addedCats, setAddedCats] = useState<string[]>([]);
+  const categoryChoices = useMemo(() => [...new Set([...categories, ...addedCats])], [categories, addedCats]);
+
+  /** Vyapar-28: "+ Add category" creates a real master entry, not just text on this one expense. */
+  async function addCategory(typed: string) {
+    const name = typed.trim();
+    if (!name) return;
+    try {
+      const saved = await vyapar.createExpenseCategory(name);
+      setAddedCats((c) => [...c, saved.name]);
+      setCategory(saved.name);
+      onCategoryAdded?.();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't add the category.");
+    }
+  }
   const [partyId, setPartyId] = useState(existing?.partyId ? String(existing.partyId) : "");
   const [expenseNo, setExpenseNo] = useState(existing?.invoiceNo ?? "");
   const [date, setDate] = useState(existing?.invoiceDate ?? new Date().toISOString().slice(0, 10));
@@ -618,6 +667,21 @@ function ExpenseForm({
   const [selectedProjectId, setSelectedProjectId] = useState(
     existing?.projectId != null ? String(existing.projectId) : projectId != null ? String(projectId) : ""
   );
+
+  // Vyapar-10: a new expense survives being closed midway (to check a setting) as a local draft.
+  const draft = useFormDraft(
+    existing ? null : "vyapar.EXPENSE",
+    { gst, category, partyId, expenseNo, date, stateOfSupply, lines, paymentMode, reference, paidTouched, paid, selectedProjectId },
+    Boolean(category.trim()) || lines.some((l) => l.itemName.trim() || l.rate > 0)
+  );
+  function restoreDraft() {
+    const d = draft.offered?.data;
+    if (!d) return;
+    setGst(d.gst); setCategory(d.category); setPartyId(d.partyId); setExpenseNo(d.expenseNo); setDate(d.date);
+    setStateOfSupply(d.stateOfSupply); setLines(d.lines); setPaymentMode(d.paymentMode); setReference(d.reference);
+    setPaidTouched(d.paidTouched); setPaid(d.paid); setSelectedProjectId(d.selectedProjectId);
+    draft.dismiss();
+  }
   const paymentTypeOptions = usePaymentTypeOptions();
 
   /** Fill the form from a scanned receipt. Values only — the user checks and presses Save. */
@@ -754,6 +818,7 @@ function ExpenseForm({
       };
       if (existing) await vyapar.updateInvoice(existing.id, body);
       else await vyapar.createInvoice(body);
+      draft.clear();
       onSaved();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Couldn't save this expense.");
@@ -770,6 +835,9 @@ function ExpenseForm({
       width="max-w-4xl"
     >
       <div className="space-y-5">
+        {draft.offered && (
+          <DraftBanner what="expense" savedAt={draft.offered.savedAt} onRestore={restoreDraft} onDiscard={draft.clear} />
+        )}
         {error && <div className="rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-600">{error}</div>}
 
         {/* GST toggle — reveals the party & place of supply, like Vyapar */}
@@ -825,19 +893,21 @@ function ExpenseForm({
               />
             </DrawerField>
             <DrawerField label="Expense Category" required>
-              <input
+              {/* Themed picker in place of the browser's <datalist>, whose unstyled list looked
+                  nothing like the rest of the form. Typing a new name still creates it. */}
+              <TypeaheadPicker<string>
                 value={category}
-                onChange={(e) => setCategory(e.target.value)}
-                list="expense-categories"
+                onChange={setCategory}
+                rows={categoryChoices}
+                getKey={(c) => c}
+                getLabel={(c) => c}
+                onPick={setCategory}
+                onCreate={(typed) => void addCategory(typed)}
+                createLabel="Add category"
                 placeholder="Select or type a category"
-                className="input"
+                inputClassName="input"
                 autoFocus
               />
-              <datalist id="expense-categories">
-                {categories.map((c) => (
-                  <option key={c} value={c} />
-                ))}
-              </datalist>
             </DrawerField>
             {gst && (
               <DrawerField label="Party">
@@ -848,7 +918,7 @@ function ExpenseForm({
                   options={[
                     { value: "", label: "Select party" },
                     // Deactivated parties are hidden unless this entry already uses one.
-                    ...parties
+                    ...vyapar.partiesForProject(parties, selectedProjectId)
                       .filter((p) => p.isActive !== false || String(p.id) === partyId)
                       .map((p) => ({ value: String(p.id), label: p.name })),
                   ]}
@@ -878,7 +948,7 @@ function ExpenseForm({
 
         {/* Line grid */}
         <div className="overflow-x-auto rounded-xl border border-gray-200">
-          <table className="w-full min-w-[640px] border-collapse text-sm">
+          <table className="vy-grid w-full min-w-[640px] text-sm">
             <thead>
               <tr className="border-b border-gray-200 bg-gray-50 text-left text-[11px] font-medium tracking-wide text-gray-500 uppercase">
                 <th className="w-8 px-2 py-2 text-center">#</th>

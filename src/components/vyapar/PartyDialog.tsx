@@ -27,6 +27,7 @@ export function PartyDialog({
   existing,
   defaultType = "CUSTOMER",
   initialName,
+  projectId: formProjectId,
   onClose,
   onSaved,
 }: {
@@ -34,6 +35,8 @@ export function PartyDialog({
   defaultType?: vyapar.PartyType;
   /** Seeds the name when opened from an invoice's "⊕ Add Party" with text already typed. */
   initialName?: string;
+  /** The project the calling form is on — a party added from it belongs to that project. */
+  projectId?: number | null;
   onClose: () => void;
   onSaved: (saved: Party, again: boolean) => void;
 }) {
@@ -54,7 +57,7 @@ export function PartyDialog({
   // Which project's directory the party sits in. "" = shared by every project.
   const { projects } = useProjects();
   const [projectPick, setProjectPick] = useState<string>(() => {
-    const id = existing ? existing.projectId : scopedProjectId;
+    const id = existing ? existing.projectId : formProjectId ?? scopedProjectId;
     return id != null ? String(id) : "";
   });
 
