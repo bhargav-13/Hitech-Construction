@@ -25,6 +25,7 @@ import type {
   TargetStatus,
 } from "@/lib/projectTargetApi";
 import { TARGET_STATUS_META, delayOf, shortDate, workingDays } from "@/lib/useProjectTargets";
+import { todayIST } from "@/lib/datetime";
 
 /**
  * One target, opened.
@@ -316,7 +317,7 @@ function ProgressModal({
   onSave: (body: { qty: number; date: string; note: string | null; location: string | null }) => Promise<void>;
 }) {
   const [qty, setQty] = useState("");
-  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
+  const [date, setDate] = useState(todayIST());
   const [location, setLocation] = useState("");
   const [note, setNote] = useState("");
   const [error, setError] = useState("");

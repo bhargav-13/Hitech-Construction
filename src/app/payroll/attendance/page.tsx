@@ -8,14 +8,14 @@ import { DatePicker } from "@/components/DatePicker";
 import { Select } from "@/components/Select";
 import { useMuster } from "@/lib/usePayrollLive";
 import { bulkEditAttendance, editAttendance, getPayrollPeople, ApiError } from "@/lib/api";
-import type { AttendanceApiResponse, AttendanceCodeApi, AttendanceEditRequestBody, PayrollProfileResponse, UserResponse } from "@/lib/api";
+import type { AttendanceApiResponse, AttendanceCodeApi, AttendanceEditRequestBody, PayrollProfileResponse, ShiftResponse, UserResponse } from "@/lib/api";
 import { ATTENDANCE_META, DEPARTMENTS } from "@/lib/payrollConfig";
 import { exportRowsToCsv, exportRowsToXlsx, printRows } from "@/lib/vyaparExport";
 import { DayActions, hoursLabel } from "@/components/payroll/AttendanceActions";
 import type { LeaveChoice } from "@/components/payroll/AttendanceActions";
 import { AttendanceImportDialog } from "@/components/payroll/AttendanceImportDialog";
 import { PendingPunches } from "@/components/payroll/PendingPunches";
-import { useLeavePolicies, usePayrollProfiles } from "@/lib/usePayrollSetup";
+import { useLeavePolicies, usePayrollProfiles, useShifts } from "@/lib/usePayrollSetup";
 import { payGroupOf, PAY_GROUP_ORDER } from "@/lib/payrollGroups";
 import { inr } from "@/lib/format";
 import { AlertTriangle,
@@ -202,6 +202,56 @@ export default function AttendancePage() {
   );
 }
 
+/**
+ * What one attendance day earns, worked out the way the payroll run pays it: the day's payable
+ * fraction (P 1, HD ½, a short day its hours ÷ the shift's full day; a PUNCH-basis member any worked
+ * day by its hours) times the member's daily rate. Hourly staff are paid hours × rate. OT and fines
+ * are shown on their own in the day's OT / F marks, so they are left out here.
+ * Null when there is nothing to price (no profile, piece rate, or a day that pays nothing yet).
+ */
+function dayPay(
+  att: AttendanceApiResponse | undefined,
+  prof: PayrollProfileResponse | undefined,
+  shift: ShiftResponse | undefined,
+  date: string,
+): { amount: number; short: string; basis: string } | null {
+  if (!att || !prof?.salary) return null;
+  const sal = prof.salary;
+  if (sal.workType === "PIECE") return null;
+  const full = shift && shift.fullDayHours > 0 ? shift.fullDayHours : 8;
+  const worked = att.workedHours != null ? Number(att.workedHours) : 0;
+  let fraction = Number(att.payableDays ?? 0);
+  const byPunch = sal.salaryBasis === "PUNCH" && worked > 0 && ["P", "HD", "A"].includes(att.code);
+  if (byPunch) fraction = worked / full;
+  const hoursLabelTxt = worked > 0 ? `${worked.toFixed(2)} h` : `${(fraction * full).toFixed(2)} h`;
+
+  if (sal.workType === "HOURLY") {
+    const hours = worked > 0 ? worked : fraction * full;
+    if (hours <= 0 || !sal.workRate) return null;
+    return { amount: Math.round(hours * sal.workRate), short: `${hours.toFixed(2)} h × ${inr(sal.workRate)}`, basis: `Paid by the hour: ${hours.toFixed(2)} h × ${inr(sal.workRate)}/h` };
+  }
+  if (fraction <= 0) return null;
+  let rate: number;
+  let rateLabel: string;
+  if (sal.workType === "DAILY" || prof.category === "WORK_BASIS") {
+    rate = Number(sal.workRate ?? 0);
+    rateLabel = `${inr(rate)}/day`;
+  } else {
+    const [y, mo] = date.split("-").map(Number);
+    const daysInMonth = new Date(y, mo, 0).getDate();
+    rate = Number(sal.monthlyCtc ?? 0) / daysInMonth;
+    rateLabel = `${inr(Number(sal.monthlyCtc ?? 0))} ÷ ${daysInMonth} days`;
+  }
+  if (rate <= 0) return null;
+  const amount = Math.round(rate * fraction);
+  const partial = fraction < 1 || byPunch;
+  return {
+    amount,
+    short: partial ? `${hoursLabelTxt} of ${full} h` : "full day",
+    basis: `${partial ? `${hoursLabelTxt} of a ${full} h day = ${fraction.toFixed(2)} day` : `${fraction} day`} × ${rateLabel}`,
+  };
+}
+
 /** Day view — editable per member per row. */
 function DayView({
   date,
@@ -223,6 +273,8 @@ function DayView({
   leaveChoices: (userId: number) => LeaveChoice[];
 }) {
   const ownLock = useOwnRecordLock();
+  const { shifts } = useShifts();
+  const shiftById = useMemo(() => new Map(shifts.map((sh) => [sh.id, sh])), [shifts]);
   const byUser = useMemo(() => {
     const m = new Map<number, AttendanceApiResponse>();
     for (const r of rows) m.set(r.userId, r);
@@ -430,7 +482,7 @@ function DayView({
       </p>
 
       <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white">
-        <table className="w-full min-w-[860px] border-collapse text-sm">
+        <table className="w-full min-w-[960px] border-collapse text-sm">
           <thead>
             <tr className="border-b border-gray-100 bg-gray-50 text-left text-gray-500">
               <SortTh label="Member" sortKey="name" activeKey={sortKey} dir={sortDir} onSort={sortBy} />
@@ -439,12 +491,13 @@ function DayView({
               <SortTh label="Out" sortKey="out" activeKey={sortKey} dir={sortDir} onSort={sortBy} />
               <th className="px-4 py-2 font-medium">Photos</th>
               <SortTh label="Hours" sortKey="hours" activeKey={sortKey} dir={sortDir} onSort={sortBy} />
+              <th className="px-4 py-2 text-right font-medium">Day pay</th>
             </tr>
           </thead>
           <tbody>
             {groups.map(({ group, list }) => [
               <tr key={`g-${group}`} className="bg-gray-50/80">
-                <td colSpan={6} className="px-4 py-1.5 text-xs font-semibold text-gray-600">
+                <td colSpan={7} className="px-4 py-1.5 text-xs font-semibold text-gray-600">
                   {group} <span className="ml-1 rounded-full bg-white px-1.5 py-0.5 text-[10px] text-gray-500 ring-1 ring-gray-200">{list.length}</span>
                 </td>
               </tr>,
@@ -529,6 +582,20 @@ function DayView({
                     ) : (
                       <span className="text-gray-300">—</span>
                     )}
+                  </td>
+                  {/* What this day earns — the client's "came for two hours, show the two hours' salary". */}
+                  <td className="px-4 py-2.5 text-right">
+                    {(() => {
+                      const prof = profiles[m.id];
+                      const pay = dayPay(att, prof, prof?.shiftId != null ? shiftById.get(prof.shiftId) : undefined, date);
+                      if (!pay) return <span className="text-gray-300">—</span>;
+                      return (
+                        <span title={pay.basis} className="inline-flex flex-col items-end leading-tight">
+                          <span className="font-semibold text-gray-800">{inr(pay.amount)}</span>
+                          <span className="text-[10px] text-gray-400">{pay.short}</span>
+                        </span>
+                      );
+                    })()}
                   </td>
                 </tr>
               );

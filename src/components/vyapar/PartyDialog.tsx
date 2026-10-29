@@ -1,11 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Drawer } from "@/components/Drawer";
 import { Select } from "@/components/Select";
 import { DatePicker } from "@/components/DatePicker";
 import { ScanButton } from "@/components/ScanButton";
-import { contactAddress, filledNote, matchOption, mobile10, stateOfGstin, validGstin, type ScannedContact } from "@/lib/docScan";
+import { contactAddress, filledNote, lookupGstin, matchOption, mobile10, stateOfGstin, validGstin, type ScannedContact } from "@/lib/docScan";
 import * as vyapar from "@/lib/vyaparApi";
 import { useVyaparProjectId } from "@/lib/projectScope";
 import { useProjects } from "@/lib/useProjects";
@@ -13,7 +13,8 @@ import { GST_TYPES, STATES_OF_SUPPLY } from "@/lib/vyaparApi";
 import type { Party } from "@/lib/vyaparApi";
 import { usePartySettings } from "@/lib/usePartySettings";
 import { ModuleAttachments } from "@/components/files/ModuleAttachments";
-import { Info } from "lucide-react";
+import { Info, Loader2, Search } from "lucide-react";
+import { todayIST } from "@/lib/datetime";
 
 // "Documents" only appears once the party exists: an attachment needs the party's id.
 const TABS = ["GST & Address", "Credit & Balance", "Additional Fields", "Documents"] as const;
@@ -62,7 +63,7 @@ export function PartyDialog({
   });
 
   const [openingBalance, setOpeningBalance] = useState(existing?.openingBalance ?? 0);
-  const [openingDate, setOpeningDate] = useState(existing?.openingDate ?? new Date().toISOString().slice(0, 10));
+  const [openingDate, setOpeningDate] = useState(existing?.openingDate ?? todayIST());
   const [limitOn, setLimitOn] = useState(existing?.creditLimit != null);
   const [creditLimit, setCreditLimit] = useState(existing?.creditLimit ?? 0);
 
@@ -120,6 +121,46 @@ export function PartyDialog({
     } catch (err) {
       setError(err instanceof Error ? err.message : "Couldn't save this party.");
       setSaving(false);
+    }
+  }
+
+  /**
+   * Vyapar-2: a valid GSTIN fills the party's name, billing address, state and GST type. State comes
+   * from the number itself; name and address from public GST listings (a suggestion — the user
+   * checks it). Only blank fields are filled, so nothing typed is lost.
+   */
+  const [gstLookup, setGstLookup] = useState<{ busy: boolean; msg: string; tone: "ok" | "warn" | "err" } | null>(null);
+  const lastLooked = useRef(existing?.gstin ?? "");
+  async function fetchGstin(value: string) {
+    const g = validGstin(value);
+    if (!g) return;
+    lastLooked.current = g;
+    setGstLookup({ busy: true, msg: "Looking up this GSTIN…", tone: "ok" });
+    try {
+      const d = await lookupGstin(g);
+      const filled: string[] = [];
+      if (d.state && !state) { setState(d.state); filled.push("state"); }
+      const regType = (d.registrationType ?? "").toLowerCase();
+      const nextType = regType.includes("composition") ? GST_TYPES[2] : regType.includes("sez") ? GST_TYPES[4] : GST_TYPES[1];
+      if (gstType === GST_TYPES[0] || (nextType !== GST_TYPES[1] && gstType === GST_TYPES[1])) { setGstType(nextType); filled.push("GST type"); }
+      const bizName = d.tradeName || d.legalName;
+      if (d.found && bizName && !name.trim()) { setName(bizName); filled.push("name"); }
+      const addr = d.address ? (d.pincode && !d.address.includes(d.pincode) ? `${d.address} - ${d.pincode}` : d.address) : null;
+      if (d.found && addr && !billingAddress.trim()) { setBillingAddress(addr); filled.push("billing address"); }
+      const cancelled = d.status && !/active/i.test(d.status);
+      const who = d.found ? `${d.legalName}${d.tradeName && d.tradeName !== d.legalName ? ` (${d.tradeName})` : ""}` : null;
+      setGstLookup({
+        busy: false,
+        tone: cancelled || !d.found ? "warn" : "ok",
+        msg: [
+          who ? `Found: ${who}${d.constitution ? ` · ${d.constitution}` : ""}.` : null,
+          cancelled ? `GST status: ${d.status} — check before billing.` : null,
+          filled.length ? `Filled ${filled.join(", ")}.` : "Nothing blank to fill.",
+          d.found ? "From public GST listings — check it before saving." : d.note ?? null,
+        ].filter(Boolean).join(" "),
+      });
+    } catch (err) {
+      setGstLookup({ busy: false, tone: "err", msg: err instanceof Error ? err.message : "Couldn't look this GSTIN up." });
     }
   }
 
@@ -181,7 +222,8 @@ export function PartyDialog({
           <Field label="Party Name" required>
             <input value={name} onChange={(e) => setName(e.target.value)} className="input" autoFocus />
           </Field>
-          <Field label="GSTIN" hint="15-character GST number; we prefill state from it">
+          <Field label="GSTIN" hint="15-character GST number; we fill name, address and state from it">
+            <div className="relative">
             <input
               value={gstin}
               onChange={(e) => {
@@ -191,16 +233,41 @@ export function PartyDialog({
                 const st = STATE_BY_GST_CODE[v.slice(0, 2)];
                 if (st && !state) setState(st);
                 if (v.length === 15 && gstType === GST_TYPES[0]) setGstType(GST_TYPES[1]);
+                // A complete GSTIN fetches its details on its own — the client's "auto fetch".
+                if (validGstin(v) && v !== lastLooked.current) fetchGstin(v);
+                if (v.length < 15) setGstLookup(null);
               }}
               placeholder="24ABCDE1234F1Z5"
               maxLength={15}
-              className="input font-mono uppercase"
+              className="input pr-8 font-mono uppercase"
             />
+            {validGstin(gstin) && (
+              <button
+                type="button"
+                onClick={() => fetchGstin(gstin)}
+                disabled={gstLookup?.busy}
+                title="Fetch name, address and state for this GSTIN"
+                className="absolute top-1/2 right-2 -translate-y-1/2 rounded p-0.5 text-gray-400 hover:text-brand-accent"
+              >
+                {gstLookup?.busy ? <Loader2 size={14} className="animate-spin" /> : <Search size={14} />}
+              </button>
+            )}
+            </div>
           </Field>
           <Field label="Phone Number">
             <input value={phone} onChange={(e) => setPhone(e.target.value)} className="input" />
           </Field>
         </div>
+        {gstLookup && (
+          <div
+            className={`-mt-2 rounded-lg px-3 py-2 text-xs ${
+              gstLookup.tone === "err" ? "bg-rose-50 text-rose-700" : gstLookup.tone === "warn" ? "bg-amber-50 text-amber-800" : "bg-cyan-50 text-cyan-900"
+            }`}
+          >
+            {gstLookup.busy && <Loader2 size={12} className="mr-1 inline animate-spin" />}
+            {gstLookup.msg}
+          </div>
+        )}
 
         {/* Tabs */}
         <div className="flex gap-5 border-b border-gray-200">

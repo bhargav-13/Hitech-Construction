@@ -60,7 +60,10 @@ export function PurchaseDocumentList({
   noun,
   emptyHint,
   vyaparHref,
+  onChanged,
 }: {
+  /** Reload the list after an edit made from the drawer. */
+  onChanged?: () => void;
   rows: Invoice[];
   loading: boolean;
   error: string;
@@ -289,12 +292,13 @@ export function PurchaseDocumentList({
             Clear filters
           </button>
         )}
+        {/* Editing happens here now (click a row, then Edit); Vyapar is just one more place to look. */}
         {canOpenVyapar && (
           <Link
             href={vyaparHref}
-            className="flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-600 transition-colors duration-150 hover:border-brand-accent hover:text-brand-accent"
+            className="ml-auto flex items-center gap-1 text-xs text-gray-400 transition-colors duration-150 hover:text-brand-accent"
           >
-            Edit in Vyapar <ExternalLink size={13} />
+            Open in Vyapar <ExternalLink size={12} />
           </Link>
         )}
       </div>
@@ -395,6 +399,7 @@ export function PurchaseDocumentList({
           fallback={shown}
           noun={noun}
           canOpenVyapar={canOpenVyapar}
+          onSaved={onChanged}
           onClose={() => {
             setOpen(null);
             setWanted(null);

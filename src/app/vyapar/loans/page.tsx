@@ -14,6 +14,7 @@ import * as vyapar from "@/lib/vyaparApi";
 import type { LoanAccount } from "@/lib/vyaparApi";
 import { FileSpreadsheet, FileText, Landmark, Plus, Upload } from "lucide-react";
 import { isBackgroundRefresh, useAutoRefresh } from "@/lib/autoRefresh";
+import { todayIST } from "@/lib/datetime";
 
 /** Loan Accounts — outstanding principal, EMI and interest per lender. */
 export default function LoanAccountsPage() {
@@ -185,7 +186,7 @@ function LoanDialog({ onClose, onSaved }: { onClose: () => void; onSaved: () => 
   const [loanAmount, setLoanAmount] = useState(0);
   const [interestRate, setInterestRate] = useState(0);
   const [termMonths, setTermMonths] = useState(0);
-  const [startDate, setStartDate] = useState(new Date().toISOString().slice(0, 10));
+  const [startDate, setStartDate] = useState(todayIST());
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 

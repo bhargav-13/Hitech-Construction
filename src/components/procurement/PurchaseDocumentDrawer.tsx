@@ -2,10 +2,14 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Download, ExternalLink } from "lucide-react";
+import { Download, ExternalLink, Pencil } from "lucide-react";
+import { InvoiceBuilder } from "@/components/vyapar/InvoiceBuilder";
+import { useCan } from "@/lib/permissions";
+import { getItems } from "@/lib/vyaparApi";
+import type { Item, Party } from "@/lib/vyaparApi";
 import { Drawer } from "@/components/Drawer";
 import { Spinner } from "@/components/Spinner";
-import { getPurchaseDocument, getVendor } from "@/lib/purchaseApi";
+import { getPurchaseDocument, getVendor, getVendors, updatePurchaseDocument } from "@/lib/purchaseApi";
 import { downloadInvoicePdf } from "@/lib/vyaparExport";
 import { DOC_APPROVAL_TYPE, useApprovalStates } from "@/lib/approvals";
 import { ApprovalPanel } from "@/components/approval/ApprovalBadge";
@@ -27,12 +31,15 @@ export function PurchaseDocumentDrawer({
   noun,
   canOpenVyapar,
   onClose,
+  onSaved,
 }: {
   documentId: number;
   fallback: Invoice;
   noun: string;
   canOpenVyapar: boolean;
   onClose: () => void;
+  /** After an edit saved from here — the list reloads its row. */
+  onSaved?: () => void;
 }) {
   const [doc, setDoc] = useState<Invoice>(fallback);
   const [loading, setLoading] = useState(true);
@@ -53,6 +60,53 @@ export function PurchaseDocumentDrawer({
   const { states: approvals, reload: reloadApproval } = useApprovalStates(approvalType, [documentId]);
   const approval = approvals[documentId] ?? null;
   const [pdfBusy, setPdfBusy] = useState(false);
+
+  /**
+   * Edit right here instead of "Edit in Vyapar" (client: a buyer shouldn't need Vyapar access).
+   * The same Vyapar form opens, fed with Procurement's vendor list, and saves through Procurement's
+   * own endpoint. Returns stay read-only — they belong to the books.
+   */
+  const can = useCan();
+  const editable =
+    (doc.docType === "PURCHASE_ORDER" || doc.docType === "PURCHASE") &&
+    can(["PROCUREMENT_PURCHASES:EDIT", doc.docType === "PURCHASE_ORDER" ? "VYAPAR_PURCHASE_ORDER:EDIT" : "VYAPAR_PURCHASE_BILL:EDIT"]);
+  const [editing, setEditing] = useState<{ parties: Party[]; items: Item[] } | null>(null);
+  const [editLoading, setEditLoading] = useState(false);
+  const [editError, setEditError] = useState("");
+  async function startEdit() {
+    setEditLoading(true);
+    setEditError("");
+    try {
+      const [parties, items] = await Promise.all([getVendors(), getItems()]);
+      setEditing({ parties, items });
+    } catch (e) {
+      setEditError(e instanceof Error ? e.message : "Couldn't open the editor.");
+    } finally {
+      setEditLoading(false);
+    }
+  }
+
+  if (editing) {
+    return (
+      <InvoiceBuilder
+        docType={doc.docType}
+        existing={doc}
+        parties={editing.parties}
+        items={editing.items}
+        saveExisting={updatePurchaseDocument}
+        onClose={() => setEditing(null)}
+        onSaved={() => {
+          setEditing(null);
+          setLoading(true);
+          getPurchaseDocument(documentId)
+            .then(setDoc)
+            .catch(() => {})
+            .finally(() => setLoading(false));
+          onSaved?.();
+        }}
+      />
+    );
+  }
 
   async function downloadPdf() {
     setPdfBusy(true);
@@ -75,18 +129,30 @@ export function PurchaseDocumentDrawer({
       width="max-w-3xl"
       guardOnClose={false}
       footer={
-        canOpenVyapar ? (
-          <Link
-            href={`/vyapar/${doc.docType === "PURCHASE_ORDER" ? "purchase-order" : "purchase"}`}
-            className="flex items-center gap-1.5 text-sm font-medium text-brand-accent hover:underline"
-          >
-            Edit in Vyapar <ExternalLink size={13} />
-          </Link>
-        ) : (
-          <span className="text-xs text-gray-400">
-            Read-only here. Editing a purchase document happens in Vyapar.
-          </span>
-        )
+        <div className="flex w-full flex-wrap items-center justify-between gap-2">
+          {editable ? (
+            <button
+              onClick={() => void startEdit()}
+              disabled={editLoading || loading}
+              className="flex items-center gap-1.5 rounded-lg bg-brand-accent px-4 py-2 text-sm font-medium text-white transition-all hover:opacity-90 active:scale-95 disabled:opacity-60"
+            >
+              {editLoading ? <Spinner size={13} className="text-white" /> : <Pencil size={13} />} Edit {noun}
+            </button>
+          ) : (
+            <span className="text-xs text-gray-400">
+              {doc.docType === "PURCHASE_RETURN" ? "Debit notes are edited in Vyapar." : "Your role can view this but not edit it."}
+            </span>
+          )}
+          {editError && <span className="text-xs text-rose-600">{editError}</span>}
+          {canOpenVyapar && (
+            <Link
+              href={`/vyapar/${doc.docType === "PURCHASE_ORDER" ? "purchase-order" : doc.docType === "PURCHASE_RETURN" ? "purchase-return" : "purchase"}?open=${doc.id}`}
+              className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-brand-accent hover:underline"
+            >
+              Open in Vyapar <ExternalLink size={12} />
+            </Link>
+          )}
+        </div>
       }
     >
       <div className="space-y-5">

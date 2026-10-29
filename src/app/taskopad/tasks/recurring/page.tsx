@@ -15,6 +15,7 @@ import { useProjects } from "@/lib/useProjects";
 import { useTaskRights } from "@/lib/taskPermissions";
 import { formatTaskDate } from "@/lib/taskTypes";
 import type { Task } from "@/lib/taskTypes";
+import { todayIST } from "@/lib/datetime";
 
 /**
  * Primary Recurring Tasks — one line per repeating series (Taskopad's "primary" task), showing its
@@ -62,7 +63,7 @@ function RecurringList() {
       const key = t.seriesId ?? t.id;
       groups.set(key, [...(groups.get(key) ?? []), t]);
     }
-    const today = new Date().toISOString().slice(0, 10);
+    const today = todayIST();
     return [...groups.entries()].map(([key, list]) => {
       const sorted = [...list].sort((a, b) => (b.dueDate || "").localeCompare(a.dueDate || ""));
       const openOne = sorted.find((t) => t.status !== "Completed");
@@ -105,7 +106,7 @@ function RecurringList() {
     const url = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
     const a = document.createElement("a");
     a.href = url;
-    a.download = `recurring-tasks-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.download = `recurring-tasks-${todayIST()}.csv`;
     a.click();
     URL.revokeObjectURL(url);
   }

@@ -14,6 +14,7 @@ import * as vyapar from "@/lib/vyaparApi";
 import type { Party, Payment } from "@/lib/vyaparApi";
 import { ArrowDownLeft, ArrowUpRight, Plus, Search, Trash2, Wallet } from "lucide-react";
 import { isBackgroundRefresh, useAutoRefresh } from "@/lib/autoRefresh";
+import { todayIST } from "@/lib/datetime";
 
 export default function VyaparPaymentsPage() {
   const [payments, setPayments] = useState<Payment[]>([]);
@@ -217,7 +218,7 @@ function StandalonePaymentDrawer({
   const [amount, setAmount] = useState(0);
   const [mode, setMode] = useState("Cash");
   const [notes, setNotes] = useState("");
-  const [paymentDate, setPaymentDate] = useState(new Date().toISOString().slice(0, 10));
+  const [paymentDate, setPaymentDate] = useState(todayIST());
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const projectId = useVyaparProjectId();

@@ -30,6 +30,7 @@ import {
   type ProjectMilestone,
   type ProjectSalesInvoice,
 } from "@/lib/projectBillingStore";
+import { todayIST } from "@/lib/datetime";
 
 /**
  * The project's Bill of Quantities — the commercial document the job is billed against.
@@ -1012,7 +1013,7 @@ function InvoiceModal({
 }) {
   const [invoiceNo, setInvoiceNo] = useState(invoice?.invoiceNo ?? "");
   const [clientName, setClientName] = useState(invoice?.clientName ?? defaultClient);
-  const [invoiceDate, setInvoiceDate] = useState(invoice?.invoiceDate ?? new Date().toISOString().slice(0, 10));
+  const [invoiceDate, setInvoiceDate] = useState(invoice?.invoiceDate ?? todayIST());
   const [amount, setAmount] = useState(invoice ? String(invoice.amount) : "");
 
   const valid = invoiceNo.trim() && Number(amount) > 0;

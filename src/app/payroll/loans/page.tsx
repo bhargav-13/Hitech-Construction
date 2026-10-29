@@ -13,6 +13,7 @@ import { getPayrollPeople, ApiError } from "@/lib/api";
 import type { LoanApi, UserResponse } from "@/lib/api";
 import { inr } from "@/lib/format";
 import { HandCoins, Landmark, Pencil, Plus, Trash2 } from "lucide-react";
+import { todayIST } from "@/lib/datetime";
 
 /** Loans — real backend, keyed by ERP member (user_id). Deducted from payroll runs as EMI. */
 export default function LoansPage() {
@@ -202,7 +203,7 @@ function LoanDialog({
   const [tenure, setTenure] = useState(Number(existing?.tenureMonths ?? 12));
   const [annualRate, setAnnualRate] = useState(Number(existing?.annualRate ?? 0));
   const [interestType, setInterestType] = useState<"FLAT" | "SIMPLE" | "COMPOUND">(existing?.interestType ?? "FLAT");
-  const [disbursementDate, setDisbursementDate] = useState(existing?.disbursementDate ?? new Date().toISOString().slice(0, 10));
+  const [disbursementDate, setDisbursementDate] = useState(existing?.disbursementDate ?? todayIST());
   const [startMonth, setStartMonth] = useState(existing?.startMonth ?? new Date().toISOString().slice(0, 7));
   // Editable on an existing loan so a part-repayment can be recorded; a new loan starts at its full
   // principal and the field is derived rather than asked for.

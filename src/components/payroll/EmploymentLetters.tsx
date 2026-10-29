@@ -2,7 +2,10 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { Download, Eye, Pencil, RotateCcw } from "lucide-react";
+import { CheckCircle2, Download, Eye, Pencil, RotateCcw, Send, Trash2 } from "lucide-react";
+import { deleteIssuedLetter, getIssuedLetters, getLetterFile, issueLetter, type IssuedLetterApi } from "@/lib/hrDeskApi";
+import { formatDateTimeIST } from "@/lib/datetime";
+import { useCan } from "@/lib/permissions";
 import { Select } from "@/components/Select";
 import { DatePicker } from "@/components/DatePicker";
 import { Spinner } from "@/components/Spinner";
@@ -31,6 +34,8 @@ export function EmploymentLetters() {
   }, []);
 
   const member = users.find((u) => String(u.id) === userId) ?? null;
+  // Bumped after a share so the history below picks the new row up.
+  const [shared, setShared] = useState(0);
 
   return (
     <div className="space-y-4">
@@ -52,11 +57,114 @@ export function EmploymentLetters() {
 
       {member ? (
         // Keyed so switching person or letter starts a fresh form, loaded for that pair.
-        <LetterForm key={`${member.id}-${kind}`} member={member} kind={kind} />
+        <LetterForm key={`${member.id}-${kind}`} member={member} kind={kind} onShared={() => setShared((n) => n + 1)} />
       ) : (
         <p className="rounded-lg border border-dashed border-gray-200 px-4 py-6 text-center text-sm text-gray-400">
           Pick a member to prepare their letter.
         </p>
+      )}
+
+      <SharedLetters key={shared} userId={member?.id ?? null} memberName={member?.fullName ?? null} />
+    </div>
+  );
+}
+
+/**
+ * KAN-60: which letter went to whom and when. Every letter shared from here is kept with its PDF,
+ * who shared it, and when the employee first opened it in Self Service → Inbox & Documents.
+ */
+function SharedLetters({ userId, memberName }: { userId: number | null; memberName: string | null }) {
+  const can = useCan();
+  const [rows, setRows] = useState<IssuedLetterApi[] | null>(null);
+  const [onlyMember, setOnlyMember] = useState(true);
+  const [error, setError] = useState("");
+  const load = () =>
+    getIssuedLetters()
+      .then(setRows)
+      .catch((e) => {
+        setRows([]);
+        setError(e instanceof Error ? e.message : "Couldn't load shared letters.");
+      });
+  useEffect(() => {
+    void load();
+  }, []);
+  const shown = (rows ?? []).filter((r) => !onlyMember || userId == null || r.userId === userId);
+
+  async function open(r: IssuedLetterApi) {
+    try {
+      const { dataUrl } = await getLetterFile(r.id);
+      const a = document.createElement("a");
+      a.href = dataUrl;
+      a.download = r.fileName;
+      a.click();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Couldn't open the letter.");
+    }
+  }
+  async function remove(r: IssuedLetterApi) {
+    if (!confirm(`Remove "${r.title}" shared with ${r.memberName ?? "this member"}? They will no longer see it in their inbox.`)) return;
+    await deleteIssuedLetter(r.id).catch(() => {});
+    void load();
+  }
+
+  return (
+    <div className="space-y-2 border-t border-gray-100 pt-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h4 className="text-sm font-semibold text-gray-800">Shared letters</h4>
+        {userId != null && (
+          <label className="flex items-center gap-1.5 text-xs text-gray-500">
+            <input type="checkbox" checked={onlyMember} onChange={(e) => setOnlyMember(e.target.checked)} />
+            Only {memberName}
+          </label>
+        )}
+      </div>
+      {error && <p className="text-xs text-rose-600">{error}</p>}
+      {rows == null ? (
+        <div className="flex items-center gap-2 py-4 text-sm text-gray-400"><Spinner size={14} className="text-brand-accent" /> Loading…</div>
+      ) : shown.length === 0 ? (
+        <p className="rounded-lg border border-dashed border-gray-200 px-4 py-4 text-center text-xs text-gray-400">
+          No letters shared yet. Use <b>Share with employee</b> above — it lands in their Self Service inbox and is listed here.
+        </p>
+      ) : (
+        <div className="overflow-x-auto rounded-xl border border-gray-200">
+          <table className="w-full min-w-[640px] text-sm">
+            <thead>
+              <tr className="border-b border-gray-100 bg-gray-50 text-left text-xs text-gray-500">
+                <th className="px-3 py-2 font-medium">Letter</th>
+                <th className="px-3 py-2 font-medium">Shared with</th>
+                <th className="px-3 py-2 font-medium">Ref no.</th>
+                <th className="px-3 py-2 font-medium">Shared on</th>
+                <th className="px-3 py-2 font-medium">By</th>
+                <th className="px-3 py-2 font-medium">Opened</th>
+                <th className="px-3 py-2" />
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-50">
+              {shown.map((r) => (
+                <tr key={r.id}>
+                  <td className="px-3 py-2 font-medium text-gray-800">{r.title}</td>
+                  <td className="px-3 py-2 text-gray-700">{r.memberName ?? "—"}</td>
+                  <td className="px-3 py-2 text-gray-500">{r.refNo ?? "—"}</td>
+                  <td className="px-3 py-2 whitespace-nowrap text-gray-600">{formatDateTimeIST(r.issuedAt)}</td>
+                  <td className="px-3 py-2 text-gray-500">{r.issuedByName ?? "—"}</td>
+                  <td className="px-3 py-2 whitespace-nowrap">
+                    {r.seenAt ? (
+                      <span className="inline-flex items-center gap-1 text-xs text-emerald-700"><CheckCircle2 size={12} /> {formatDateTimeIST(r.seenAt)}</span>
+                    ) : (
+                      <span className="text-xs text-gray-400">Not yet</span>
+                    )}
+                  </td>
+                  <td className="px-3 py-2 text-right whitespace-nowrap">
+                    <button onClick={() => void open(r)} title="Download the shared PDF" className="rounded p-1 text-gray-400 hover:text-brand-accent"><Download size={14} /></button>
+                    {can("PAYROLL_STAFF:EDIT") && (
+                      <button onClick={() => void remove(r)} title="Remove" className="rounded p-1 text-gray-400 hover:text-rose-600"><Trash2 size={14} /></button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </div>
   );
@@ -90,7 +198,7 @@ function autoValues(member: UserResponse, profile: PayrollProfileResponse | null
   };
 }
 
-function LetterForm({ member, kind }: { member: UserResponse; kind: LetterKind }) {
+function LetterForm({ member, kind, onShared }: { member: UserResponse; kind: LetterKind; onShared: () => void }) {
   const def = LETTER_DEFS.find((d) => d.kind === kind)!;
   const [loaded, setLoaded] = useState<{ tpl: DocTemplate; auto: Record<string, string> } | null>(null);
   const [error, setError] = useState("");
@@ -98,7 +206,8 @@ function LetterForm({ member, kind }: { member: UserResponse; kind: LetterKind }
   // Wording for this one letter; null = use the template's as saved.
   const [subject, setSubject] = useState<string | null>(null);
   const [body, setBody] = useState<string | null>(null);
-  const [busy, setBusy] = useState<"" | "preview" | "download">("");
+  const [busy, setBusy] = useState<"" | "preview" | "download" | "share">("");
+  const [sharedMsg, setSharedMsg] = useState("");
 
   useEffect(() => {
     let live = true;
@@ -139,8 +248,9 @@ function LetterForm({ member, kind }: { member: UserResponse; kind: LetterKind }
   const values: Record<string, string> = { ...loaded.auto, ...manual };
   const missing = asks.filter((f) => !values[f.key]?.trim());
 
-  async function run(mode: "preview" | "download") {
+  async function run(mode: "preview" | "download" | "share") {
     setBusy(mode);
+    setSharedMsg("");
     try {
       const doc = await printLetter(kind, values, {
         template: loaded!.tpl,
@@ -149,6 +259,19 @@ function LetterForm({ member, kind }: { member: UserResponse; kind: LetterKind }
         save: mode === "download",
       });
       if (mode === "preview") window.open(String(doc.output("bloburl")), "_blank");
+      if (mode === "share") {
+        if (!confirm(`Share this ${def.label} with ${member.fullName}? It goes to their Self Service inbox.`)) return;
+        await issueLetter({
+          userId: member.id,
+          kind,
+          title: def.label,
+          refNo: values.refNo?.trim() || null,
+          fileName: `${def.label} - ${member.fullName}.pdf`,
+          dataUrl: String(doc.output("datauristring")),
+        });
+        setSharedMsg(`Shared with ${member.fullName} — they'll find it under Self Service → Inbox & Documents.`);
+        onShared();
+      }
     } catch (e) {
       alert(e instanceof Error ? e.message : "Couldn't build the letter.");
     } finally {
@@ -223,6 +346,7 @@ function LetterForm({ member, kind }: { member: UserResponse; kind: LetterKind }
         </p>
       )}
 
+      {sharedMsg && <p className="rounded-lg bg-emerald-50 px-3 py-2 text-xs text-emerald-800">{sharedMsg}</p>}
       <div className="flex flex-wrap items-center justify-between gap-2">
         <Link href={`/templates?kind=${kind}`} className="flex items-center gap-1 text-xs font-medium text-brand-accent hover:underline">
           <Pencil size={12} /> Edit {def.label} design &amp; default wording
@@ -241,6 +365,14 @@ function LetterForm({ member, kind }: { member: UserResponse; kind: LetterKind }
             className="flex items-center gap-1.5 rounded-lg bg-brand-accent px-4 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50"
           >
             <Download size={15} /> {busy === "download" ? "Preparing…" : "Download PDF"}
+          </button>
+          <button
+            onClick={() => void run("share")}
+            disabled={!!busy}
+            title="Send the PDF to the employee's Self Service inbox and keep a record of it"
+            className="flex items-center gap-1.5 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
+          >
+            <Send size={15} /> {busy === "share" ? "Sharing…" : "Share with employee"}
           </button>
         </div>
       </div>

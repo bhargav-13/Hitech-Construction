@@ -9,7 +9,7 @@ import { projectAvatarColor, projectInitials } from "@/lib/projectHelpers";
 import { useAuthStore } from "@/lib/authStore";
 import { useProjects } from "@/lib/useProjects";
 import { useProjectScope } from "@/lib/projectScope";
-import { formatDateTime24IST } from "@/lib/datetime";
+import { todayIST, formatDateTime24IST } from "@/lib/datetime";
 import * as audit from "@/lib/auditApi";
 import type { AuditActionApi, AuditLog } from "@/lib/auditApi";
 import { downloadPdf } from "@/lib/vyaparExport";
@@ -208,7 +208,7 @@ export default function AuditPage() {
       const url = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
       const a = document.createElement("a");
       a.href = url;
-      a.download = `audit-log-${new Date().toISOString().slice(0, 10)}.csv`;
+      a.download = `audit-log-${todayIST()}.csv`;
       a.click();
       URL.revokeObjectURL(url);
     } catch (err) {

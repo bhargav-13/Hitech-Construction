@@ -20,6 +20,7 @@ import { getAmountDecimals } from "./format";
 import { gstRate } from "./gstRates";
 import { getTemplate, type DocKind, type DocTemplate } from "./docTemplates";
 import type { PrintModel } from "./docPdf";
+import { todayIST } from "@/lib/datetime";
 
 type Cell = string | number | null | undefined;
 
@@ -131,7 +132,7 @@ export function exportRowsToCsv(filename: string, head: string[], rows: Cell[][]
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = `${filename}-${new Date().toISOString().slice(0, 10)}.csv`;
+  a.download = `${filename}-${todayIST()}.csv`;
   a.click();
   URL.revokeObjectURL(url);
 }
@@ -186,7 +187,7 @@ export async function exportRowsToXlsx(
   });
   const book = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(book, sheet, "Export");
-  XLSX.writeFile(book, `${filename}-${new Date().toISOString().slice(0, 10)}.xlsx`, { compression: true });
+  XLSX.writeFile(book, `${filename}-${todayIST()}.xlsx`, { compression: true });
 }
 
 /**
@@ -525,7 +526,7 @@ export async function downloadPdf(
   });
 
   if (opts?.preview) return doc;
-  doc.save(`${title.replace(/[^\w\-]+/g, "-").toLowerCase()}-${new Date().toISOString().slice(0, 10)}.pdf`);
+  doc.save(`${title.replace(/[^\w\-]+/g, "-").toLowerCase()}-${todayIST()}.pdf`);
 }
 
 /**

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { PayrollShell, PayrollEmpty } from "@/components/payroll/PayrollShell";
 import { Spinner } from "@/components/Spinner";
 import { LeaveStatusPill } from "@/components/payroll/LeaveStatusPill";
@@ -45,6 +45,7 @@ export default function LeavePage() {
   const [order, setOrder] = useState("newest");
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [note, setNote] = useState("");
+  const asideRef = useRef<HTMLElement>(null);
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState("");
 
@@ -190,6 +191,10 @@ export default function LeavePage() {
                             setSelectedId(r.id);
                             setNote("");
                             setActionError("");
+                            // One column on a phone: the panel is below the whole list — bring it up.
+                            if (!window.matchMedia("(min-width: 1024px)").matches) {
+                              setTimeout(() => asideRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
+                            }
                           }}
                           className={`flex w-full items-start gap-3 px-4 py-3 text-left transition ${
                             active ? "bg-cyan-50/60 ring-1 ring-inset ring-cyan-500/20" : "hover:bg-slate-50"
@@ -231,11 +236,16 @@ export default function LeavePage() {
             </div>
 
             {/* ---- detail sidebar: request + ladder + trail + actions ---- */}
-            <aside className="rounded-xl border border-gray-200 bg-white">
+            {/* KAN-72: the panel used to stretch to the list's height, so Approve / Reject sat beside
+                the last request. It now stays in view (sticky) and scrolls inside itself. */}
+            <aside
+              ref={asideRef}
+              className="scroll-mt-4 rounded-xl border border-gray-200 bg-white lg:sticky lg:top-0 lg:flex lg:max-h-[calc(100dvh-8rem)] lg:flex-col lg:self-start lg:overflow-hidden"
+            >
               {!selected ? (
                 <div className="p-6 text-center text-sm text-slate-400">Select a request to see its history.</div>
               ) : (
-                <div className="flex h-full flex-col">
+                <div className="flex min-h-0 flex-1 flex-col">
                   <div className="border-b border-gray-100 p-4">
                     <div className="flex items-start justify-between gap-2">
                       <div>

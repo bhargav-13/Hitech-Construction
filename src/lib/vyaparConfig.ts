@@ -16,7 +16,8 @@ export type VyaparDocType =
   | "PURCHASE_RETURN"
   | "PURCHASE_ORDER"
   | "EXPENSE"
-  | "PARTY_TRANSFER";
+  | "PARTY_TRANSFER"
+  | "PAYMENT_REQUEST";
 
 export interface DocConfig {
   type: VyaparDocType;
@@ -52,6 +53,8 @@ export const DOC_CONFIGS: DocConfig[] = [
   { type: "PURCHASE_ORDER", label: "Purchase Order", title: "Purchase Orders", slug: "purchase-order", group: "PURCHASE", prefix: "PO", flow: "out", posts: false, hasLines: true },
   // ---- Others ----
   { type: "EXPENSE", label: "Expenses", title: "Expenses", slug: "expenses", group: "OTHERS", prefix: "EXP", flow: "out", posts: true, hasLines: true },
+  // KAN-68: Onsite's Payment Request — ask for money to pay a party, approve, then pay.
+  { type: "PAYMENT_REQUEST", label: "Payment Request", title: "Payment Requests", slug: "payment-request", group: "OTHERS", prefix: "PR", flow: "out", posts: false, hasLines: false },
   { type: "PARTY_TRANSFER", label: "Party To Party Transfer", title: "Party To Party Transfer", slug: "party-transfer", group: "OTHERS", prefix: "PTP", flow: "out", posts: true, hasLines: false },
 ];
 
@@ -82,6 +85,7 @@ export function docFeature(type: string): string {
     case "PAYMENT_IN":
     case "PAYMENT_OUT":
     case "PARTY_TRANSFER":
+    case "PAYMENT_REQUEST":
       return "VYAPAR_PAYMENT";
     default:
       return "VYAPAR_SALE_INVOICE";
@@ -127,6 +131,7 @@ export const VYAPAR_NAV: NavNode[] = [
     children: [
       { label: "Purchase Bills", href: "/vyapar/purchase", feature: "VYAPAR_PURCHASE_BILL" },
       { label: "Payment-Out", href: "/vyapar/payment-out", feature: "VYAPAR_PAYMENT" },
+      { label: "Payment Request", href: "/vyapar/payment-request", feature: "VYAPAR_PAYMENT" },
       { label: "Expenses", href: "/vyapar/expenses", feature: "VYAPAR_EXPENSE" },
       { label: "Purchase Order", href: "/vyapar/purchase-order", feature: "VYAPAR_PURCHASE_ORDER" },
       { label: "Purchase Return / Dr. Note", href: "/vyapar/purchase-return", feature: "VYAPAR_PURCHASE_RETURN" },

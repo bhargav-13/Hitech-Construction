@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AlertTriangle, Building2, ChevronDown, FlaskConical, Layers, Plus, Trash2, X } from "lucide-react";
 import { Spinner } from "@/components/Spinner";
+import { useProjectScope } from "@/lib/projectScope";
 import {
   ApiError,
   deleteApprovalRule,
@@ -100,6 +101,29 @@ export function MultiLevelApproval() {
 
   const current = useMemo(() => chains.find((c) => c.entityType === selected) ?? null, [chains, selected]);
 
+  /**
+   * The header's project picker (KAN-56): pick an office or site up there and this screen shows and
+   * edits *that* project's approval steps — e.g. the office: HR → Super Admin, a site: PM → HR →
+   * Super Admin. "All Projects" is the company default every project without its own steps uses.
+   */
+  const scopeId = useProjectScope((st) => st.projectId);
+  const scopedProject = scopeId === "all" ? null : projects.find((p) => String(p.id) === String(scopeId)) ?? null;
+  /** Which record types have their own steps for the scoped project — the dots in the list. */
+  const [ownRule, setOwnRule] = useState<Record<string, ApprovalChain | null>>({});
+  const reloadOwnRules = useCallback(async () => {
+    if (!scopedProject) return setOwnRule({});
+    const entries = await Promise.all(
+      chains.map(async (c) => {
+        const rules = await getApprovalRules(c.entityType).catch(() => [] as ApprovalChain[]);
+        return [c.entityType, rules.find((r) => r.projectId === scopedProject.id) ?? null] as const;
+      }),
+    );
+    setOwnRule(Object.fromEntries(entries));
+  }, [chains, scopedProject]);
+  useEffect(() => {
+    void reloadOwnRules();
+  }, [reloadOwnRules]);
+
   if (loading) return <div className="flex justify-center py-16"><Spinner /></div>;
   if (error) {
     return <div className="rounded-lg border border-rose-200 bg-rose-50/60 px-3 py-6 text-center text-sm text-rose-700">{error}</div>;
@@ -119,7 +143,14 @@ export function MultiLevelApproval() {
                 }`}
               >
                 <span className="truncate">{c.entityLabel}</span>
-                {c.published && <span className="ml-2 h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-500" title="Published" />}
+                <span className="ml-2 flex shrink-0 items-center gap-1">
+                  {scopedProject && ownRule[c.entityType] && (
+                    <span className="rounded bg-cyan-100 px-1 text-[9px] font-semibold text-brand-accent" title={`${scopedProject.name} has its own steps`}>
+                      OWN
+                    </span>
+                  )}
+                  {c.published && <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" title="Published" />}
+                </span>
               </button>
             </li>
           ))}
@@ -134,7 +165,7 @@ export function MultiLevelApproval() {
             <div className="flex flex-wrap items-center gap-1 border-b border-slate-100 px-3 pt-2">
               {(
                 [
-                  ["default", "Default chain", Layers],
+                  ["default", scopedProject ? "This project's chain" : "Default chain", Layers],
                   ["rules", "Office/site rules", Building2],
                   ["test", "Test a chain", FlaskConical],
                 ] as const
@@ -151,7 +182,24 @@ export function MultiLevelApproval() {
               ))}
             </div>
 
-            {tab === "default" && (
+            {scopedProject && (
+              <div className="flex flex-wrap items-center gap-2 border-b border-cyan-100 bg-cyan-50/50 px-4 py-2 text-xs text-cyan-900">
+                <Building2 size={13} />
+                Showing <span className="font-semibold">{scopedProject.name}</span> (picked at the top of the page).
+                <span className="text-cyan-700">Switch the picker to All Projects for the company default.</span>
+              </div>
+            )}
+            {tab === "default" && scopedProject && (
+              <ProjectChain
+                key={`${current.entityType}-${scopedProject.id}`}
+                chain={current}
+                project={scopedProject}
+                rule={ownRule[current.entityType] ?? null}
+                roles={roles}
+                onChanged={reloadOwnRules}
+              />
+            )}
+            {tab === "default" && !scopedProject && (
               <DefaultChain
                 key={current.entityType}
                 chain={current}
@@ -252,6 +300,161 @@ function DefaultChain({ chain, roles, onSaved }: { chain: ApprovalChain; roles: 
     </div>
   );
 }
+
+/**
+ * One project's steps for a record type, shown when that project is picked in the header. Without
+ * its own steps the project follows the company default, shown read-only with a button to give it
+ * its own (started from a copy of the default, so only the difference needs typing).
+ */
+function ProjectChain({
+  chain,
+  project,
+  rule,
+  roles,
+  onChanged,
+}: {
+  chain: ApprovalChain;
+  project: ProjectResponse;
+  rule: ApprovalChain | null;
+  roles: RoleResponse[];
+  onChanged: () => Promise<void> | void;
+}) {
+  const [draft, setDraft] = useState<Draft | null>(rule ? toDraft(rule) : null);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  useEffect(() => setDraft(rule ? toDraft(rule) : null), [rule]);
+  const describe = (c: ApprovalChain) =>
+    c.mode === "REPORTING_CHAIN"
+      ? "Reporting chain — the requester's manager, then theirs, and so on"
+      : c.levels.length === 0
+        ? "No steps"
+        : c.levels.map((l) => `${l.roleNames.join(" / ")}${l.scope === "SAME_PROJECT" ? " (same office/site)" : ""}`).join(" → ");
+
+  async function save() {
+    if (!draft) return;
+    setSaving(true);
+    setError("");
+    try {
+      await saveApprovalRule(chain.entityType, project.id, { ...toInput({ ...draft, mode: "EXPLICIT" }), published: true });
+      await onChanged();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Couldn't save these steps.");
+    } finally {
+      setSaving(false);
+    }
+  }
+  async function backToDefault() {
+    if (!confirm(`${project.name} goes back to the company default steps for ${chain.entityLabel}. Continue?`)) return;
+    setSaving(true);
+    try {
+      await deleteApprovalRule(chain.entityType, project.id);
+      setDraft(null);
+      await onChanged();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Couldn't remove these steps.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="space-y-4 p-4">
+      <div className="text-sm font-semibold text-slate-800">
+        Approval for {chain.entityLabel} — {project.name}
+      </div>
+      {APPLIES_WHEN[chain.entityType] && (
+        <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600">
+          <span className="font-semibold">When it applies: </span>
+          {APPLIES_WHEN[chain.entityType]} {PROJECT_OF[chain.entityType] ?? "The record's project decides which steps it follows."}
+        </p>
+      )}
+      {!chain.published && (
+        <p className="flex items-center gap-1.5 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
+          <AlertTriangle size={13} /> The company default for {chain.entityLabel} isn&apos;t published, so no approval runs yet — publish it under All Projects first.
+        </p>
+      )}
+
+      {COMPANY_WIDE.has(chain.entityType) ? (
+        <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50/50 p-4 text-sm text-slate-700">
+          A {chain.entityLabel.toLowerCase()} isn&apos;t raised for one project, so it always follows the company default:
+          <div className="mt-1 font-medium text-slate-900">{describe(chain)}</div>
+          <div className="mt-1 text-xs text-slate-500">Switch the picker at the top to All Projects to change it.</div>
+        </div>
+      ) : !draft ? (
+        <div className="space-y-3 rounded-lg border border-dashed border-slate-200 bg-slate-50/50 p-4">
+          <div className="text-sm text-slate-700">
+            {project.name} uses the <span className="font-medium">company default</span>:
+            <div className="mt-1 font-medium text-slate-900">{describe(chain)}</div>
+          </div>
+          <button
+            onClick={() =>
+              setDraft({
+                mode: "EXPLICIT",
+                published: true,
+                skipEmpty: chain.skipEmpty ?? true,
+                levels: chain.mode === "EXPLICIT" && chain.levels.length
+                  ? chain.levels.map((l) => ({ roleIds: [...l.roleIds], scope: l.scope ?? "ANY" }))
+                  : [{ roleIds: [], scope: "ANY" }],
+              })
+            }
+            className="inline-flex items-center gap-1.5 rounded-lg bg-brand-accent px-3 py-1.5 text-sm font-medium text-white hover:opacity-90"
+          >
+            <Plus size={14} /> Give {project.name} its own steps
+          </button>
+        </div>
+      ) : (
+        <>
+          {!rule && (
+            <p className="text-xs text-slate-500">
+              {chain.mode === "EXPLICIT" && chain.levels.length
+                ? `Started from a copy of the company default — change what is different for ${project.name}.`
+                : `Pick the role for each step ${project.name} needs, in order.`}
+            </p>
+          )}
+          <StepsEditor draft={draft} setDraft={setDraft} roles={roles} />
+        </>
+      )}
+
+      {error && <p className="text-sm text-rose-600">{error}</p>}
+      {draft && (
+        <div className="flex flex-wrap items-center gap-2 border-t border-slate-100 pt-3">
+          <button
+            disabled={saving || draft.levels.length === 0 || draft.levels.some((l) => !l.roleIds.length) || (rule != null && JSON.stringify(draft) === JSON.stringify(toDraft(rule)))}
+            onClick={save}
+            className="rounded-lg bg-brand-accent px-4 py-2 text-sm font-semibold text-white transition hover:bg-brand-accent-strong disabled:opacity-40"
+          >
+            {saving ? "Saving…" : `Save for ${project.name}`}
+          </button>
+          {rule ? (
+            <button onClick={backToDefault} disabled={saving} className="rounded-lg px-3 py-2 text-sm text-rose-600 hover:bg-rose-50">
+              Use the company default instead
+            </button>
+          ) : (
+            <button onClick={() => setDraft(null)} className="rounded-lg px-3 py-2 text-sm text-slate-500 hover:bg-slate-50">
+              Cancel
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Which project a record is judged by, per type — so the settings screen can say it plainly. */
+const PROJECT_OF: Record<string, string> = {
+  LEAVE_APPLICATION: "The applicant's home office/site (on their payroll profile) decides which steps it follows.",
+  PURCHASE_ORDER: "The order's project decides which steps it follows.",
+  SALES_INVOICE: "The invoice's project decides which steps it follows.",
+  PAYMENT_ENTRY: "The payment's project decides which steps it follows.",
+  PAYMENT_REQUEST: "The request's project decides which steps it follows.",
+  SITE_EXPENSE: "The expense's project decides which steps it follows.",
+  MATERIAL_PURCHASE: "The bill's project decides which steps it follows.",
+  SALE_RETURN: "The credit note's project decides which steps it follows.",
+  PURCHASE_RETURN: "The debit note's project decides which steps it follows.",
+};
+
+/** Records that don't belong to one project, so they always follow the company default. */
+const COMPANY_WIDE = new Set(["PAYROLL_RUN", "TENDER_SUBMISSION", "TASK_COMPLETION"]);
 
 /** The steps list + the skip switch — shared by the default chain and office/site rules. */
 function StepsEditor({ draft, setDraft, roles }: { draft: Draft; setDraft: (d: Draft) => void; roles: RoleResponse[] }) {
@@ -595,6 +798,7 @@ const APPLIES_WHEN: Record<string, string> = {
   SALES_INVOICE: "A sale invoice is saved. Rejecting cancels the invoice.",
   SALE_RETURN: "A credit note / sale return is saved. Rejecting cancels it.",
   PAYMENT_ENTRY: "A Payment In or Payment Out is recorded. Rejecting marks it rejected (money already moved isn't reversed).",
+  PAYMENT_REQUEST: "Someone raises a Payment Request in Vyapar. It can be paid only after the last step approves; rejecting closes it.",
   SITE_EXPENSE: "An expense is saved. Rejecting cancels the expense.",
   MATERIAL_PURCHASE: "A purchase bill is saved. Rejecting cancels the bill.",
   PURCHASE_RETURN: "A debit note / purchase return is saved. Rejecting cancels it.",

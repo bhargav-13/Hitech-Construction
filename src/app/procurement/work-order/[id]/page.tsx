@@ -19,6 +19,7 @@ import * as wo from "@/lib/workOrderApi";
 import * as vyapar from "@/lib/vyaparApi";
 import { inr } from "@/lib/format";
 import { PdfButton, downloadWorkOrderPdf } from "@/components/PdfButton";
+import { todayIST } from "@/lib/datetime";
 
 /**
  * One subcontract: what was ordered, what has been billed, and what material he is holding.
@@ -174,6 +175,7 @@ export default function WorkOrderDetailPage({ params }: { params: Promise<{ id: 
                     bankAccountName: w.bankAccountName,
                     bankAccountNumber: w.bankAccountNumber,
                     bankIfsc: w.bankIfsc,
+                    bankName: w.bankName,
                     terms: w.terms,
                     notes: w.notes,
                     items: w.items.map((i) => ({
@@ -295,10 +297,11 @@ export default function WorkOrderDetailPage({ params }: { params: Promise<{ id: 
         <div className="grid gap-4 lg:grid-cols-3">
           <section className="rounded-xl border border-gray-200 bg-white p-4 lg:col-span-2">
             <h2 className="mb-2 text-sm font-semibold text-gray-800">Payment details</h2>
-            <dl className="grid gap-x-6 gap-y-1 text-sm sm:grid-cols-3">
+            <dl className="grid gap-x-6 gap-y-1 text-sm sm:grid-cols-2 xl:grid-cols-4">
               <Pair label="Account holder" value={w.bankAccountName} />
               <Pair label="Account number" value={w.bankAccountNumber} mono />
               <Pair label="IFSC" value={w.bankIfsc} mono />
+              <Pair label="Bank name" value={w.bankName} />
             </dl>
             {(w.terms || w.notes) && (
               <div className="mt-3 grid gap-3 border-t border-gray-100 pt-3 sm:grid-cols-2">
@@ -657,7 +660,7 @@ function BillDialog({
   onSave: (body: wo.SubconBillInput) => void;
 }) {
   const [billNo, setBillNo] = useState("");
-  const [billDate, setBillDate] = useState(new Date().toISOString().slice(0, 10));
+  const [billDate, setBillDate] = useState(todayIST());
   const [amount, setAmount] = useState("");
   const [retention, setRetention] = useState("");
   const [recovery, setRecovery] = useState("");
@@ -787,7 +790,7 @@ function IssueDialog({
   const [movement, setMovement] = useState<wo.MaterialMovement>("ISSUE");
   const [quantity, setQuantity] = useState("");
   const [rate, setRate] = useState("");
-  const [movedOn, setMovedOn] = useState(new Date().toISOString().slice(0, 10));
+  const [movedOn, setMovedOn] = useState(todayIST());
   const [note, setNote] = useState("");
 
   const n = (v: string) => (v.trim() === "" ? 0 : Number(v) || 0);

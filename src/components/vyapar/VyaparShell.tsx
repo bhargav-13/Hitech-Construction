@@ -10,6 +10,7 @@ import type { NavNode } from "@/lib/vyaparConfig";
 import { useUiStore } from "@/lib/uiStore";
 import { useVyaparSettings } from "@/lib/useVyaparSettings";
 import { CalculatorPanel } from "@/components/vyapar/CalculatorPanel";
+import { MENU_SHORTCUT, comboOf, useVyaparShortcuts } from "@/lib/vyaparShortcuts";
 import {
   BarChart3,
   Boxes,
@@ -19,6 +20,7 @@ import {
   ChevronRight,
   FileText,
   Home,
+  Keyboard,
   PanelLeftClose,
   PanelLeftOpen,
   Pin,
@@ -107,6 +109,38 @@ export function VyaparShell({ children }: { children: React.ReactNode }) {
   // into `inr`/`qty`, so every amount below the shell renders the way the books are configured.
   useVyaparSettings();
 
+  // Vyapar's keyboard shortcuts (Alt+S Sale, Alt+P Purchase, … Ctrl+Enter this menu), editable
+  // under Settings → Shortcuts. Capture phase, so a focused input can't swallow them first.
+  const shortcuts = useVyaparShortcuts().map;
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.repeat || document.body.dataset.shortcutRecording) return;
+      const combo = comboOf(e);
+      if (!combo) return;
+      const hit = Object.entries(shortcuts).find(([, c]) => c && c === combo)?.[0];
+      if (!hit) return;
+      if (hit === MENU_SHORTCUT) {
+        if (!creatable.length) return;
+        e.preventDefault();
+        setAddOpen((o) => !o);
+        return;
+      }
+      const doc = creatable.find((d) => d.type === hit);
+      if (!doc) return;
+      e.preventDefault();
+      setAddOpen(false);
+      router.push(`/vyapar/${doc.slug}?new=1`);
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [shortcuts, creatable, router]);
+  useEffect(() => {
+    if (!addOpen) return;
+    const onEsc = (e: KeyboardEvent) => { if (e.key === "Escape") setAddOpen(false); };
+    window.addEventListener("keydown", onEsc);
+    return () => window.removeEventListener("keydown", onEsc);
+  }, [addOpen]);
+
   // Open the section containing the current route by default.
   const [open, setOpen] = useState<Record<string, boolean>>(() => {
     const init: Record<string, boolean> = {};
@@ -178,6 +212,7 @@ export function VyaparShell({ children }: { children: React.ReactNode }) {
                 }`}
               >
                 <Plus size={14} /> Add {QUICK_ADD_LABEL[d.type] ?? d.label}
+                {shortcuts[d.type] && <kbd className="ml-1 hidden rounded bg-white/70 px-1 text-[10px] font-medium text-gray-400 xl:inline">{shortcuts[d.type]}</kbd>}
               </Link>
             ))}
 
@@ -205,6 +240,7 @@ export function VyaparShell({ children }: { children: React.ReactNode }) {
             <div className="relative">
               <button
                 onClick={() => setAddOpen((o) => !o)}
+                title={shortcuts[MENU_SHORTCUT] ? `Add More (${shortcuts[MENU_SHORTCUT]})` : "Add More"}
                 className={`flex items-center gap-1 rounded-lg px-3 py-1.5 text-sm font-semibold transition-all duration-150 active:scale-95 ${
                   addOpen ? "bg-brand-accent text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"
                 }`}
@@ -214,9 +250,12 @@ export function VyaparShell({ children }: { children: React.ReactNode }) {
               {addOpen && (
                 <>
                   <div className="fixed inset-0 z-30" onClick={() => setAddOpen(false)} />
-                  <div className="animate-menu-pop absolute right-0 top-10 z-40 w-[560px] origin-top-right rounded-xl border border-gray-100 bg-white p-4 shadow-2xl ring-1 ring-black/[0.04]">
+                  <div className="animate-menu-pop absolute right-0 top-10 z-40 w-[760px] max-w-[calc(100vw-2rem)] origin-top-right rounded-xl border border-gray-100 bg-white p-4 shadow-2xl ring-1 ring-black/[0.04]">
                     <p className="mb-3 flex items-center gap-1.5 text-xs text-gray-400">
                       <Pin size={12} /> Pin an entry to keep it as a button on the top bar.
+                      <Link href="/vyapar/settings?tab=Shortcuts" onClick={() => setAddOpen(false)} className="ml-auto inline-flex items-center gap-1 text-brand-accent hover:underline">
+                        <Keyboard size={12} /> Customise shortcuts
+                      </Link>
                     </p>
                     <div className="grid grid-cols-3 gap-4">
                       {(["SALE", "PURCHASE", "OTHERS"] as const).map((group) => (
@@ -236,6 +275,9 @@ export function VyaparShell({ children }: { children: React.ReactNode }) {
                                   >
                                     {d.label}
                                   </Link>
+                                  {shortcuts[d.type] && (
+                                    <kbd className="shrink-0 px-1 text-[10px] font-medium tracking-wide text-gray-400 uppercase">{shortcuts[d.type].replace(/\+/g, " + ")}</kbd>
+                                  )}
                                   <button
                                     type="button"
                                     onClick={() => quickAdd.toggle(d.type)}
@@ -257,6 +299,17 @@ export function VyaparShell({ children }: { children: React.ReactNode }) {
                         </div>
                       ))}
                     </div>
+                    {shortcuts[MENU_SHORTCUT] && (
+                      <div className="mt-4 flex items-center gap-1.5 rounded-lg bg-amber-100 px-3 py-2 text-xs text-gray-700">
+                        Shortcut to open this menu:
+                        {shortcuts[MENU_SHORTCUT].split("+").map((k, i) => (
+                          <span key={i} className="flex items-center gap-1.5">
+                            {i > 0 && <span>+</span>}
+                            <kbd className="rounded bg-white px-1.5 py-0.5 font-semibold shadow-sm">{k}</kbd>
+                          </span>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 </>
               )}

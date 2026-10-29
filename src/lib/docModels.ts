@@ -81,6 +81,7 @@ export function workOrderPrintModel(
   const bank: [string, string][] = [["Name", wo.bankAccountName || wo.vendorName]];
   if (wo.bankAccountNumber) bank.push(["A/c No.", wo.bankAccountNumber]);
   if (wo.bankIfsc) bank.push(["IFSC", wo.bankIfsc]);
+  if (wo.bankName) bank.push(["Bank", wo.bankName]);
 
   return {
     kind: "WORK_ORDER",
@@ -221,6 +222,7 @@ export async function sampleModel(kind: DocKind): Promise<PrintModel> {
         bankAccountName: "Hitech Infraspace Pvt Ltd",
         bankAccountNumber: "50200012345678",
         bankIfsc: "HDFC0001234",
+        bankName: "HDFC Bank",
         terms: "Work to be completed as per drawings and site engineer's instructions.",
         notes: null,
         items: [

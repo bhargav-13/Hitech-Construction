@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { apiRequest, ApiError } from "./api";
-import type { Invoice, Party, PartyLedgerRow } from "./vyaparApi";
+import type { Invoice, InvoiceInput, Party, PartyLedgerRow } from "./vyaparApi";
 import { useVyaparProjectId } from "./projectScope";
 
 /**
@@ -38,6 +38,10 @@ export const getPurchaseReturns = (projectId?: number) =>
   apiRequest<Invoice[]>(`${BASE}/returns${qs({ projectId })}`);
 
 export const getPurchaseDocument = (id: number) => apiRequest<Invoice>(`${BASE}/documents/${id}`);
+
+/** Edit a purchase order or bill from Procurement (PROCUREMENT_PURCHASES:EDIT — no Vyapar access needed). */
+export const updatePurchaseDocument = (id: number, body: InvoiceInput) =>
+  apiRequest<Invoice>(`${BASE}/documents/${id}`, { method: "PUT", body });
 
 export const getVendors = (projectId?: number) =>
   apiRequest<Party[]>(`${BASE}/vendors${qs({ projectId })}`);

@@ -13,6 +13,7 @@ import { filterNav, useCan } from "@/lib/permissions";
 import type { PayrollNavNode } from "@/lib/payrollConfig";
 import {
   Megaphone,
+  MessagesSquare,
   Banknote,
   BarChart3,
   CalendarDays,
@@ -59,6 +60,7 @@ const ICONS: Record<string, React.ComponentType<{ size?: number; className?: str
   tiles: Grid3x3,
   sliders: SlidersHorizontal,
   megaphone: Megaphone,
+  message: MessagesSquare,
 };
 
 /**
@@ -334,7 +336,15 @@ export function StatCard({
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           <div className="text-xs text-gray-500">{label}</div>
-          <div className={`mt-1 text-2xl font-semibold ${tone[accent]}`}>{value}</div>
+          {/* Long amounts ("₹1,47,686.00", "₹0.00 / ₹0.00") step down a size instead of running out of the card. */}
+          <div
+            title={String(value)}
+            className={`mt-1 font-semibold tabular-nums break-words ${tone[accent]} ${
+              String(value).length > 16 ? "text-base" : String(value).length > 10 ? "text-lg" : String(value).length > 7 ? "text-xl" : "text-2xl"
+            }`}
+          >
+            {value}
+          </div>
           {hint && <div className="mt-0.5 text-[11px] text-gray-400">{hint}</div>}
         </div>
         {Icon && (

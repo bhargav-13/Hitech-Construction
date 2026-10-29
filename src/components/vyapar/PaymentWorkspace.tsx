@@ -33,6 +33,7 @@ import { DraftBanner } from "@/components/vyapar/DraftBanner";
 import type { Party, Payment, PaymentLink } from "@/lib/vyaparApi";
 import { Download, FileText, Link2, Plus, Search, Upload, Wallet } from "lucide-react";
 import { isBackgroundRefresh, useAutoRefresh } from "@/lib/autoRefresh";
+import { todayIST } from "@/lib/datetime";
 
 /**
  * Payment-In / Payment-Out workspace. Unlike an invoice, a payment moves money directly: a
@@ -448,7 +449,7 @@ function PaymentForm({
   const [mode, setMode] = useState(initialMode || "Cash");
   // Vyapar-21: a free-text Description replaces Reference No. on payments (saved as `notes`).
   const [description, setDescription] = useState("");
-  const [paymentDate, setPaymentDate] = useState(new Date().toISOString().slice(0, 10));
+  const [paymentDate, setPaymentDate] = useState(todayIST());
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const projectId = useVyaparProjectId();

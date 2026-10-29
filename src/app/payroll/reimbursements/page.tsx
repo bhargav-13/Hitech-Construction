@@ -13,7 +13,7 @@ import { useReimbursements } from "@/lib/usePayrollLive";
 import { getPayrollPeople, ApiError } from "@/lib/api";
 import type { ReimbursementApi, ReimbStatus, UserResponse } from "@/lib/api";
 import { inr } from "@/lib/format";
-import { formatDateTimeIST } from "@/lib/datetime";
+import { todayIST, formatDateTimeIST } from "@/lib/datetime";
 import { Banknote, CalendarDays, Check, CircleCheck, Clock, Eye, Plus, Receipt, RotateCcw, UserRound, Wallet, X } from "lucide-react";
 import { useTableSort } from "@/lib/useTableSort";
 import { SortTh } from "@/components/vyapar/SortTh";
@@ -339,7 +339,7 @@ function ClaimDialog({
 }) {
   const [userId, setUserId] = useState("");
   const [expenseType, setExpenseType] = useState(EXPENSE_TYPES[0]);
-  const [expenseDate, setExpenseDate] = useState(new Date().toISOString().slice(0, 10));
+  const [expenseDate, setExpenseDate] = useState(todayIST());
   const [amount, setAmount] = useState(0);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);

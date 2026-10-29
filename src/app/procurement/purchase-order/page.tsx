@@ -14,7 +14,7 @@ import { usePurchaseOrders } from "@/lib/purchaseApi";
  * link to it is shown only to people who can actually get in.
  */
 export default function ProcurementPurchaseOrdersPage() {
-  const { rows, loading, error } = usePurchaseOrders();
+  const { rows, loading, error, refresh } = usePurchaseOrders();
 
   return (
     <ProcurementShell>
@@ -28,6 +28,7 @@ export default function ProcurementPurchaseOrdersPage() {
         error={error}
         noun="purchase order"
         emptyHint="Orders appear here once a comparison is awarded and a PO is raised."
+        onChanged={refresh}
         vyaparHref="/vyapar/purchase-order"
       />
     </ProcurementShell>

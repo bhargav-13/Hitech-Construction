@@ -63,6 +63,7 @@ import {
   Sparkles,
   X,
 } from "lucide-react";
+import { todayIST } from "@/lib/datetime";
 
 /**
  * Sentinel value for the "⊕ Add New Unit" row at the foot of the unit picker. It can never collide
@@ -178,7 +179,13 @@ export function InvoiceBuilder({
   approvalType,
   approval,
   onApprovalChanged,
+  saveExisting,
 }: {
+  /**
+   * Saves an edit through another module's endpoint — Procurement edits POs and bills through its
+   * own window so buyers don't need Vyapar access. Defaults to Vyapar's own update.
+   */
+  saveExisting?: (id: number, body: vyapar.InvoiceInput) => Promise<Invoice>;
   docType: DocType;
   existing?: Invoice;
   parties: Party[];
@@ -313,7 +320,7 @@ export function InvoiceBuilder({
   const [invoicePrefix, setInvoicePrefix] = useState(existing?.invoicePrefix ?? "");
   const [invoiceNo, setInvoiceNo] = useState(existing?.invoiceNo ?? "");
   const [invoiceDate, setInvoiceDate] = useState(
-    existing?.invoiceDate ?? prefill?.orderDate ?? new Date().toISOString().slice(0, 10)
+    existing?.invoiceDate ?? prefill?.orderDate ?? todayIST()
   );
   const [dueDate, setDueDate] = useState(existing?.dueDate ?? prefill?.deliveryDate ?? "");
   const [stateOfSupply, setStateOfSupply] = useState(existing?.stateOfSupply ?? "");
@@ -987,7 +994,7 @@ export function InvoiceBuilder({
       if (spreading) body.paidAmount = 0;
 
       const saved = existing
-        ? await vyapar.updateInvoice(existing.id, body)
+        ? await (saveExisting ?? vyapar.updateInvoice)(existing.id, body)
         : await vyapar.createInvoice(body);
 
       if (spreading) {
@@ -1466,13 +1473,13 @@ export function InvoiceBuilder({
                 <th className="w-8 px-2 py-2 text-center">#</th>
                 {/* Vyapar-8/9: the description sits on a second line under the item (as Vyapar
                     prints it), so the item takes the width the Description column had. */}
-                <th className="min-w-[340px] px-2 py-2">Item / Description</th>
+                <th className="min-w-[260px] px-2 py-2">Item / Description</th>
                 {/* HSN/SAC sits beside the description because that's where the person entering a
                     line is already looking, and a GST invoice is not compliant without it. */}
-                <th className="w-24 px-2 py-2">HSN/SAC</th>
+                <th className="w-24 min-w-[80px] px-2 py-2">HSN/SAC</th>
                 <th className="w-20 min-w-[72px] px-2 py-2 text-right">Qty</th>
-                <th className="w-24 px-2 py-2">Unit</th>
-                <th className="w-32 px-2 py-2 text-right">
+                <th className="w-24 min-w-[88px] px-2 py-2">Unit</th>
+                <th className="w-32 min-w-[110px] px-2 py-2 text-right">
                   <div className="flex flex-col items-end gap-1">
                     <span>Price/Unit</span>
                     <select
@@ -1485,12 +1492,14 @@ export function InvoiceBuilder({
                     </select>
                   </div>
                 </th>
-                <th className="w-20 px-2 py-1 text-right">%</th>
-                <th className="w-24 px-2 py-1 text-right">Amount</th>
+                {/* KAN-71: auto table layout squeezed the discount % to a sliver when the form isn't
+                    maximised — every number column keeps a floor width now. */}
+                <th className="w-20 min-w-[72px] px-2 py-1 text-right">%</th>
+                <th className="w-24 min-w-[88px] px-2 py-1 text-right">Amount</th>
                 {/* Wide enough for "Ineligible as Per Section 17(5)" — the longest ITC label. */}
-                <th className={`${isPurchase ? "w-56" : "w-32"} px-2 py-1 text-right`}>%</th>
-                <th className="w-24 px-2 py-1 text-right">Amount</th>
-                <th className="w-28 px-2 py-2 text-right">Amount</th>
+                <th className={`${isPurchase ? "w-56 min-w-[200px]" : "w-32 min-w-[120px]"} px-2 py-1 text-right`}>%</th>
+                <th className="w-24 min-w-[88px] px-2 py-1 text-right">Amount</th>
+                <th className="w-28 min-w-[100px] px-2 py-2 text-right">Amount</th>
                 <th className="w-8 px-1 py-2" />
               </tr>
             </thead>

@@ -12,6 +12,7 @@ import { useProjects } from "@/lib/useProjects";
 import { inr } from "@/lib/format";
 import * as vyapar from "@/lib/vyaparApi";
 import type { Invoice, Party } from "@/lib/vyaparApi";
+import { todayIST } from "@/lib/datetime";
 
 /**
  * Move a balance from one party to another.
@@ -50,7 +51,7 @@ export function PartyTransferDialog({
   const [fromId, setFromId] = useState(existing?.partyId != null ? String(existing.partyId) : "");
   const [toId, setToId] = useState(existing?.transferToPartyId != null ? String(existing.transferToPartyId) : "");
   const [amount, setAmount] = useState(existing ? String(existing.total) : "");
-  const [date, setDate] = useState(existing?.invoiceDate ?? new Date().toISOString().slice(0, 10));
+  const [date, setDate] = useState(existing?.invoiceDate ?? todayIST());
   const [refNo, setRefNo] = useState(existing?.invoiceNo ?? "");
   const [notes, setNotes] = useState(existing?.notes ?? "");
   const [creating, setCreating] = useState<"from" | "to" | null>(null);

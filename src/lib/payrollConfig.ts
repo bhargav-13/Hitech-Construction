@@ -39,6 +39,8 @@ export const PAYROLL_NAV: PayrollNavNode[] = [
   { label: "Reports", href: "/payroll/reports", feature: "PAYROLL_STAFF", icon: "chart" },
   // Messages to staff, delivered to their notification bell and Inbox.
   { label: "Broadcasts", href: "/payroll/broadcasts", feature: "PAYROLL_STAFF", icon: "megaphone" },
+  // Staff questions and problems raised from Self Service → Query / Problem (KAN-57).
+  { label: "Queries", href: "/payroll/queries", feature: "PAYROLL_STAFF", icon: "message" },
   // Letters, cashbook and the attendance scorecard read every staff member's records.
   { label: "Others", href: "/payroll/others", feature: "PAYROLL_STAFF", icon: "grid" },
   // Admins are employees too — they need somewhere to apply for their own leave and read their own
@@ -55,6 +57,7 @@ export const PAYROLL_NAV: PayrollNavNode[] = [
       { label: "My Reimbursements", href: "/payroll/me/reimbursements" },
       { label: "My Profile", href: "/payroll/me/profile" },
       { label: "Inbox & Documents", href: "/payroll/me/inbox" },
+      { label: "Query / Problem", href: "/payroll/me/queries" },
     ],
   },
 ];
@@ -69,6 +72,7 @@ export const PAYROLL_SELF_NAV: PayrollNavNode[] = [
   { label: "My Reimbursements", href: "/payroll/me/reimbursements", icon: "receipt" },
   { label: "My Profile", href: "/payroll/me/profile", icon: "users" },
   { label: "Inbox & Documents", href: "/payroll/me/inbox", icon: "megaphone" },
+  { label: "Query / Problem", href: "/payroll/me/queries", icon: "message" },
 ];
 
 /** The three employment categories PagarBook offers when adding staff. */

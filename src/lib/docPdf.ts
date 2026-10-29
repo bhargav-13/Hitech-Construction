@@ -12,6 +12,7 @@ import type { jsPDF as JsPdf } from "jspdf";
 import { amountInWords, getAppLogo, getCachedFirmProfile, imageSize } from "./vyaparExport";
 import { getTemplate, type DocKind, type DocTemplate } from "./docTemplates";
 import type { FirmProfile } from "./vyaparApi";
+import { todayIST } from "@/lib/datetime";
 
 export type Align = "left" | "right" | "center";
 
@@ -453,7 +454,7 @@ export async function renderDocPdf(
 
   if (opts.save) {
     const safe = (model.number || tpl.title || "document").replace(/[\\/:*?"<>|\s]+/g, "-");
-    doc.save(`${safe}-${new Date().toISOString().slice(0, 10)}.pdf`);
+    doc.save(`${safe}-${todayIST()}.pdf`);
   }
   return doc;
 }

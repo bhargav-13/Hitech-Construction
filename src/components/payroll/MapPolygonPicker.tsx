@@ -23,6 +23,8 @@ export function MapPolygonPicker({ value, onChange }: { value: GeoPoint[]; onCha
 
   const [count, setCount] = useState(ptsRef.current.length);
   const [locating, setLocating] = useState(false);
+  const [adding, setAdding] = useState(false);
+  const [geoError, setGeoError] = useState("");
 
   function redraw() {
     const L = LRef.current;
@@ -113,6 +115,30 @@ export function MapPolygonPicker({ value, onChange }: { value: GeoPoint[]; onCha
     );
   }
 
+  /**
+   * Walk the site: standing at a corner, add where the phone is as the next point (KAN-63 — tapping
+   * a small map on a phone is fiddly, and on site you are standing on the corners anyway).
+   */
+  function addMyLocation() {
+    if (!navigator.geolocation) return setGeoError("This device can't share its location.");
+    setAdding(true);
+    setGeoError("");
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setAdding(false);
+        const p = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+        ptsRef.current = [...ptsRef.current, p];
+        commit();
+        mapRef.current?.setView([p.lat, p.lng], Math.max(mapRef.current.getZoom(), 18));
+      },
+      (err) => {
+        setAdding(false);
+        setGeoError(err.code === err.PERMISSION_DENIED ? "Location permission is off — allow it for this site in the browser settings." : "Couldn't read your location. Try again in the open.");
+      },
+      { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 },
+    );
+  }
+
   const hint =
     count === 0
       ? "Tap each corner of the site on the map."
@@ -149,9 +175,19 @@ export function MapPolygonPicker({ value, onChange }: { value: GeoPoint[]; onCha
           >
             {locating ? <Loader2 size={13} className="animate-spin" /> : <Crosshair size={13} />} Locate me
           </button>
+          <button
+            type="button"
+            onClick={addMyLocation}
+            disabled={adding}
+            title="Stand at a corner of the site and add where you are"
+            className="flex items-center gap-1 rounded-lg border border-cyan-200 bg-cyan-50 px-2.5 py-1.5 text-xs font-medium text-brand-accent transition-colors hover:bg-cyan-100 disabled:opacity-50"
+          >
+            {adding ? <Loader2 size={13} className="animate-spin" /> : <MapPin size={13} />} Add my spot as corner
+          </button>
         </div>
       </div>
-      <div ref={divRef} className="h-72 w-full overflow-hidden rounded-xl border border-gray-200" style={{ background: "#e5e7eb" }} />
+      {geoError && <p className="text-xs text-rose-600">{geoError}</p>}
+      <div ref={divRef} style={{ touchAction: "none", background: "#e5e7eb" }} className="h-72 w-full overflow-hidden rounded-xl border border-gray-200" />
     </div>
   );
 }

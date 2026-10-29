@@ -11,6 +11,7 @@ import type {
   WarehouseMember,
 } from "./warehouseTypes";
 import { MOVEMENT_META } from "./warehouseTypes";
+import { todayIST } from "@/lib/datetime";
 
 /**
  * Warehouse state, backed by warehouse-service.
@@ -39,7 +40,7 @@ import { MOVEMENT_META } from "./warehouseTypes";
  * spreadsheet.
  */
 
-const today = () => new Date().toISOString().slice(0, 10);
+const today = () => todayIST();
 const uid = (p: string) => `${p}-${Math.random().toString(36).slice(2, 9)}`;
 
 /** null and "" both mean "no id" coming back from the server; everything else is a number. */

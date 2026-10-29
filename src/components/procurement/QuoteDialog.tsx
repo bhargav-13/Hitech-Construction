@@ -12,6 +12,7 @@ import { inr } from "@/lib/format";
 import * as procurement from "@/lib/procurementApi";
 import type { Rfq } from "@/lib/procurementApi";
 import type { Party } from "@/lib/vyaparApi";
+import { todayIST } from "@/lib/datetime";
 
 /**
  * Key in what a supplier came back with.
@@ -43,7 +44,7 @@ export function QuoteDialog({
   const existing = rfq.quotes.find((q) => q.vendorPartyId === existingVendorId);
 
   const [vendorId, setVendorId] = useState(existingVendorId != null ? String(existingVendorId) : "");
-  const [receivedOn, setReceivedOn] = useState(existing?.receivedOn ?? new Date().toISOString().slice(0, 10));
+  const [receivedOn, setReceivedOn] = useState(existing?.receivedOn ?? todayIST());
   const [deliveryDays, setDeliveryDays] = useState(existing?.deliveryDays != null ? String(existing.deliveryDays) : "");
   const [taxPercent, setTaxPercent] = useState(String(existing?.taxPercent ?? 18));
   const [discount, setDiscount] = useState(String(existing?.discount ?? 0));

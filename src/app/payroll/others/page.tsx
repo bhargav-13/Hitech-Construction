@@ -1,11 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useDiscardGuard } from "@/lib/formDirty";
 import { PayrollShell } from "@/components/payroll/PayrollShell";
 import { Spinner } from "@/components/Spinner";
 import { OTHERS_TILES } from "@/lib/payrollConfig";
 import { loadRows, saveRows, type RegisterRow } from "@/lib/localRegister";
+import { getRegister, saveRegister } from "@/lib/hrDeskApi";
+import { ApiError } from "@/lib/api";
 import { loadReportContext, buildReport } from "@/lib/payrollReports";
 import { getPayrollPeople, getPayrollProfiles } from "@/lib/api";
 import { inr } from "@/lib/format";
@@ -14,6 +16,7 @@ import {
 } from "lucide-react";
 import { ReportTable } from "@/components/payroll/ReportTable";
 import { EmploymentLetters } from "@/components/payroll/EmploymentLetters";
+import { todayIST } from "@/lib/datetime";
 
 const ICON: Record<string, React.ComponentType<{ size?: number; className?: string }>> = {
   file: FileText, shield: Shield, grid: LayoutGrid, wallet: Wallet, trophy: Trophy, check: CheckSquare, users: Users, gift: Gift,
@@ -87,7 +90,7 @@ function Modal({ title, onClose, children }: { title: string; onClose: () => voi
   const dismiss = () => confirmDiscard() && onClose();
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={dismiss}>
-      <div ref={panelRef} className="max-h-[85vh] w-full max-w-3xl overflow-auto rounded-2xl bg-white p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
+      <div ref={panelRef} className="max-h-[85vh] w-full max-w-4xl overflow-auto rounded-2xl bg-white p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
         <div className="mb-4 flex items-center justify-between">
           <h3 className="text-base font-semibold text-gray-800">{title}</h3>
           <button onClick={dismiss} aria-label="Close" className="rounded-md p-1.5 text-gray-400 hover:bg-gray-100"><X size={18} /></button>
@@ -98,20 +101,105 @@ function Modal({ title, onClose, children }: { title: string; onClose: () => voi
   );
 }
 
-/** Generic local table: add/edit/delete rows, persisted in the browser. */
+/**
+ * One of the Others lists, kept on the server for the whole company (KAN-74).
+ *
+ * <p>These used to live in each browser's storage, so an asset HR typed in never reached Super
+ * Admin's screen. Now they load from and save to payroll's server-side registers. A browser that
+ * still holds rows from before is moved up the first time the list is opened (only when the server
+ * has nothing yet, so nobody's list is overwritten), and the local copy is then left alone.
+ */
+function useServerRegister(key: string) {
+  const [rows, setRows] = useState<RegisterRow[] | null>(null);
+  const [state, setState] = useState<"" | "saving" | "saved" | "error">("");
+  const [error, setError] = useState("");
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pending = useRef<RegisterRow[] | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    (async () => {
+      try {
+        const res = await getRegister(key);
+        let server: RegisterRow[] = [];
+        try { server = res.rows ? JSON.parse(res.rows) : []; } catch { server = []; }
+        if (res.rows == null) {
+          const local = loadRows(key);
+          if (local.length) {
+            await saveRegister(key, local);
+            server = local;
+            saveRows(`${key}.moved-to-server`, local);
+          }
+        }
+        if (live) setRows(server);
+      } catch (e) {
+        if (live) {
+          setError(e instanceof ApiError ? e.message : "Couldn't load this list.");
+          setRows([]);
+        }
+      }
+    })();
+    return () => { live = false; };
+  }, [key]);
+
+  async function flush() {
+    if (!pending.current) return;
+    const next = pending.current;
+    pending.current = null;
+    setState("saving");
+    try {
+      await saveRegister(key, next);
+      setState("saved");
+    } catch (e) {
+      setState("error");
+      setError(e instanceof ApiError ? e.message : "Couldn't save — check your connection.");
+    }
+  }
+  // Save anything typed but not yet sent when the sheet closes.
+  useEffect(() => () => { if (timer.current) clearTimeout(timer.current); void flush(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const update = (next: RegisterRow[]) => {
+    setRows(next);
+    pending.current = next;
+    setState("saving");
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(() => void flush(), 600);
+  };
+  return { rows, update, state, error };
+}
+
+function SaveState({ state, error }: { state: string; error: string }) {
+  if (error && state !== "saving") return <span className="text-xs text-rose-600">{error}</span>;
+  if (state === "saving") return <span className="text-xs text-gray-400">Saving…</span>;
+  if (state === "saved") return <span className="text-xs text-emerald-600">Saved · visible to everyone with access</span>;
+  return <span className="text-xs text-gray-400">Shared with everyone in this company who can open Others.</span>;
+}
+
+/** Generic table: add/edit/delete rows, saved on the server for the whole company. */
 function Register({ title, columns }: { title: string; columns: string[] }) {
   const key = slug(title);
-  const [rows, setRows] = useState<RegisterRow[]>(() => loadRows(key));
-  const update = (next: RegisterRow[]) => { setRows(next); saveRows(key, next); };
+  const { rows: loaded, update, state, error } = useServerRegister(key);
+  // Staff names offered in "Assigned To" / "Staff" cells, so an asset is tied to a real person.
+  const [staff, setStaff] = useState<string[]>([]);
+  useEffect(() => {
+    if (!columns.some((c) => /assigned|staff/i.test(c))) return;
+    getPayrollPeople().then((r) => setStaff(r.content.map((u) => u.fullName))).catch(() => {});
+  }, [columns]);
+  if (loaded == null) {
+    return <div className="flex items-center justify-center gap-2 py-10 text-sm text-gray-400"><Spinner size={16} className="text-brand-accent" /> Loading…</div>;
+  }
+  const rows = loaded;
   const addRow = () => update([...rows, Object.fromEntries(columns.map((c) => [c, ""]))]);
   const setCell = (i: number, col: string, v: string) => update(rows.map((r, j) => (j === i ? { ...r, [col]: v } : r)));
   const removeRow = (i: number) => update(rows.filter((_, j) => j !== i));
 
   return (
     <div className="space-y-3">
-      <div className="flex justify-end">
+      <div className="flex items-center justify-between gap-2">
+        <SaveState state={state} error={error} />
         <button onClick={addRow} className="flex items-center gap-1.5 rounded-lg bg-brand-accent px-3 py-1.5 text-sm font-semibold text-white hover:opacity-90"><Plus size={14} /> Add</button>
       </div>
+      {staff.length > 0 && <datalist id={`staff-${key}`}>{staff.map((n) => <option key={n} value={n} />)}</datalist>}
       {rows.length === 0 ? (
         <p className="py-8 text-center text-sm text-gray-400">Nothing yet — click Add to create the first entry.</p>
       ) : (
@@ -128,7 +216,13 @@ function Register({ title, columns }: { title: string; columns: string[] }) {
                 <tr key={i} className="border-b border-gray-50 last:border-b-0">
                   {columns.map((c) => (
                     <td key={c} className="px-2 py-1.5">
-                      <input value={r[c] ?? ""} onChange={(e) => setCell(i, c, e.target.value)} className="w-full rounded-md border border-transparent px-2 py-1 text-sm outline-none hover:border-gray-200 focus:border-cyan-500" placeholder={c} />
+                      <input
+                        value={r[c] ?? ""}
+                        onChange={(e) => setCell(i, c, e.target.value)}
+                        list={/assigned|staff/i.test(c) && staff.length ? `staff-${key}` : undefined}
+                        className="w-full rounded-md border border-transparent px-2 py-1 text-sm outline-none hover:border-gray-200 focus:border-cyan-500"
+                        placeholder={c}
+                      />
                     </td>
                   ))}
                   <td className="px-2 py-1.5 text-right">
@@ -144,12 +238,15 @@ function Register({ title, columns }: { title: string; columns: string[] }) {
   );
 }
 
-/** Daily cash log with a running balance. */
+/** Daily cash log with a running balance — on the server, like the other lists. */
 function Cashbook() {
   const key = "cashbook";
-  const [rows, setRows] = useState<RegisterRow[]>(() => loadRows(key));
-  const update = (next: RegisterRow[]) => { setRows(next); saveRows(key, next); };
-  const addRow = () => update([...rows, { date: new Date().toISOString().slice(0, 10), desc: "", in: "", out: "" }]);
+  const { rows: loaded, update, state, error } = useServerRegister(key);
+  if (loaded == null) {
+    return <div className="flex items-center justify-center gap-2 py-10 text-sm text-gray-400"><Spinner size={16} className="text-brand-accent" /> Loading…</div>;
+  }
+  const rows = loaded;
+  const addRow = () => update([...rows, { date: todayIST(), desc: "", in: "", out: "" }]);
   const setCell = (i: number, col: string, v: string) => update(rows.map((r, j) => (j === i ? { ...r, [col]: v } : r)));
   const removeRow = (i: number) => update(rows.filter((_, j) => j !== i));
   const balance = rows.reduce((s, r) => s + (Number(r.in) || 0) - (Number(r.out) || 0), 0);
@@ -157,7 +254,10 @@ function Cashbook() {
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
-        <div className="rounded-lg bg-gray-50 px-3 py-1.5 text-sm">Balance <span className="font-semibold text-gray-900">{inr(balance)}</span></div>
+        <div className="flex items-center gap-3">
+          <div className="rounded-lg bg-gray-50 px-3 py-1.5 text-sm">Balance <span className="font-semibold text-gray-900">{inr(balance)}</span></div>
+          <SaveState state={state} error={error} />
+        </div>
         <button onClick={addRow} className="flex items-center gap-1.5 rounded-lg bg-brand-accent px-3 py-1.5 text-sm font-semibold text-white hover:opacity-90"><Plus size={14} /> Add entry</button>
       </div>
       {rows.length === 0 ? (

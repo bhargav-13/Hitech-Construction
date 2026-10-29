@@ -11,6 +11,7 @@ import * as vyapar from "@/lib/vyaparApi";
 import { useVyaparProjectId } from "@/lib/projectScope";
 import type { Item } from "@/lib/vyaparApi";
 import { Barcode, ImagePlus, Plus, Search, X } from "lucide-react";
+import { todayIST } from "@/lib/datetime";
 
 type Tab = "Pricing" | "Stock";
 
@@ -97,7 +98,7 @@ export function ItemDialog({
 
   const [openingQty, setOpeningQty] = useState(existing?.openingQty ?? 0);
   const [openingPrice, setOpeningPrice] = useState(existing?.openingPrice ?? 0);
-  const [openingDate, setOpeningDate] = useState(existing?.openingDate ?? new Date().toISOString().slice(0, 10));
+  const [openingDate, setOpeningDate] = useState(existing?.openingDate ?? todayIST());
   const [lowStockAlert, setLowStockAlert] = useState(existing?.lowStockAlert ?? 0);
   const [location, setLocation] = useState(existing?.location ?? "");
 

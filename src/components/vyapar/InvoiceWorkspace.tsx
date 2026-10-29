@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { resubmitApproval } from "@/lib/api";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { VyaparEmpty } from "@/components/vyapar/VyaparShell";
 import { Drawer, DrawerField } from "@/components/Drawer";
@@ -28,6 +29,7 @@ import { Download, FileText, Plus, Search, Upload } from "lucide-react";
 import { ApprovalBadge } from "@/components/approval/ApprovalBadge";
 import { DOC_APPROVAL_TYPE, useApprovalStates } from "@/lib/approvals";
 import { isBackgroundRefresh, useAutoRefresh } from "@/lib/autoRefresh";
+import { todayIST } from "@/lib/datetime";
 
 const PAYMENT_TYPES = ["Cash", "Credit", "Bank", "UPI", "Cheque"];
 
@@ -84,6 +86,38 @@ export function InvoiceWorkspace({
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<"All" | "Paid" | "Partial" | "Unpaid">("All");
+  /**
+   * KAN-76: purchase orders read like Onsite's list — an Approval column (and filter) on every row,
+   * and a PO Status. Orders raised before the chain was published, or imported, have no request:
+   * they show "Not sent" with a Send action instead of a blank.
+   */
+  const isPoList = docType === "PURCHASE_ORDER";
+  const [approvalFilter, setApprovalFilter] = useState<"All" | "Pending" | "Mine" | "Approved" | "Rejected" | "Not sent">("All");
+  const [sending, setSending] = useState<number | null>(null);
+  const approvalBucket = useCallback(
+    (i: Invoice): "Pending" | "Approved" | "Rejected" | "Not sent" => {
+      const st = approvals[i.id];
+      if (!st || st.status === "CANCELLED") return "Not sent";
+      return st.status === "APPROVED" ? "Approved" : st.status === "REJECTED" ? "Rejected" : "Pending";
+    },
+    [approvals],
+  );
+  const poStatus = (i: Invoice) =>
+    i.cancelled ? "Cancelled" : /Onsite PO status:\s*Closed/i.test(i.description ?? "") ? "Closed" : "Open";
+  async function sendForApproval(inv: Invoice) {
+    if (!approvalType) return;
+    setSending(inv.id);
+    setError("");
+    try {
+      const st = await resubmitApproval(approvalType, inv.id);
+      if (!st) setError("Purchase orders have no published approval chain yet — set one up in Settings → Multi Level Approval.");
+      await reloadApprovals();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't send this order for approval.");
+    } finally {
+      setSending(null);
+    }
+  }
   const [editing, setEditing] = useState<Invoice | null>(null);
   const [creating, setCreating] = useState(false);
   /** A purchase order carried over from an awarded RFQ, waiting for the builder to open. */
@@ -159,10 +193,15 @@ export function InvoiceWorkspace({
     return invoices.filter((i) => {
       if (!inRange(i.invoiceDate, range)) return false;
       if (statusFilter !== "All" && i.status !== statusFilter) return false;
+      if (isPoList && approvalFilter !== "All") {
+        if (approvalFilter === "Mine") {
+          if (!approvals[i.id]?.canActNow) return false;
+        } else if (approvalBucket(i) !== approvalFilter) return false;
+      }
       if (!q) return true;
       return [fullInvoiceNo(i), i.partyName, i.invoiceDate].some((f) => f?.toLowerCase().includes(q));
     });
-  }, [invoices, search, statusFilter, range]);
+  }, [invoices, search, statusFilter, range, isPoList, approvalFilter, approvals, approvalBucket]);
 
   // Vyapar-style per-column funnels stack on top of the search/status filter.
   const columns = useMemo(
@@ -487,6 +526,18 @@ export function InvoiceWorkspace({
               {s}
             </button>
           ))}
+        {isPoList &&
+          (["All", "Mine", "Pending", "Approved", "Rejected", "Not sent"] as const).map((s) => (
+            <button
+              key={s}
+              onClick={() => setApprovalFilter(s)}
+              className={`rounded-full px-3 py-1.5 text-xs font-medium transition-all duration-150 ${
+                approvalFilter === s ? "bg-navy text-white shadow-sm" : "bg-white text-gray-600 ring-1 ring-gray-200 hover:bg-gray-50"
+              }`}
+            >
+              {s === "All" ? "All approvals" : s === "Mine" ? "Waiting on me" : s}
+            </button>
+          ))}
       </div>
 
       {error && <div className="rounded-lg bg-rose-50 px-4 py-2 text-sm text-rose-600">{error}</div>}
@@ -517,8 +568,10 @@ export function InvoiceWorkspace({
                 <FilterTh label={numberColLabel} sortKey="number" activeKey={sortKey} dir={sortDir} onSort={toggle} filterKey="number" type="text" filter={filters.number} onApply={setFilter} />
                 <FilterTh label="Party Name" sortKey="party" activeKey={sortKey} dir={sortDir} onSort={toggle} filterKey="party" type="text" filter={filters.party} onApply={setFilter} />
                 {/* Vyapar carries a Transaction column naming the document type on every list. */}
-                <th className="px-4 py-2 text-left font-medium">Transaction</th>
+                {!isPoList && <th className="px-4 py-2 text-left font-medium">Transaction</th>}
                 {!NON_PAYMENT && <FilterTh label="Payment Type" sortKey="paymentType" activeKey={sortKey} dir={sortDir} onSort={toggle} filterKey="paymentType" type="select" options={filterOptions.paymentType} filter={filters.paymentType} onApply={setFilter} />}
+                {isPoList && <th className="px-4 py-2 text-left font-medium">PO Status</th>}
+                {isPoList && <th className="px-4 py-2 text-left font-medium">Approval</th>}
                 <FilterTh label="Amount" sortKey="amount" activeKey={sortKey} dir={sortDir} onSort={toggle} align="right" filterKey="amount" type="number" filter={filters.amount} onApply={setFilter} />
                 {!NON_PAYMENT && <FilterTh label="Balance" sortKey="balance" activeKey={sortKey} dir={sortDir} onSort={toggle} align="right" filterKey="balance" type="number" filter={filters.balance} onApply={setFilter} />}
                 {!NON_PAYMENT && <FilterTh label="Status" sortKey="status" activeKey={sortKey} dir={sortDir} onSort={toggle} filterKey="status" type="select" options={filterOptions.status} filter={filters.status} onApply={setFilter} />}
@@ -536,12 +589,39 @@ export function InvoiceWorkspace({
                   <td className={`px-4 py-2.5 font-medium text-gray-800 ${i.cancelled ? "line-through decoration-rose-400" : ""}`}>
                     <span className="flex items-center gap-2">
                       {fullInvoiceNo(i)}
-                      <ApprovalBadge state={approvals[i.id]} />
+                      {!isPoList && <ApprovalBadge state={approvals[i.id]} />}
                     </span>
                   </td>
                   <td className="px-4 py-2.5 text-gray-700">{i.partyName ?? "—"}</td>
-                  <td className="px-4 py-2.5 text-gray-600">{noun}</td>
+                  {!isPoList && <td className="px-4 py-2.5 text-gray-600">{noun}</td>}
                   {!NON_PAYMENT && <td className="px-4 py-2.5 text-gray-600">{i.paymentType}</td>}
+                  {isPoList && (
+                    <td className="px-4 py-2.5">
+                      <span className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${
+                        poStatus(i) === "Open" ? "bg-sky-50 text-sky-700" : poStatus(i) === "Closed" ? "bg-gray-100 text-gray-600" : "bg-rose-50 text-rose-600"
+                      }`}>
+                        {poStatus(i)}
+                      </span>
+                    </td>
+                  )}
+                  {isPoList && (
+                    <td className="px-4 py-2.5" onClick={(e) => e.stopPropagation()}>
+                      {approvalBucket(i) === "Not sent" && !i.cancelled ? (
+                        <span className="flex items-center gap-1.5 whitespace-nowrap">
+                          <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-500">Not sent</span>
+                          <button
+                            onClick={() => void sendForApproval(i)}
+                            disabled={sending === i.id}
+                            className="text-[11px] font-medium text-brand-accent hover:underline disabled:opacity-50"
+                          >
+                            {sending === i.id ? "Sending…" : "Send"}
+                          </button>
+                        </span>
+                      ) : (
+                        <ApprovalBadge state={approvals[i.id]} />
+                      )}
+                    </td>
+                  )}
                   <td className="px-4 py-2.5 text-right font-medium text-gray-800">{inr(i.total)}</td>
                   {!NON_PAYMENT && (
                     <td className={`px-4 py-2.5 text-right ${i.balance > 0 ? "font-medium text-rose-600" : "text-gray-400"}`}>
@@ -720,7 +800,7 @@ function PaymentDrawer({
   const [amount, setAmount] = useState(invoice.balance);
   const [mode, setMode] = useState("Cash");
   const [description, setDescription] = useState("");
-  const [paymentDate, setPaymentDate] = useState(new Date().toISOString().slice(0, 10));
+  const [paymentDate, setPaymentDate] = useState(todayIST());
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 

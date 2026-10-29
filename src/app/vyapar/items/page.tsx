@@ -26,6 +26,7 @@ import {
   AlertTriangle,
   ArrowUpDown,
   Boxes,
+  ChevronLeft,
   FileSpreadsheet,
   FileText,
   Pencil,
@@ -408,6 +409,8 @@ export default function ItemsPage() {
         ) : tab === "CATEGORY" ? (
           <CategoryTab
             categories={categories}
+            items={items}
+            onOpenItem={(i) => { setTab(i.isService ? "SERVICES" : "PRODUCTS"); setSelectedId(i.id); }}
             onAdd={() => { setEditingCategory(null); setCategoryDialog(true); }}
             onEdit={(name) => { setEditingCategory(name); setCategoryDialog(true); }}
             onDelete={deleteCategory}
@@ -820,15 +823,76 @@ export default function ItemsPage() {
 
 function CategoryTab({
   categories,
+  items,
+  onOpenItem,
   onAdd,
   onEdit,
   onDelete,
 }: {
   categories: { name: string; count: number; stockValue: number; virtual?: boolean }[];
+  items: Item[];
+  onOpenItem: (item: Item) => void;
   onAdd: () => void;
   onEdit: (name: string) => void;
   onDelete: (name: string, count: number) => void;
 }) {
+  // KAN-69: a card only said "1 item" — clicking it now lists which items are in the category.
+  const [open, setOpen] = useState<string | null>(null);
+  const openCat = categories.find((c) => c.name === open) ?? null;
+  if (openCat) {
+    const inCat = items
+      .filter((i) => (openCat.virtual ? !i.category?.trim() : i.category?.trim() === openCat.name))
+      .sort((a, b) => a.name.localeCompare(b.name));
+    return (
+      <div className="space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <button onClick={() => setOpen(null)} className="flex items-center gap-1 rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 text-sm text-gray-600 hover:bg-gray-50">
+              <ChevronLeft size={14} /> All categories
+            </button>
+            <h3 className={`text-base font-semibold ${openCat.virtual ? "italic text-gray-500" : "text-gray-800"}`}>{openCat.name}</h3>
+            <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-500">{inCat.length} item{inCat.length === 1 ? "" : "s"}</span>
+          </div>
+          <span className="text-sm text-gray-500">Stock value <span className="font-medium text-gray-800">{inr(openCat.stockValue)}</span></span>
+        </div>
+        {inCat.length === 0 ? (
+          <VyaparEmpty icon={Boxes} title="No items in this category" hint="Set this category on an item (Edit item → Category) to list it here." />
+        ) : (
+          <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white">
+            <table className="w-full min-w-[640px] text-sm">
+              <thead>
+                <tr className="border-b border-gray-100 bg-gray-50 text-left text-[11px] font-semibold tracking-wide text-gray-500 uppercase">
+                  <th className="px-4 py-2">Item</th>
+                  <th className="px-3 py-2">Code</th>
+                  <th className="px-3 py-2 text-right">Stock</th>
+                  <th className="px-3 py-2 text-right">Sale price</th>
+                  <th className="px-3 py-2 text-right">Purchase price</th>
+                  <th className="px-4 py-2 text-right">Stock value</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-50">
+                {inCat.map((i) => (
+                  <tr key={i.id} onClick={() => onOpenItem(i)} className="cursor-pointer hover:bg-cyan-50/40" title="Open this item">
+                    <td className="px-4 py-2.5 font-medium text-gray-800">
+                      {i.name}
+                      {i.isService && <span className="ml-1.5 rounded bg-violet-50 px-1 text-[10px] text-violet-700">service</span>}
+                    </td>
+                    <td className="px-3 py-2.5 text-gray-500">{i.itemCode || "—"}</td>
+                    <td className={`px-3 py-2.5 text-right tabular-nums ${i.stockQty <= 0 ? "text-rose-600" : i.lowStock ? "text-amber-600" : "text-gray-700"}`}>
+                      {i.isService ? "—" : `${i.stockQty} ${i.unit ?? ""}`}
+                    </td>
+                    <td className="px-3 py-2.5 text-right tabular-nums text-gray-700">{inr(i.salePrice)}</td>
+                    <td className="px-3 py-2.5 text-right tabular-nums text-gray-700">{inr(i.purchasePrice)}</td>
+                    <td className="px-4 py-2.5 text-right font-medium tabular-nums text-gray-800">{inr(i.stockValue)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    );
+  }
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
@@ -847,7 +911,12 @@ function CategoryTab({
           {categories.map((c) => (
             <div
               key={c.name}
-              className={`group rounded-xl border p-4 transition-shadow duration-150 hover:shadow-md ${
+              role="button"
+              tabIndex={0}
+              onClick={() => setOpen(c.name)}
+              onKeyDown={(e) => { if (e.key === "Enter") setOpen(c.name); }}
+              title={`See the ${c.count} item${c.count === 1 ? "" : "s"} in ${c.name}`}
+              className={`group cursor-pointer rounded-xl border p-4 transition-shadow duration-150 hover:border-brand-accent hover:shadow-md ${
                 c.virtual ? "border-dashed border-gray-200 bg-gray-50/60" : "border-gray-200 bg-white"
               }`}
             >
@@ -858,14 +927,14 @@ function CategoryTab({
                   {!c.virtual && (
                     <>
                       <button
-                        onClick={() => onEdit(c.name)}
+                        onClick={(e) => { e.stopPropagation(); onEdit(c.name); }}
                         title="Rename category"
                         className="rounded-md p-1 text-gray-400 opacity-0 transition group-hover:opacity-100 hover:bg-cyan-50 hover:text-brand-accent"
                       >
                         <Pencil size={13} />
                       </button>
                       <button
-                        onClick={() => onDelete(c.name, c.count)}
+                        onClick={(e) => { e.stopPropagation(); onDelete(c.name, c.count); }}
                         title="Delete category"
                         className="rounded-md p-1 text-gray-400 opacity-0 transition group-hover:opacity-100 hover:bg-rose-50 hover:text-rose-600"
                       >
@@ -875,8 +944,9 @@ function CategoryTab({
                   )}
                 </div>
               </div>
-              <div className="mt-2 text-sm text-gray-500">
-                Stock value <span className="font-medium text-gray-800">{inr(c.stockValue)}</span>
+              <div className="mt-2 flex items-center justify-between text-sm text-gray-500">
+                <span>Stock value <span className="font-medium text-gray-800">{inr(c.stockValue)}</span></span>
+                <span className="text-xs text-brand-accent opacity-0 transition group-hover:opacity-100">View items →</span>
               </div>
             </div>
           ))}

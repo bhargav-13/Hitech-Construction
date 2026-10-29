@@ -16,6 +16,7 @@ import { inr, qty as fmtQty } from "@/lib/format";
 import * as vyapar from "@/lib/vyaparApi";
 import type { Item, Party } from "@/lib/vyaparApi";
 import { AlertTriangle } from "lucide-react";
+import { todayIST } from "@/lib/datetime";
 
 /**
  * Record one stock movement.
@@ -68,7 +69,7 @@ export function MovementDialog({
   const [unitEdit, setUnitEdit] = useState<string | null>(null);
   const [quantity, setQuantity] = useState("");
   const [rate, setRate] = useState("");
-  const [movedOn, setMovedOn] = useState(new Date().toISOString().slice(0, 10));
+  const [movedOn, setMovedOn] = useState(todayIST());
   const [target, setTarget] = useState<IssueTarget>("PROJECT");
   const [projectId, setProjectId] = useState("");
   const [partyId, setPartyId] = useState("");

@@ -27,6 +27,7 @@ import { docTypeHref, txnHref } from "@/lib/vyaparLinks";
 import type { CashBankTxn, Invoice, InvoiceLine, Item, Party, Payment } from "@/lib/vyaparApi";
 import { ChevronLeft, ChevronRight, Download } from "lucide-react";
 import { isBackgroundRefresh, useAutoRefresh } from "@/lib/autoRefresh";
+import { todayIST } from "@/lib/datetime";
 
 type ReportId = string;
 
@@ -118,7 +119,7 @@ function ReportDetail({ id, onBack }: { id: ReportId; onBack: () => void }) {
   // The Day Book is a single-day view (Vyapar's own default): it opens on today with prev/next
   // stepping. Setting either From or To switches it to range mode and the stepper steps aside.
   const isDaybook = id === "daybook";
-  const [day, setDay] = useState(() => new Date().toISOString().slice(0, 10));
+  const [day, setDay] = useState(() => todayIST());
   const usingRange = !!(from || to);
   const effFrom = isDaybook && !usingRange ? day : from;
   const effTo = isDaybook && !usingRange ? day : to;
@@ -143,10 +144,12 @@ function ReportDetail({ id, onBack }: { id: ReportId; onBack: () => void }) {
         vyapar.getItems(projectId),
         vyapar.getPayments(undefined, projectId),
       ]);
-      setInvoices(inv);
+      // KAN-70: every report reads oldest → newest, like a ledger. Sorting the sources once means
+      // each report built from them inherits the order.
+      setInvoices([...inv].sort((a, b) => toIsoDate(a.invoiceDate ?? "").localeCompare(toIsoDate(b.invoiceDate ?? "")) || a.id - b.id));
       setParties(pty);
       setItems(itm);
-      setPayments(pay);
+      setPayments([...pay].sort((a, b) => toIsoDate(a.paymentDate ?? "").localeCompare(toIsoDate(b.paymentDate ?? "")) || a.id - b.id));
 
       // Bank Statement needs the cash/bank ledger, which lives outside the documents API.
       if (id === "bank-statement") {
@@ -212,7 +215,9 @@ function ReportDetail({ id, onBack }: { id: ReportId; onBack: () => void }) {
   const paysInRange = useMemo(() => payments.filter((p) => inRange(p.paymentDate)), [payments, inRange]);
 
   function download(rows: (string | number)[][], head: string[]) {
-    const csv = [head, ...rows].map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\n");
+    // Dates go out the Indian way (28/10/2026), the same as on screen — the file used to carry 2026-10-28.
+    const dated = rows.map((r) => r.map((c) => (typeof c === "string" && /^\d{4}-\d{2}-\d{2}(T.*)?$/.test(c) ? bookDate(c) : c)));
+    const csv = [head, ...dated].map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\n");
     const url = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
     const a = document.createElement("a");
     a.href = url;
@@ -253,7 +258,7 @@ function ReportDetail({ id, onBack }: { id: ReportId; onBack: () => void }) {
                   <ChevronRight size={15} />
                 </button>
                 <button
-                  onClick={() => setDay(new Date().toISOString().slice(0, 10))}
+                  onClick={() => setDay(todayIST())}
                   disabled={usingRange}
                   className="rounded-lg border border-gray-200 px-2.5 py-2 text-xs font-medium text-gray-600 transition-all duration-150 hover:bg-gray-50 active:scale-95 disabled:cursor-not-allowed"
                 >
@@ -416,7 +421,7 @@ function ReportBody({
   }
 
   if (id === "daybook") {
-    // Everything that happened, documents and payments together, newest first.
+    // Everything that happened, documents and payments together, oldest first (KAN-70).
     type Entry = { date: string | null; type: string; name: string; ref: string; in: number; out: number; href: string | null };
     const entries: Entry[] = [
       ...allInvoices.map((i) => ({
@@ -437,7 +442,7 @@ function ReportBody({
         out: p.direction === "OUT" ? p.amount : 0,
         href: txnHref(p.direction === "IN" ? "Payment-In" : "Payment-Out", p.id),
       })),
-    ].sort((a, b) => (b.date ?? "").localeCompare(a.date ?? ""));
+    ].sort((a, b) => toIsoDate(a.date ?? "").localeCompare(toIsoDate(b.date ?? "")));
     const inSum = sum(entries.map((e) => e.in));
     const outSum = sum(entries.map((e) => e.out));
     return (
@@ -556,10 +561,10 @@ function ReportBody({
       byDate.set(key, cur);
     };
     payments.forEach((p) => bump(p.paymentDate, p.direction === "IN" ? "in" : "out", p.amount));
-    const rows = [...byDate.entries()].sort((a, b) => b[0].localeCompare(a[0]));
+    const rows = [...byDate.entries()].sort((a, b) => a[0].localeCompare(b[0]));
     const inSum = sum(rows.map(([, v]) => v.in));
     const outSum = sum(rows.map(([, v]) => v.out));
-    const chart = [...rows].reverse().map(([d, v]) => ({ name: d.slice(8, 10) + "/" + d.slice(5, 7), In: v.in, Out: v.out }));
+    const chart = [...rows].map(([d, v]) => ({ name: d.slice(8, 10) + "/" + d.slice(5, 7), In: v.in, Out: v.out }));
     return (
       <>
         <SummaryStrip
@@ -1348,7 +1353,8 @@ function BankStatementReport({ txns }: { txns: BankLedgerRow[] }) {
       acc.push({ ...t, balance: previous + (t.direction === "in" ? t.amount : -t.amount) });
       return acc;
     }, []);
-    return withBalance.reverse();
+    // Oldest first with the running balance reading down, as a passbook does (KAN-70).
+    return withBalance;
   }, [txns, picked]);
 
   const total = (ns: number[]) => ns.reduce((a, b) => a + b, 0);

@@ -259,7 +259,7 @@ export default function PayrollRunPage() {
         {run && run.status === "DRAFT" && !profilesLoading && <MissingFromRun slips={run.payslips} profiles={profiles} />}
 
         {run && (
-          <div className="grid grid-cols-2 gap-3 md:grid-cols-4 2xl:grid-cols-8">
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-4 min-[1800px]:grid-cols-8">
             <StatCard label="Net Payout" value={inr(Number(run.totalNet))} accent="green" icon={Wallet} />
             <StatCard label="Gross Pay" value={inr(tiles.gross)} accent="cyan" />
             <StatCard label="Deductions" value={inr(tiles.deductions)} accent="rose" />
@@ -485,7 +485,7 @@ function SummaryTable({ grouped, editable, onEdit, profiles }: {
 }) {
   // Sort inside each pay-type group, so the grouping PagarBook shows survives a column sort.
   const flat = useMemo(() => grouped.flatMap((g) => g.list), [grouped]);
-  const { sorted, sortKey, sortDir, toggle } = useTableSort(flat, SUMMARY_SORT);
+  const { sorted, sortKey, sortDir, toggle } = useTableSort(flat, SUMMARY_SORT, { key: "name" });
   const order = useMemo(() => new Map(sorted.map((p, i) => [p.id, i])), [sorted]);
   const groups = useMemo(
     () => grouped.map((g) => ({ ...g, list: [...g.list].sort((a, b) => order.get(a.id)! - order.get(b.id)!) })),
@@ -637,7 +637,7 @@ function InputsPanel({ monthKey, slips, editable, status, onChanged }: {
   const [adding, setAdding] = useState(false);
   const [error, setError] = useState("");
   const [lop, setLop] = useState<Record<number, string>>({});
-  const { sorted: inputRows, sortKey, sortDir, toggle } = useTableSort(slips, INPUT_SORT);
+  const { sorted: inputRows, sortKey, sortDir, toggle } = useTableSort(slips, INPUT_SORT, { key: "name" });
   const ownLock = useOwnRecordLock();
   const loadVars = useCallback(async () => {
     try { setVars(await getVariablesApi({ month: monthKey })); } catch { setVars([]); }
@@ -750,7 +750,7 @@ function PaymentPanel({ monthKey, slips, status, profiles, onChanged }: {
 }) {
   const [sel, setSel] = useState<Set<number>>(new Set());
   const [paying, setPaying] = useState(false);
-  const { sorted: payRows, sortKey, sortDir, toggle: sortBy } = useTableSort(slips, PAYMENT_SORT);
+  const { sorted: payRows, sortKey, sortDir, toggle: sortBy } = useTableSort(slips, PAYMENT_SORT, { key: "name" });
   const ownLock = useOwnRecordLock();
   const [error, setError] = useState("");
   if (status === "DRAFT") {

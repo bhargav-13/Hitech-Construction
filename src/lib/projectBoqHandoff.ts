@@ -2,6 +2,7 @@ import * as api from "./projectTargetApi";
 import { costRateOf, expenseAmount, groupedBoq } from "./tenderAnalysisCalc";
 import type { TenderAnalysis } from "./tenderAnalysisTypes";
 import type { HandoffOptions } from "./projectBoqStore";
+import { todayIST } from "@/lib/datetime";
 
 /**
  * Turning a won tender's analysis into the project's BOQ — the conversion that makes the tender
@@ -64,7 +65,7 @@ export async function handoffToServer(
     title: analysis.title ?? null,
     clientName: opts.clientName,
     boqNo: opts.boqNo || null,
-    boqDate: new Date().toISOString().slice(0, 10),
+    boqDate: todayIST(),
     bidPct: analysis.bidPct,
     items,
     targets,

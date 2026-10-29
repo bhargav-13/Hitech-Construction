@@ -18,6 +18,7 @@ import * as vyapar from "@/lib/vyaparApi";
 import { measuredQuantity } from "@/lib/workOrderApi";
 import { inr } from "@/lib/format";
 import type { Item, Party } from "@/lib/vyaparApi";
+import { todayIST } from "@/lib/datetime";
 
 /**
  * The work-order builder.
@@ -85,7 +86,7 @@ function Builder() {
   const [projectId, setProjectId] = useState(scopeProjectId != null ? String(scopeProjectId) : "");
   const [vendorId, setVendorId] = useState<number | null>(null);
   const [vendorSearch, setVendorSearch] = useState("");
-  const [woDate, setWoDate] = useState(new Date().toISOString().slice(0, 10));
+  const [woDate, setWoDate] = useState(todayIST());
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [taxPercent, setTaxPercent] = useState("0");
@@ -94,6 +95,7 @@ function Builder() {
   const [bankName, setBankName] = useState("");
   const [bankNumber, setBankNumber] = useState("");
   const [bankIfsc, setBankIfsc] = useState("");
+  const [bankBankName, setBankBankName] = useState("");
   const [terms, setTerms] = useState("");
   const [notes, setNotes] = useState("");
   const [items, setItems] = useState<DraftItem[]>([blankItem()]);
@@ -105,7 +107,7 @@ function Builder() {
   const [pastOrders, setPastOrders] = useState<wo.WorkOrder[]>([]);
   const [vendorListOpen, setVendorListOpen] = useState(false);
   /** Exactly what `pickVendor` last wrote into the bank fields — see the note there. */
-  const [autofilled, setAutofilled] = useState({ name: "", number: "", ifsc: "" });
+  const [autofilled, setAutofilled] = useState({ name: "", number: "", ifsc: "", bank: "" });
 
   const loadMasters = useCallback(async () => {
     const [p, i, w] = await Promise.allSettled([vyapar.getParties(), vyapar.getItems(), wo.getWorkOrders()]);
@@ -134,6 +136,7 @@ function Builder() {
     setBankName(w.bankAccountName ?? "");
     setBankNumber(w.bankAccountNumber ?? "");
     setBankIfsc(w.bankIfsc ?? "");
+    setBankBankName(w.bankName ?? "");
     setTerms(w.terms ?? "");
     setNotes(w.notes ?? "");
     setItems(
@@ -201,22 +204,24 @@ function Builder() {
     setVendorListOpen(false);
 
     const last = pastOrders
-      .filter((w) => w.vendorPartyId === p.id && (w.bankAccountNumber || w.bankAccountName || w.bankIfsc))
+      .filter((w) => w.vendorPartyId === p.id && (w.bankAccountNumber || w.bankAccountName || w.bankIfsc || w.bankName))
       .sort((a, b) => (b.woDate ?? "").localeCompare(a.woDate ?? "") || b.id - a.id)[0];
     const next = {
       name: last ? last.bankAccountName || p.name : "",
       number: last?.bankAccountNumber ?? "",
       ifsc: last?.bankIfsc ?? "",
+      bank: last?.bankName ?? "",
     };
 
     // Untouched = empty, or still exactly what the last prefill put there.
     const untouched = (current: string, filled: string) => current === "" || current === filled;
-    if (!untouched(bankName, autofilled.name) || !untouched(bankNumber, autofilled.number) || !untouched(bankIfsc, autofilled.ifsc)) {
+    if (!untouched(bankName, autofilled.name) || !untouched(bankNumber, autofilled.number) || !untouched(bankIfsc, autofilled.ifsc) || !untouched(bankBankName, autofilled.bank)) {
       return;
     }
     setBankName(next.name);
     setBankNumber(next.number);
     setBankIfsc(next.ifsc);
+    setBankBankName(next.bank);
     setAutofilled(next);
   }
 
@@ -325,6 +330,7 @@ function Builder() {
         bankAccountName: bankName.trim() || null,
         bankAccountNumber: bankNumber.trim() || null,
         bankIfsc: bankIfsc.trim() || null,
+        bankName: bankBankName.trim() || null,
         terms: terms.trim() || null,
         notes: notes.trim() || null,
         items: clean.map((it) => ({
@@ -648,7 +654,7 @@ function Builder() {
         <div className="grid gap-4 lg:grid-cols-3">
           <section className="rounded-xl border border-gray-200 bg-white p-4 lg:col-span-2">
             <h2 className="mb-3 text-sm font-semibold text-gray-800">Payment details</h2>
-            <div className="grid gap-3 sm:grid-cols-3">
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
               <Field label="Account holder name">
                 <input value={bankName} onChange={(e) => setBankName(e.target.value)} className="input" />
               </Field>
@@ -665,6 +671,9 @@ function Builder() {
                   onChange={(e) => setBankIfsc(e.target.value.toUpperCase())}
                   className="input font-mono"
                 />
+              </Field>
+              <Field label="Bank name">
+                <input value={bankBankName} onChange={(e) => setBankBankName(e.target.value)} placeholder="e.g. HDFC Bank, Junagadh" className="input" />
               </Field>
             </div>
             <div className="mt-4 grid gap-3 sm:grid-cols-2">

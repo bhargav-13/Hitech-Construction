@@ -1,6 +1,7 @@
 "use client";
 
 import { Suspense, useMemo, useState } from "react";
+import type { ReactNode } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import {
@@ -316,6 +317,9 @@ function Matrix({
     let cheapest = 0;
     let budget = 0;
     let decided = 0;
+    // What the orders would really come to: each chosen line plus its vendor's GST, and a vendor's
+    // whole-quote discount / charges only when they take every line they quoted (as the PO does).
+    const byVendor = new Map<number, number>();
     for (let i = 0; i < rfq.lines.length; i++) {
       const line = rfq.lines[i];
       const { best, cheapest: cheapestOffer } = perLine[i];
@@ -327,13 +331,25 @@ function Matrix({
         const q = rfq.quotes.find((x) => x.vendorPartyId === chosen);
         const rate = q?.lines.find((c) => c.rfqLineId === line.id)?.rate ?? null;
         selected += (rate ?? 0) * line.quantity;
+        byVendor.set(chosen, (byVendor.get(chosen) ?? 0) + (rate ?? 0) * line.quantity);
       } else if (cheapestOffer) {
         // Undecided lines are costed at the cheapest offer, so the running total means something
         // before every row has been settled.
         selected += cheapestOffer.rate * line.quantity;
+        byVendor.set(cheapestOffer.vendorPartyId, (byVendor.get(cheapestOffer.vendorPartyId) ?? 0) + cheapestOffer.rate * line.quantity);
       }
     }
-    return { selected, cheapest, budget, decided, of: rfq.lines.length };
+    let selectedWithTax = 0;
+    for (const [vendorId, sub] of byVendor) {
+      const q = rfq.quotes.find((x) => x.vendorPartyId === vendorId);
+      if (!q) { selectedWithTax += sub; continue; }
+      const quoted = q.lines.filter((c) => c.rate != null).map((c) => c.rfqLineId);
+      const taking = rfq.lines.filter((l) => (l.awardedVendorPartyId ?? perLine[rfq.lines.indexOf(l)].cheapest?.vendorPartyId) === vendorId).map((l) => l.id);
+      const sweep = quoted.length > 0 && quoted.every((id) => taking.includes(id));
+      const base = sub + (sweep ? (q.charges ?? 0) - (q.discount ?? 0) : 0);
+      selectedWithTax += base * (1 + (q.taxPercent ?? 0) / 100);
+    }
+    return { selected, selectedWithTax, cheapest, budget, decided, of: rfq.lines.length };
   }, [rfq, perLine]);
 
   /**
@@ -732,32 +748,89 @@ function Matrix({
               );
             })}
 
-            {/* Whole-quote terms, below the lines they apply to */}
-            <tr className="border-t border-gray-200 bg-gray-50/60 text-xs">
-              <td className="sticky left-0 z-10 bg-gray-50/60 px-4 py-3 font-medium text-gray-500">
-                Discount · Charges · Tax
-              </td>
-              {rfq.quotes.map((q, qi) => {
-                const place = standings.findIndex((s) => s.qi === qi);
-                const dimmed = focus != null && focus !== qi;
-                return (
-                  <td
-                    key={q.id}
-                    className={`border-l border-gray-100 px-4 py-3 text-gray-600 tabular-nums transition-opacity duration-150 ${
-                      dimmed ? "opacity-30" : ""
-                    } ${place === 0 ? "bg-emerald-50/60" : ""}`}
-                  >
-                    <div>Sub {inr(totals[qi].subtotal)}</div>
-                    {!!q.discount && <div className="text-emerald-700">− {inr(q.discount)} discount</div>}
-                    {!!q.charges && <div>+ {inr(q.charges)} charges</div>}
-                    <div>+ {inr(totals[qi].tax)} tax</div>
-                    <div className={`mt-1 font-semibold ${place === 0 ? "text-emerald-800" : "text-gray-800"}`}>
-                      {inr(totals[qi].total)}
-                    </div>
+            {/* Whole-quote terms, below the lines they apply to — one labelled row per step, so the
+                way each vendor gets from their line rates to their final figure reads straight across. */}
+            {(() => {
+              const anyDiscount = rfq.quotes.some((q) => !!q.discount);
+              const anyCharges = rfq.quotes.some((q) => !!q.charges);
+              const allRows: { key: string; label: string; hint: string; cell: (qi: number) => ReactNode; strong?: boolean }[] = [
+                {
+                  key: "sub",
+                  label: "Items subtotal",
+                  hint: "Rate × quantity, added up over every line this vendor priced",
+                  cell: (qi) => inr(totals[qi].subtotal),
+                },
+                {
+                  key: "disc",
+                  label: "Discount",
+                  hint: "Flat discount the vendor gave on their whole quote",
+                  cell: (qi) => (rfq.quotes[qi].discount ? <span className="text-emerald-700">− {inr(rfq.quotes[qi].discount!)}</span> : <span className="text-gray-300">none</span>),
+                },
+                {
+                  key: "chg",
+                  label: "Freight / other charges",
+                  hint: "Transport, loading or other charges the vendor added on top",
+                  cell: (qi) => (rfq.quotes[qi].charges ? <>+ {inr(rfq.quotes[qi].charges!)}</> : <span className="text-gray-300">none</span>),
+                },
+                {
+                  key: "taxable",
+                  label: "Taxable amount",
+                  hint: "Subtotal − discount + charges: what GST is worked out on",
+                  cell: (qi) => inr(totals[qi].subtotal - (rfq.quotes[qi].discount ?? 0) + (rfq.quotes[qi].charges ?? 0)),
+                },
+                {
+                  key: "tax",
+                  label: "GST",
+                  hint: "The vendor's GST rate on the taxable amount",
+                  cell: (qi) => (
+                    <>
+                      + {inr(totals[qi].tax)}
+                      <span className="ml-1 text-[10px] text-gray-400">@ {rfq.quotes[qi].taxPercent ?? 0}%</span>
+                    </>
+                  ),
+                },
+                {
+                  key: "total",
+                  label: "Quote total (all lines)",
+                  hint: "What this vendor's whole quote comes to, everything included",
+                  strong: true,
+                  cell: (qi) => inr(totals[qi].total),
+                },
+              ];
+              const rows = allRows.filter((r) => (r.key !== "disc" || anyDiscount) && (r.key !== "chg" || anyCharges) && (r.key !== "taxable" || anyDiscount || anyCharges));
+              return rows.map((r, ri) => (
+                <tr key={r.key} className={`${ri === 0 ? "border-t-2 border-gray-200" : "border-t border-gray-100"} ${r.strong ? "bg-gray-50" : "bg-gray-50/40"} text-xs`}>
+                  <td className={`sticky left-0 z-10 px-4 py-2 ${r.strong ? "bg-gray-50 font-semibold text-gray-800" : "bg-gray-50/90 font-medium text-gray-500"}`} title={r.hint}>
+                    {r.label}
+                    {ri === 0 && <div className="mt-0.5 text-[10px] font-normal text-gray-400">Whole quote, as each vendor sent it</div>}
                   </td>
-                );
-              })}
-            </tr>
+                  {rfq.quotes.map((q, qi) => {
+                    const place = standings.findIndex((st) => st.qi === qi);
+                    const dimmed = focus != null && focus !== qi;
+                    return (
+                      <td
+                        key={q.id}
+                        className={`border-l border-gray-100 px-4 py-2 text-right tabular-nums transition-opacity duration-150 ${dimmed ? "opacity-30" : ""} ${
+                          place === 0 ? "bg-emerald-50/60" : ""
+                        } ${r.strong ? `text-sm font-semibold ${place === 0 ? "text-emerald-800" : "text-gray-900"}` : "text-gray-600"}`}
+                      >
+                        {r.cell(qi)}
+                        {r.strong && place === 0 && rfq.quotes.length > 1 && <div className="text-[10px] font-medium text-emerald-700">lowest overall</div>}
+                        {r.strong && place > 0 && <div className="text-[10px] font-normal text-gray-400">+{inr(standings[place].delta)} vs lowest</div>}
+                      </td>
+                    );
+                  })}
+                </tr>
+              ));
+            })()}
+            {(rfq.quotes.some((q) => !!q.discount || !!q.charges)) && (
+              <tr className="bg-gray-50/40 text-[11px] text-gray-500">
+                <td colSpan={rfq.quotes.length + 1} className="px-4 py-2">
+                  A vendor&apos;s discount and charges apply to their whole quote, so they go on the purchase order only when that vendor
+                  wins <strong>every line they quoted</strong>. If you split the lines between vendors, each order carries just its lines + GST.
+                </td>
+              </tr>
+            )}
           </tbody>
         </table>
       </div>
@@ -766,7 +839,12 @@ function Matrix({
       <div className="sticky bottom-0 z-20 rounded-xl border border-gray-200 bg-white/95 p-4 shadow-lg backdrop-blur">
         <div className="flex flex-wrap items-end justify-between gap-4">
           <div className="flex flex-wrap gap-6">
-            <Figure label="Current selection" value={inr(summary.selected)} strong />
+            <Figure label="Current selection · before GST" value={inr(summary.selected)} strong hint="Chosen rate × quantity on every line (undecided lines at the cheapest offer)" />
+            <Figure
+              label="Incl. GST, discount & charges"
+              value={inr(summary.selectedWithTax)}
+              hint="What the purchase orders come to: each line plus its vendor's GST; a vendor's discount and charges count only if they win every line they quoted"
+            />
             <Figure
               label="All-cheapest"
               value={inr(summary.cheapest)}

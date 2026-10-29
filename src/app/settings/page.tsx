@@ -165,6 +165,7 @@ function RolesAndAccess() {
         modules={modules}
         roles={roles}
         existing={roleDrawer.mode === "edit" ? roleDrawer.role : undefined}
+        memberCount={roleDrawer.mode === "edit" ? usersByRoleId.get(roleDrawer.role.id)?.length ?? 0 : 0}
         onCancel={() => setRoleDrawer(null)}
         onSaved={() => {
           setRoleDrawer(null);

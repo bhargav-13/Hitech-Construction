@@ -13,6 +13,7 @@ import * as vyapar from "@/lib/vyaparApi";
 import type { Cheque } from "@/lib/vyaparApi";
 import { CheckCircle2, FileSpreadsheet, FileText, RotateCcw, Search, Wallet } from "lucide-react";
 import { isBackgroundRefresh, useAutoRefresh } from "@/lib/autoRefresh";
+import { todayIST } from "@/lib/datetime";
 
 const STATUS_STYLE: Record<string, string> = {
   OPEN: "bg-amber-50 text-amber-700",
@@ -80,7 +81,7 @@ export default function ChequesPage() {
 
   async function setStatus(c: Cheque, status: Cheque["status"]) {
     try {
-      await vyapar.updateCheque(c.id, { status, transferDate: new Date().toISOString().slice(0, 10) });
+      await vyapar.updateCheque(c.id, { status, transferDate: todayIST() });
       load();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Couldn't update this cheque.");

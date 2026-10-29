@@ -23,6 +23,7 @@ import * as procurement from "@/lib/procurementApi";
 import * as vyapar from "@/lib/vyaparApi";
 import type { Rfq } from "@/lib/procurementApi";
 import type { Item, Party } from "@/lib/vyaparApi";
+import { todayIST } from "@/lib/datetime";
 
 /**
  * The RFQ builder — a full page, not a dialog.
@@ -79,7 +80,7 @@ function Builder() {
   const [editingNo, setEditingNo] = useState(false);
   const [title, setTitle] = useState("");
   const [projectId, setProjectId] = useState(scopeProjectId != null ? String(scopeProjectId) : "");
-  const [rfqDate, setRfqDate] = useState(new Date().toISOString().slice(0, 10));
+  const [rfqDate, setRfqDate] = useState(todayIST());
   const [taxType, setTaxType] = useState<"ITEM" | "BILL">("ITEM");
   const [biddingStart, setBiddingStart] = useState("");
   const [biddingEnd, setBiddingEnd] = useState("");

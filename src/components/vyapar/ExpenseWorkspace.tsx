@@ -42,6 +42,7 @@ import type { Invoice, InvoiceLine, Party } from "@/lib/vyaparApi";
 import { Download, FileText, Plus, Receipt, Search, Tags, Upload, X } from "lucide-react";
 import { previewFile } from "@/lib/filePreview";
 import { isBackgroundRefresh, useAutoRefresh } from "@/lib/autoRefresh";
+import { todayIST } from "@/lib/datetime";
 const UNCATEGORISED = "Uncategorised";
 
 /**
@@ -634,7 +635,7 @@ function ExpenseForm({
   }
   const [partyId, setPartyId] = useState(existing?.partyId ? String(existing.partyId) : "");
   const [expenseNo, setExpenseNo] = useState(existing?.invoiceNo ?? "");
-  const [date, setDate] = useState(existing?.invoiceDate ?? new Date().toISOString().slice(0, 10));
+  const [date, setDate] = useState(existing?.invoiceDate ?? todayIST());
   const [stateOfSupply, setStateOfSupply] = useState(existing?.stateOfSupply ?? "");
   const [lines, setLines] = useState<LineDraft[]>(
     existing?.lines.length

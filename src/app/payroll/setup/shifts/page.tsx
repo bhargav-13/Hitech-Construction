@@ -180,8 +180,12 @@ function ShiftDrawer({
   const [endTime, setEndTime] = useState(existing?.endTime ?? "18:00");
   const [weeklyOffs, setWeeklyOffs] = useState<number[]>(existing?.weeklyOffs ?? [0]);
   const [graceMinutes, setGraceMinutes] = useState(existing?.graceMinutes ?? 30);
-  const [halfDayHours, setHalfDayHours] = useState(existing?.halfDayHours ?? 4);
+  const [halfDayHours, setHalfDayHours] = useState<number>(existing?.halfDayHours ?? 4);
   const [fullDayHours, setFullDayHours] = useState(existing?.fullDayHours ?? 8);
+  // Half-day follows full-day ÷ 2 (client: "auto calculate, and it can also be editable") until
+  // someone types their own figure; an existing shift that already sits at half stays linked.
+  const [halfAuto, setHalfAuto] = useState(() => !existing || Number(existing.halfDayHours) === Number(existing.fullDayHours) / 2);
+  const halfOf = (full: number) => Math.round((full / 2) * 100) / 100;
   const [overtimeEnabled, setOvertimeEnabled] = useState(existing?.overtimeEnabled ?? true);
   const [alt, setAlt] = useState<Record<number, number[]>>(() => parseAlt(existing?.alternateOffs));
   const [lateMode, setLateMode] = useState<FineMode>(existing?.lateFineMode ?? "NONE");
@@ -259,9 +263,40 @@ function ShiftDrawer({
 
         <div className="grid grid-cols-3 gap-3">
           <DrawerField label="Grace (min)"><input type="number" value={graceMinutes} onChange={(e) => setGraceMinutes(Number(e.target.value))} className="input" /></DrawerField>
-          <DrawerField label="Half-day (hrs)"><input type="number" value={halfDayHours} onChange={(e) => setHalfDayHours(Number(e.target.value))} className="input" /></DrawerField>
-          <DrawerField label="Full-day (hrs)"><input type="number" value={fullDayHours} onChange={(e) => setFullDayHours(Number(e.target.value))} className="input" /></DrawerField>
+          <DrawerField label={halfAuto ? "Half-day (hrs) · auto" : "Half-day (hrs)"}>
+            <input
+              type="number"
+              step="0.25"
+              value={halfDayHours}
+              onChange={(e) => { setHalfDayHours(Number(e.target.value)); setHalfAuto(false); }}
+              className="input"
+            />
+          </DrawerField>
+          <DrawerField label="Full-day (hrs)">
+            <input
+              type="number"
+              step="0.25"
+              value={fullDayHours}
+              onChange={(e) => {
+                const full = Number(e.target.value);
+                setFullDayHours(full);
+                if (halfAuto) setHalfDayHours(halfOf(full));
+              }}
+              className="input"
+            />
+          </DrawerField>
         </div>
+        {halfAuto ? (
+          <p className="-mt-2 text-[11px] text-gray-400">Half-day is worked out as half of the full day. Type in it to set your own.</p>
+        ) : (
+          <button
+            type="button"
+            onClick={() => { setHalfAuto(true); setHalfDayHours(halfOf(Number(fullDayHours) || 0)); }}
+            className="-mt-2 text-[11px] font-medium text-brand-accent hover:underline"
+          >
+            Set half-day back to half of full day ({halfOf(Number(fullDayHours) || 0)} h)
+          </button>
+        )}
 
         <label className="flex items-center gap-2 text-sm text-gray-600">
           <button

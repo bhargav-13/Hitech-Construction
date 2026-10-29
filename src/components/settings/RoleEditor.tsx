@@ -1,7 +1,8 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { ChevronDown, Info, Lock } from "lucide-react";
+import { ChevronDown, Info, Lock, Trash2 } from "lucide-react";
+import { useCan } from "@/lib/permissions";
 import * as api from "@/lib/api";
 import type { ModuleResponse, PermissionResponse, RoleResponse } from "@/lib/api";
 import { Select } from "@/components/Select";
@@ -87,13 +88,20 @@ export function RoleEditor({
   existing,
   onCancel,
   onSaved,
+  memberCount = 0,
 }: {
   modules: ModuleResponse[];
   roles: RoleResponse[];
   existing?: RoleResponse;
   onCancel: () => void;
   onSaved: () => void;
+  /** People holding this role — they must move to another role before it can go. */
+  memberCount?: number;
 }) {
+  const can = useCan();
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [moveTo, setMoveTo] = useState("");
+  const [deleting, setDeleting] = useState(false);
   const [name, setName] = useState(existing?.name ?? "");
   const [description, setDescription] = useState(existing?.description ?? "");
   const [reportsToRoleId, setReportsToRoleId] = useState<string>(existing?.reportsToRoleId ? String(existing.reportsToRoleId) : "");
@@ -248,6 +256,14 @@ export function RoleEditor({
           >
             Cancel
           </button>
+          {existing && !existing.isSystem && !locked && can("USER_MANAGEMENT:DELETE") && (
+            <button
+              onClick={() => { setConfirmDelete(true); setError(""); }}
+              className="flex items-center gap-1.5 rounded-lg border border-rose-200 bg-white px-4 py-2 text-sm font-medium text-rose-600 transition-colors hover:bg-rose-50"
+            >
+              <Trash2 size={14} /> Delete role
+            </button>
+          )}
           {!locked && (
             <button
               onClick={save}
@@ -261,6 +277,51 @@ export function RoleEditor({
       </div>
 
       {error && <div className="rounded-lg bg-rose-50 px-4 py-2 text-sm text-rose-600">{error}</div>}
+
+      {confirmDelete && existing && (
+        <div className="space-y-3 rounded-xl border border-rose-200 bg-rose-50/60 p-4">
+          <div className="text-sm font-semibold text-rose-700">Delete the &ldquo;{existing.name}&rdquo; role?</div>
+          <p className="text-xs text-gray-600">
+            Roles that report to it will report to {roles.find((r) => r.id === existing.reportsToRoleId)?.name ?? "the top of the chart"} instead.
+            {memberCount > 0
+              ? ` ${memberCount} ${memberCount === 1 ? "person has" : "people have"} this role — pick the role they move to. Any approval still waiting on this role moves with them.`
+              : " Nobody here has this role — if someone in another company does, pick a role to move them to."}
+          </p>
+          {(
+            <div className="max-w-xs">
+              <Select
+                value={moveTo}
+                onChange={setMoveTo}
+                placeholder="Move people to…"
+                options={parentOptions.map((r) => ({ value: String(r.id), label: r.name }))}
+              />
+            </div>
+          )}
+          <div className="flex gap-2">
+            <button
+              disabled={deleting || (memberCount > 0 && !moveTo)}
+              onClick={async () => {
+                setDeleting(true);
+                setError("");
+                try {
+                  await api.deleteRole(existing.id, moveTo ? Number(moveTo) : undefined);
+                  onSaved();
+                } catch (err) {
+                  setError(err instanceof api.ApiError ? err.message : "Unable to delete this role.");
+                } finally {
+                  setDeleting(false);
+                }
+              }}
+              className="rounded-lg bg-rose-600 px-4 py-2 text-sm font-medium text-white hover:bg-rose-700 disabled:opacity-50"
+            >
+              {deleting ? "Deleting…" : "Delete role"}
+            </button>
+            <button onClick={() => setConfirmDelete(false)} className="rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm text-gray-600 hover:bg-gray-50">
+              Keep it
+            </button>
+          </div>
+        </div>
+      )}
 
       {isSuperAdmin && (
         <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">

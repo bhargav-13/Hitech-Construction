@@ -9,19 +9,22 @@ import { formatDateIST, formatDateTimeIST } from "@/lib/datetime";
 import { Download, FileText, Megaphone, Paperclip } from "lucide-react";
 import { previewFile } from "@/lib/filePreview";
 import { useRefreshTick } from "@/lib/autoRefresh";
+import { getLetterFile, getMyLetters, type IssuedLetterApi } from "@/lib/hrDeskApi";
 
 /** Self-service: messages HR has sent me, and the organisation's documents. */
 export default function MyInboxPage() {
   const [messages, setMessages] = useState<BroadcastApi[]>([]);
   const [docs, setDocs] = useState<OrgDocumentApi[]>([]);
+  // Letters HR shared with me (appointment, increment…). Opening one tells HR it was seen.
+  const [letters, setLetters] = useState<IssuedLetterApi[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
   const tick = useRefreshTick(); // silent re-load on the module auto-refresh
   useEffect(() => {
     let cancelled = false;
-    Promise.all([myBroadcasts(), getOrgDocuments()])
-      .then(([m, d]) => { if (!cancelled) { setMessages(m); setDocs(d); } })
+    Promise.all([myBroadcasts(), getOrgDocuments(), getMyLetters().catch(() => [] as IssuedLetterApi[])])
+      .then(([m, d, l]) => { if (!cancelled) { setMessages(m); setDocs(d); setLetters(l); } })
       .catch((err) => { if (!cancelled) setError(err instanceof ApiError ? err.message : "Unable to load."); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
@@ -65,6 +68,37 @@ export default function MyInboxPage() {
                 </div>
               )}
             </section>
+            <div className="space-y-4">
+            <section className="rounded-xl border border-gray-200 bg-white">
+              <div className="flex items-center gap-2 border-b border-gray-100 px-4 py-2 text-sm font-semibold text-gray-800"><FileText size={15} /> My letters</div>
+              {letters.length === 0 ? (
+                <div className="py-6 text-center text-sm text-gray-400">No letters from HR yet.</div>
+              ) : (
+                <div className="divide-y divide-gray-100">
+                  {letters.map((l) => (
+                    <button
+                      key={l.id}
+                      onClick={async () => {
+                        const { dataUrl } = await getLetterFile(l.id);
+                        previewFile({ name: l.fileName, url: dataUrl });
+                        setLetters((cur) => cur.map((x) => (x.id === l.id && !x.seenAt ? { ...x, seenAt: new Date().toISOString() } : x)));
+                      }}
+                      className="flex w-full items-center gap-3 px-4 py-2.5 text-left hover:bg-gray-50"
+                    >
+                      <FileText size={16} className="shrink-0 text-brand-accent" />
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-sm font-medium text-gray-800">
+                          {l.title}
+                          {!l.seenAt && <span className="ml-1.5 rounded-full bg-rose-500 px-1.5 py-0.5 text-[9px] font-semibold text-white">NEW</span>}
+                        </span>
+                        <span className="block text-xs text-gray-500">{l.issuedAt ? formatDateIST(l.issuedAt) : ""}{l.refNo ? ` · ${l.refNo}` : ""}</span>
+                      </span>
+                      <Download size={14} className="shrink-0 text-gray-400" />
+                    </button>
+                  ))}
+                </div>
+              )}
+            </section>
             <section className="rounded-xl border border-gray-200 bg-white">
               <div className="flex items-center gap-2 border-b border-gray-100 px-4 py-2 text-sm font-semibold text-gray-800"><FileText size={15} /> Organisation documents</div>
               {docs.length === 0 ? (
@@ -88,6 +122,7 @@ export default function MyInboxPage() {
                 </div>
               )}
             </section>
+            </div>
           </div>
         )}
       </div>

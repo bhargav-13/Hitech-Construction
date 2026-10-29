@@ -10,6 +10,7 @@ import { inr } from "@/lib/format";
 import * as vyapar from "@/lib/vyaparApi";
 import type { BankAccount } from "@/lib/vyaparApi";
 import { Info, Plus } from "lucide-react";
+import { todayIST } from "@/lib/datetime";
 
 /** Add / edit a bank account — mirrors Vyapar's "Add Bank Account" screen. */
 export function BankAccountDialog({
@@ -23,7 +24,7 @@ export function BankAccountDialog({
 }) {
   const [name, setName] = useState(existing?.name ?? "");
   const [openingBalance, setOpeningBalance] = useState(existing?.openingBalance ?? 0);
-  const [openingDate, setOpeningDate] = useState(existing?.openingDate ?? new Date().toISOString().slice(0, 10));
+  const [openingDate, setOpeningDate] = useState(existing?.openingDate ?? todayIST());
   const [more, setMore] = useState(!!existing?.accountNumber);
   const [accountNumber, setAccountNumber] = useState(existing?.accountNumber ?? "");
   const [ifsc, setIfsc] = useState(existing?.ifsc ?? "");
@@ -185,7 +186,7 @@ export function CashBankEntryDialog({
   const [amount, setAmount] = useState(0);
   const [fromAccountId, setFromAccountId] = useState(currentAccountId ? String(currentAccountId) : "");
   const [toAccountId, setToAccountId] = useState("");
-  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
+  const [date, setDate] = useState(todayIST());
   const [description, setDescription] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");

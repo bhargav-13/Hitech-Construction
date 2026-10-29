@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { VyaparShell } from "@/components/vyapar/VyaparShell";
 import { Select } from "@/components/Select";
@@ -11,6 +11,7 @@ import { useItemSettings } from "@/lib/useItemSettings";
 import { DOC_LABEL } from "@/lib/vyaparApi";
 import type { DocType, VyaparSettings } from "@/lib/vyaparApi";
 import { Boxes, ChevronRight, Printer, Users } from "lucide-react";
+import { ShortcutsTab } from "@/components/vyapar/ShortcutsTab";
 
 /**
  * Vyapar's Settings screen: a left tab rail and a panel of switches.
@@ -23,12 +24,17 @@ import { Boxes, ChevronRight, Printer, Users } from "lucide-react";
  * Party and Item keep their own dedicated pages (they're backed by their own stores), so those
  * tabs summarise and link rather than duplicating the controls.
  */
-const TABS = ["General", "Transaction", "Party", "Item", "Print"] as const;
+const TABS = ["General", "Transaction", "Party", "Item", "Print", "Shortcuts"] as const;
 type Tab = (typeof TABS)[number];
 
 export default function VyaparSettingsPage() {
   const { settings, loading, save } = useVyaparSettings();
   const [tab, setTab] = useState<Tab>("General");
+  // ?tab=Shortcuts — the Add More menu's "Customise shortcuts" link lands here.
+  useEffect(() => {
+    const t = new URLSearchParams(window.location.search).get("tab");
+    if (t && (TABS as readonly string[]).includes(t)) setTab(t as Tab);
+  }, []);
   /**
    * Edits live in a local copy so a half-made change doesn't reformat every amount on screen
    * mid-edit. Derived rather than synced in an effect: null means "untouched, follow the store",
@@ -102,7 +108,9 @@ export default function VyaparSettingsPage() {
           </nav>
 
           <div className="rounded-xl border border-gray-200 bg-white p-5">
-            {loading || !draft ? (
+            {tab === "Shortcuts" ? (
+              <ShortcutsTab />
+            ) : loading || !draft ? (
               <div className="flex min-h-[280px] items-center justify-center gap-2 text-sm text-gray-400">
                 <Spinner size={16} className="text-brand-accent" /> Loading settings…
               </div>

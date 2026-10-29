@@ -25,6 +25,7 @@ import {
 } from "lucide-react";
 import { getHomeSites, getProjects } from "@/lib/api";
 import type { HomeSite } from "@/lib/api";
+import { todayIST } from "@/lib/datetime";
 
 /** One uploaded identity document: a label plus the file (kept as a data URL, like punch selfies). */
 type DocRow = { type: string; fileName: string; dataUrl: string };
@@ -138,7 +139,7 @@ function WizardForm({
   // Form state (seeded from the existing profile or sensible defaults).
   const [category, setCategory] = useState<StaffCategory>((existing?.category as StaffCategory) ?? "REGULAR");
   const [designation, setDesignation] = useState(existing?.designation ?? DESIGNATIONS[0]);
-  const [joiningDate, setJoiningDate] = useState(existing?.joiningDate ?? new Date().toISOString().slice(0, 10));
+  const [joiningDate, setJoiningDate] = useState(existing?.joiningDate ?? todayIST());
   const [shiftId, setShiftId] = useState<string>(existing?.shiftId != null ? String(existing.shiftId) : shifts[0] ? String(shifts[0].id) : "");
   const [holidayPolicyId, setHolidayPolicyId] = useState<string>(existing?.holidayPolicyId != null ? String(existing.holidayPolicyId) : holidayPolicies[0] ? String(holidayPolicies[0].id) : "");
   const [leavePolicyId, setLeavePolicyId] = useState<string>(existing?.leavePolicyId != null ? String(existing.leavePolicyId) : leavePolicies[0] ? String(leavePolicies[0].id) : "");

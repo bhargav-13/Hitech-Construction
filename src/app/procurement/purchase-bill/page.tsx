@@ -9,7 +9,7 @@ import { usePurchaseBills } from "@/lib/purchaseApi";
  * Same reasoning as the Purchase Orders screen beside it.
  */
 export default function ProcurementPurchaseBillsPage() {
-  const { rows, loading, error } = usePurchaseBills();
+  const { rows, loading, error, refresh } = usePurchaseBills();
 
   return (
     <ProcurementShell>
@@ -23,6 +23,7 @@ export default function ProcurementPurchaseBillsPage() {
         error={error}
         noun="purchase bill"
         emptyHint="Bills appear here as suppliers invoice against their orders."
+        onChanged={refresh}
         vyaparHref="/vyapar/purchase"
       />
     </ProcurementShell>

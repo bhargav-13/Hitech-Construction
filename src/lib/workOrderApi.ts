@@ -108,6 +108,8 @@ export interface WorkOrder {
   bankAccountName: string | null;
   bankAccountNumber: string | null;
   bankIfsc: string | null;
+  /** The bank itself — "HDFC Bank". */
+  bankName: string | null;
   terms: string | null;
   notes: string | null;
   // ---- derived, server-side ----
@@ -162,6 +164,7 @@ export interface WorkOrderInput {
   bankAccountName?: string | null;
   bankAccountNumber?: string | null;
   bankIfsc?: string | null;
+  bankName?: string | null;
   terms?: string | null;
   notes?: string | null;
   items: WorkOrderItemInput[];

@@ -7,6 +7,7 @@ import { inr } from "@/lib/format";
 import * as vyapar from "@/lib/vyaparApi";
 import type { Item } from "@/lib/vyaparApi";
 import { MinusCircle, PlusCircle } from "lucide-react";
+import { todayIST } from "@/lib/datetime";
 
 /** Manual stock correction for damage, wastage or a recount — Vyapar's "Adjust Item". */
 export function AdjustStockDialog({
@@ -21,7 +22,7 @@ export function AdjustStockDialog({
   const [mode, setMode] = useState<"ADD" | "REDUCE">("ADD");
   const [quantity, setQuantity] = useState(0);
   const [atPrice, setAtPrice] = useState(item.purchasePrice);
-  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
+  const [date, setDate] = useState(todayIST());
   const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");

@@ -183,6 +183,27 @@ function isPdf(file: File): boolean {
 
 // ---- server ------------------------------------------------------------------------------------
 
+/** What GET /scan/gstin/{gstin} knows about a GSTIN. Name/address are from public listings — check them. */
+export interface GstinDetails {
+  gstin: string;
+  state: string | null;
+  pan: string;
+  constitution: string | null;
+  found: boolean;
+  legalName: string | null;
+  tradeName: string | null;
+  address: string | null;
+  pincode: string | null;
+  status: string | null;
+  registrationType: string | null;
+  sources: string[];
+  note?: string;
+}
+
+export function lookupGstin(gstin: string): Promise<GstinDetails> {
+  return apiRequest<GstinDetails>(`/api/v1/scan/gstin/${encodeURIComponent(gstin)}`);
+}
+
 let statusCache: Promise<boolean> | null = null;
 
 /** Whether this server has a key configured. Cached for the page's life; a failed check retries. */

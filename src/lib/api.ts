@@ -312,8 +312,10 @@ export function updateRole(id: number, body: RoleRequest) {
   return request<RoleResponse>(`/api/v1/roles/${id}`, { method: "PUT", body });
 }
 
-export function deleteRole(id: number) {
-  return request<void>(`/api/v1/roles/${id}`, { method: "DELETE" });
+export function deleteRole(id: number, moveToRoleId?: number) {
+  // A role still in use is deleted by moving its people (and pending approval steps) to another.
+  const path = moveToRoleId ? `/api/v1/roles/${id}/move-to/${moveToRoleId}` : `/api/v1/roles/${id}`;
+  return request<void>(path, { method: "DELETE" });
 }
 
 // ---- Modules & permissions ----
@@ -342,12 +344,17 @@ export interface TeamMemberResponse {
  * Everyone Payroll works with (same shape as getUsers, never paged). Payroll screens use this, not
  * getUsers — that one needs User Management access and pages at a few hundred people.
  */
-export function getPayrollPeople() {
-  return request<UserPageResponse>("/api/v1/payroll/people");
+/** People lists read A→Z everywhere they are picked from (KAN-66 — they came in database order). */
+const byFullName = (a: { fullName?: string | null }, b: { fullName?: string | null }) =>
+  (a.fullName ?? "").localeCompare(b.fullName ?? "", undefined, { sensitivity: "base" });
+
+export async function getPayrollPeople() {
+  const res = await request<UserPageResponse>("/api/v1/payroll/people");
+  return { ...res, content: [...res.content].sort(byFullName) };
 }
 
-export function getTeam() {
-  return request<TeamMemberResponse[]>("/api/v1/team");
+export async function getTeam() {
+  return [...(await request<TeamMemberResponse[]>("/api/v1/team"))].sort(byFullName);
 }
 
 // ---- Users (admin User Management, gated by USER_MANAGEMENT:VIEW) ----
@@ -1067,8 +1074,11 @@ export interface AttendanceLogApi {
   at: string | null;
 }
 
-export function punchAttendance(body: PunchRequestBody) {
-  return request<AttendanceApiResponse>("/api/v1/payroll/attendance/punch", { method: "POST", body });
+export async function punchAttendance(body: PunchRequestBody) {
+  const res = await request<AttendanceApiResponse>("/api/v1/payroll/attendance/punch", { method: "POST", body });
+  // Live tracking in the browser starts (or stops) on a punch — see WebLocationReporter.
+  if (typeof window !== "undefined") window.dispatchEvent(new Event("hitech:punch"));
+  return res;
 }
 export function getTodayAttendance() {
   return request<AttendanceApiResponse>("/api/v1/payroll/attendance/today");

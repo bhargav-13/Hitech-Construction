@@ -14,6 +14,7 @@ import { CircleCheck, Clock, Plus, Receipt, Wallet } from "lucide-react";
 import { useTableSort } from "@/lib/useTableSort";
 import { SortTh } from "@/components/vyapar/SortTh";
 import type { ReimbursementApi } from "@/lib/api";
+import { todayIST } from "@/lib/datetime";
 
 const STATUS_STYLE: Record<ReimbStatus, string> = {
   PENDING: "bg-amber-50 text-amber-700",
@@ -128,7 +129,7 @@ function ClaimDialog({
   onCreate: (body: { expenseType: string; expenseDate: string; requestedAmount: number }) => Promise<void>;
 }) {
   const [expenseType, setExpenseType] = useState(EXPENSE_TYPES[0]);
-  const [expenseDate, setExpenseDate] = useState(new Date().toISOString().slice(0, 10));
+  const [expenseDate, setExpenseDate] = useState(todayIST());
   const [amount, setAmount] = useState(0);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);

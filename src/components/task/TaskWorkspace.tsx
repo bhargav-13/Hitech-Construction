@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   CalendarDays,
   ChevronDown,
@@ -80,6 +81,7 @@ import {
   StatusFilterButton,
   ViewMenuButton,
 } from "./workspace/Toolbar";
+import { todayIST } from "@/lib/datetime";
 
 type View = "List" | "Kanban" | "Calendar";
 type SortKey = "title" | "dueDate" | "status" | "priority" | "createdDate";
@@ -446,7 +448,7 @@ export function TaskWorkspace({ projectId, fill = false }: { projectId?: string;
     const url = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
     const a = document.createElement("a");
     a.href = url;
-    a.download = `tasks-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.download = `tasks-${todayIST()}.csv`;
     a.click();
     URL.revokeObjectURL(url);
   }
@@ -1451,6 +1453,92 @@ function KanbanView({
     setPanning(false);
     boardRef.current?.releasePointerCapture(e.pointerId);
   }
+  /**
+   * Touch drag (KAN-64: "not able to drag the task" on phones). HTML5 drag-and-drop doesn't fire on
+   * most phone browsers or in an app's WebView, so on touch a card is picked up with a long press,
+   * follows the finger, and drops on whichever column it is let go over. A quick swipe still scrolls.
+   */
+  const [touchDrag, setTouchDrag] = useState<{ key: string; title: string; x: number; y: number } | null>(null);
+  const dropRef = useRef<(key: string, statusId: string | undefined) => void>(() => {});
+  useEffect(() => {
+    dropRef.current = (key, statusId) => {
+      const r = rows.find((x) => x.key === key);
+      const status = statusRows.find((s) => String(s.id) === statusId);
+      if (r && status && statusRowOf(r).id !== status.id && status.base !== "Awaiting Approval") onMove(r, status);
+    };
+  });
+  useEffect(() => {
+    const board = boardRef.current;
+    if (!board) return;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let start: { x: number; y: number; key: string; title: string } | null = null;
+    let dragging: string | null = null;
+    let last = { x: 0, y: 0 };
+    const cancelTimer = () => { if (timer) clearTimeout(timer); timer = null; };
+
+    const onStart = (e: TouchEvent) => {
+      const card = (e.target as HTMLElement).closest<HTMLElement>("[data-kanban-card]");
+      if (!card || e.touches.length > 1) return;
+      const t = e.touches[0];
+      start = { x: t.clientX, y: t.clientY, key: card.dataset.key ?? "", title: card.dataset.title ?? "" };
+      last = { x: t.clientX, y: t.clientY };
+      cancelTimer();
+      timer = setTimeout(() => {
+        if (!start) return;
+        dragging = start.key;
+        setDragKey(start.key);
+        setTouchDrag({ key: start.key, title: start.title, x: last.x, y: last.y });
+        navigator.vibrate?.(15);
+      }, 350);
+    };
+    const onMove = (e: TouchEvent) => {
+      const t = e.touches[0];
+      if (!t) return;
+      last = { x: t.clientX, y: t.clientY };
+      if (!dragging) {
+        // Moving before the press settles is a scroll, not a pick-up.
+        if (start && Math.hypot(t.clientX - start.x, t.clientY - start.y) > 10) { cancelTimer(); start = null; }
+        return;
+      }
+      e.preventDefault();
+      setTouchDrag((d) => (d ? { ...d, x: t.clientX, y: t.clientY } : d));
+      const r = board.getBoundingClientRect();
+      if (t.clientX < r.left + KANBAN_EDGE) board.scrollLeft -= KANBAN_STEP;
+      else if (t.clientX > r.right - KANBAN_EDGE) board.scrollLeft += KANBAN_STEP;
+      const under = document.elementFromPoint(t.clientX, t.clientY);
+      const list = under?.closest<HTMLElement>("[data-kanban-col]")?.querySelector<HTMLElement>("[data-kanban-list]");
+      if (list) {
+        const lr = list.getBoundingClientRect();
+        if (t.clientY < lr.top + KANBAN_EDGE) list.scrollTop -= KANBAN_STEP;
+        else if (t.clientY > lr.bottom - KANBAN_EDGE) list.scrollTop += KANBAN_STEP;
+      }
+    };
+    const onEnd = (e: TouchEvent) => {
+      cancelTimer();
+      start = null;
+      if (!dragging) return;
+      const key = dragging;
+      dragging = null;
+      e.preventDefault(); // no click → the card doesn't open as it is dropped
+      const t = e.changedTouches[0];
+      const col = t ? document.elementFromPoint(t.clientX, t.clientY)?.closest<HTMLElement>("[data-kanban-col]") : null;
+      dropRef.current(key, col?.dataset.statusId);
+      setDragKey(null);
+      setTouchDrag(null);
+    };
+    board.addEventListener("touchstart", onStart, { passive: true });
+    board.addEventListener("touchmove", onMove, { passive: false });
+    board.addEventListener("touchend", onEnd, { passive: false });
+    board.addEventListener("touchcancel", onEnd, { passive: false });
+    return () => {
+      cancelTimer();
+      board.removeEventListener("touchstart", onStart);
+      board.removeEventListener("touchmove", onMove);
+      board.removeEventListener("touchend", onEnd);
+      board.removeEventListener("touchcancel", onEnd);
+    };
+  }, []);
+
   function onBoardDragOver(e: React.DragEvent<HTMLDivElement>) {
     const board = boardRef.current;
     if (!board || !dragKey) return;
@@ -1490,7 +1578,8 @@ function KanbanView({
               setDragKey(null);
             }}
             data-kanban-col
-            className="flex max-h-full min-h-0 w-[270px] shrink-0 flex-col rounded-xl border border-gray-200 bg-gray-50/60 p-3"
+            data-status-id={String(status.id)}
+            className={`flex max-h-full min-h-0 w-[270px] shrink-0 flex-col rounded-xl border bg-gray-50/60 p-3 ${touchDrag ? "border-dashed border-cyan-300" : "border-gray-200"}`}
             style={{ borderTop: `3px solid ${status.color}` }}
           >
             <div className="mb-3 flex shrink-0 items-center justify-between">
@@ -1505,6 +1594,10 @@ function KanbanView({
                   <div
                     key={r.key}
                     data-kanban-card
+                    data-key={r.key}
+                    data-title={t.title}
+                    onContextMenu={(e) => { if (touchDrag || dragKey) e.preventDefault(); }}
+                    style={{ WebkitTouchCallout: "none" }}
                     draggable
                     onDragStart={() => setDragKey(r.key)}
                     onDragEnd={() => setDragKey(null)}
@@ -1536,6 +1629,16 @@ function KanbanView({
           </div>
         );
       })}
+      {touchDrag && createPortal(
+        <div
+          className="pointer-events-none fixed z-[100] w-[240px] -translate-x-1/2 -translate-y-1/2 rotate-2 rounded-lg border border-brand-accent bg-white p-3 text-sm font-medium text-gray-800 shadow-2xl"
+          style={{ left: touchDrag.x, top: touchDrag.y }}
+        >
+          {touchDrag.title}
+          <div className="mt-1 text-[10px] font-normal text-gray-400">Let go over a column to move it</div>
+        </div>,
+        document.body,
+      )}
     </div>
   );
 }
