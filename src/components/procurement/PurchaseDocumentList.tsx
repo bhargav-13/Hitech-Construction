@@ -99,7 +99,10 @@ export function PurchaseDocumentList({
   const [open, setOpen] = useState<Invoice | null>(null);
   // Vyapar's screens are gated on VYAPAR:VIEW, so the handoff link is only shown to people who
   // would get through — the whole reason these screens exist is that most buyers would not.
-  const canOpenVyapar = (useAuthStore((s) => s.user?.permissions) ?? []).includes("VYAPAR:VIEW");
+  // KAN-55: the link is its own Roles & Access switch (Procurement → Open in Vyapar), and still
+  // needs Vyapar itself — no point showing a link into a wall.
+  const perms = useAuthStore((s) => s.user?.permissions) ?? [];
+  const canOpenVyapar = perms.includes("VYAPAR:VIEW") && perms.includes("PROCUREMENT_OPEN_VYAPAR:VIEW");
 
   // `?open=<id>` opens that document once the list arrives — the comparison's "On PO" links land
   // here. Read from the URL directly so the pages using this list need no Suspense boundary, and

@@ -25,7 +25,10 @@ export default function ProcurementVendorsPage() {
   const [q, setQ] = useState("");
   const [status, setStatus] = useState<"active" | "all">("active");
   const [open, setOpen] = useState<Party | null>(null);
-  const canOpenVyapar = (useAuthStore((s) => s.user?.permissions) ?? []).includes("VYAPAR:VIEW");
+  // KAN-55: the link is its own Roles & Access switch (Procurement → Open in Vyapar), and still
+  // needs Vyapar itself — no point showing a link into a wall.
+  const perms = useAuthStore((s) => s.user?.permissions) ?? [];
+  const canOpenVyapar = perms.includes("VYAPAR:VIEW") && perms.includes("PROCUREMENT_OPEN_VYAPAR:VIEW");
 
   const visible = useMemo(() => {
     const query = q.trim().toLowerCase();

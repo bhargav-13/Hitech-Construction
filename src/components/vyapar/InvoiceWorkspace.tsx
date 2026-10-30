@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { resubmitApproval } from "@/lib/api";
+import { decideApproval, resubmitApproval } from "@/lib/api";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { VyaparEmpty } from "@/components/vyapar/VyaparShell";
 import { Drawer, DrawerField } from "@/components/Drawer";
@@ -104,6 +104,32 @@ export function InvoiceWorkspace({
   );
   const poStatus = (i: Invoice) =>
     i.cancelled ? "Cancelled" : /Onsite PO status:\s*Closed/i.test(i.description ?? "") ? "Closed" : "Open";
+  /**
+   * KAN-76: approve or reject an order straight from the list when it's waiting on you. Rejecting
+   * cancels the PO (it keeps its number and can be reopened once it's fixed) — the approval chain's
+   * usual rule — so a wrong order can't be issued.
+   */
+  async function decidePo(inv: Invoice, approve: boolean) {
+    if (!approvalType) return;
+    let note: string | undefined;
+    if (!approve) {
+      const why = prompt(`Reject ${fullInvoiceNo(inv)}? It will be cancelled. Reason (optional):`, "");
+      if (why === null) return;
+      note = why.trim() || undefined;
+    }
+    setSending(inv.id);
+    setError("");
+    try {
+      await decideApproval(approvalType, inv.id, approve ? "APPROVE" : "REJECT", note);
+      await reloadApprovals();
+      if (!approve) load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't record the decision.");
+    } finally {
+      setSending(null);
+    }
+  }
+
   async function sendForApproval(inv: Invoice) {
     if (!approvalType) return;
     setSending(inv.id);
@@ -618,7 +644,29 @@ export function InvoiceWorkspace({
                           </button>
                         </span>
                       ) : (
-                        <ApprovalBadge state={approvals[i.id]} />
+                        <span className="flex flex-wrap items-center gap-1.5">
+                          <ApprovalBadge state={approvals[i.id]} />
+                          {approvals[i.id]?.canActNow && approvals[i.id]?.status === "PENDING" && !i.cancelled && (
+                            <>
+                              <button
+                                onClick={() => void decidePo(i, true)}
+                                disabled={sending === i.id}
+                                title="Approve this order"
+                                className="rounded bg-emerald-600 px-1.5 py-0.5 text-[10px] font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
+                              >
+                                Approve
+                              </button>
+                              <button
+                                onClick={() => void decidePo(i, false)}
+                                disabled={sending === i.id}
+                                title="Reject — the order is cancelled until it's fixed and sent again"
+                                className="rounded border border-rose-200 px-1.5 py-0.5 text-[10px] font-semibold text-rose-600 hover:bg-rose-50 disabled:opacity-50"
+                              >
+                                Reject
+                              </button>
+                            </>
+                          )}
+                        </span>
                       )}
                     </td>
                   )}

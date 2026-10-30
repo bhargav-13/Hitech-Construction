@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { CheckCircle2, Loader2, Mic, MicOff, Paperclip, Plus, RotateCcw, Send, Square, Trash2, Volume2, X } from "lucide-react";
+import { CheckCircle2, Languages, Loader2, Mic, MicOff, Paperclip, Plus, RotateCcw, Send, Square, Trash2, Volume2, X } from "lucide-react";
 import { Spinner } from "@/components/Spinner";
 import { Select } from "@/components/Select";
 import { formatDateTimeIST } from "@/lib/datetime";
@@ -17,6 +17,8 @@ import {
   raiseQuery,
   replyQuery,
   setQueryStatus,
+  deleteQuery,
+  translateText,
   type HrPersonApi,
   type MessageBody,
   type QueryApi,
@@ -165,6 +167,7 @@ export function QueryDesk({ mode }: { mode: "me" | "hr" }) {
             mode={mode}
             myId={myId}
             onChanged={(q) => { setThread(q); void loadList(); }}
+            onDeleted={() => { setOpenId(null); setThread(null); void loadList(); }}
           />
         ) : (
           <div className="flex min-h-[320px] items-center justify-center rounded-xl border border-dashed border-gray-300 bg-white px-6 text-center text-sm text-gray-400">
@@ -231,12 +234,22 @@ function NewQuery({ onCancel, onRaised }: { onCancel: () => void; onRaised: (q: 
   );
 }
 
-function Thread({ q, mode, myId, onChanged }: { q: QueryApi; mode: "me" | "hr"; myId?: number; onChanged: (q: QueryApi) => void }) {
+function Thread({ q, mode, myId, onChanged, onDeleted }: { q: QueryApi; mode: "me" | "hr"; myId?: number; onChanged: (q: QueryApi) => void; onDeleted: () => void }) {
   const [error, setError] = useState("");
   const endRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     endRef.current?.scrollIntoView({ block: "end" });
   }, [q.messages?.length]);
+
+  async function remove() {
+    if (!confirm(`Delete "${q.subject}" and all its messages? This can't be undone.`)) return;
+    try {
+      await deleteQuery(q.id);
+      onDeleted();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Couldn't delete this query.");
+    }
+  }
 
   async function status(s: "OPEN" | "CLOSED") {
     try {
@@ -269,6 +282,9 @@ function Thread({ q, mode, myId, onChanged }: { q: QueryApi; mode: "me" | "hr"; 
               <CheckCircle2 size={12} /> {mode === "me" ? "Solved — close" : "Close"}
             </button>
           )}
+          <button onClick={() => void remove()} title="Delete this query" className="rounded-lg border border-rose-200 p-1 text-rose-500 hover:bg-rose-50">
+            <Trash2 size={13} />
+          </button>
         </div>
       </div>
 
@@ -284,6 +300,7 @@ function Thread({ q, mode, myId, onChanged }: { q: QueryApi; mode: "me" | "hr"; 
                 {m.body && (
                   <p lang={m.language ?? undefined} className="whitespace-pre-wrap break-words">{m.body}</p>
                 )}
+                {m.body && <Translate text={m.body} language={m.language} light={mine} />}
                 {m.hasVoice && <VoiceNote messageId={m.id} seconds={m.voiceSeconds} light={mine} />}
                 {m.hasAttachment && (
                   <button
@@ -323,6 +340,40 @@ function Thread({ q, mode, myId, onChanged }: { q: QueryApi; mode: "me" | "hr"; 
           />
         )}
       </div>
+    </div>
+  );
+}
+
+/**
+ * "Translate to English" under a Gujarati / Hindi message (KAN-57). Shown for anything written in a
+ * non-English script or marked gu/hi; the translation is fetched once and kept on screen.
+ */
+function Translate({ text, language, light }: { text: string; language: string | null; light: boolean }) {
+  const [out, setOut] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const foreign = (language && language !== "en") || /[ऀ-૿]/.test(text);
+  if (!foreign) return null;
+  if (out) return <p className={`mt-1 border-t pt-1 text-[12px] italic ${light ? "border-white/30 text-white/90" : "border-gray-100 text-gray-600"}`}>{out}</p>;
+  return (
+    <div className="mt-1">
+      <button
+        onClick={async () => {
+          setBusy(true);
+          setErr("");
+          try {
+            setOut((await translateText(text, "en")).translation);
+          } catch (e) {
+            setErr(e instanceof Error ? e.message : "Couldn't translate.");
+          } finally {
+            setBusy(false);
+          }
+        }}
+        className={`flex items-center gap-1 text-[11px] font-medium hover:underline ${light ? "text-white/90" : "text-brand-accent"}`}
+      >
+        {busy ? <Loader2 size={11} className="animate-spin" /> : <Languages size={11} />} Translate to English
+      </button>
+      {err && <p className={`text-[11px] ${light ? "text-white" : "text-rose-600"}`}>{err}</p>}
     </div>
   );
 }

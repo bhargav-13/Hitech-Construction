@@ -106,3 +106,9 @@ export const getQueryMedia = (messageId: number, which: "attachment" | "voice") 
   apiRequest<{ dataUrl: string }>(`/api/v1/payroll/queries/messages/${messageId}/${which}`);
 
 export const QUERY_CATEGORIES = ["Salary / Payslip", "Attendance", "Leave", "Reimbursement", "Loan / Advance", "Documents", "Other"];
+
+export const deleteQuery = (id: number) => apiRequest<void>(`/api/v1/payroll/queries/${id}`, { method: "DELETE" });
+
+/** AI translation of one message (en / gu / hi). */
+export const translateText = (text: string, to: QueryLanguage = "en") =>
+  apiRequest<{ translation: string; sourceLanguage: string; to: string }>("/api/v1/scan/translate", { method: "POST", body: { text, to } });
