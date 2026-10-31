@@ -6,10 +6,11 @@ const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "
 /** Render an ISO-ish date ("2026-01-27") as "27 Jan 2026". Passes through free-text dates. */
 export function tdate(value?: string | null): string {
   if (!value) return "—";
-  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(value);
-  if (!m) return value; // some cells hold free text like "29-01-2026 (11:00 AM)"
-  const [, y, mo, d] = m;
-  return `${d} ${MONTHS[Number(mo) - 1] ?? mo} ${y}`;
+  const m = /^(\d{4})-(\d{2})-(\d{2})([\s\S]*)$/.exec(value);
+  if (!m) return value; // some cells hold free text such as "Online"
+  const [, y, mo, d, rest] = m;
+  // Tech and price openings carry a time: "2025-12-04 (03:00 PM)" keeps it.
+  return `${d} ${MONTHS[Number(mo) - 1] ?? mo} ${y}${rest.trim() ? ` ${rest.trim()}` : ""}`;
 }
 
 /** Money that tolerates the seed's occasional string amounts. */
@@ -233,6 +234,10 @@ export function parseSecurityDetails(value?: string | null): ParsedSecurity {
     } else if (/^B\.?G\.?\s*Charge/i.test(p)) out.bgCharges = amountIn(p);
     else if (/^Security/i.test(p)) out.securityAmount = amountIn(p);
   }
+  // The sheet writes "Charges : n", once per instrument, and gives additional security no type of its own.
+  const charges = [...value.matchAll(/(?<![a-z])Charges?\s*:\s*([\d,.]+)/gi)].map((m) => Number(m[1].replace(/,/g, "")));
+  if (charges.length) out.bgCharges = Math.round(charges.reduce((a, b) => a + b, 0) * 100) / 100;
+  if (out.additionalSecurityAmount != null && !out.additionalSecurityType) out.additionalSecurityType = out.securityType;
   return out;
 }
 

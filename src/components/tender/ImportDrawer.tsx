@@ -38,7 +38,6 @@ export function ImportDrawer({ onClose }: { onClose: () => void }) {
   const [fileName, setFileName] = useState("");
   const [sheets, setSheets] = useState<ParsedSheet[]>([]);
   const [kinds, setKinds] = useState<Record<string, SheetKind>>({});
-  const [mode, setMode] = useState<"merge" | "replace">("merge");
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<{ added: number; updated: number; skipped: number } | null>(null);
   const [busy, setBusy] = useState(false);
@@ -89,14 +88,17 @@ export function ImportDrawer({ onClose }: { onClose: () => void }) {
     return { add, update };
   }, [allRows, existing]);
 
-  function commit() {
+  async function commit() {
     setBusy(true);
-    // Deliberately deferred a tick so the button's busy state paints before a large merge blocks.
-    setTimeout(() => {
-      setResult(importTenders(allRows, mode));
+    setError(null);
+    try {
+      setResult(await importTenders(allRows));
       setStep("done");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "The import failed, so nothing was saved.");
+    } finally {
       setBusy(false);
-    }, 0);
+    }
   }
 
   return (
@@ -117,8 +119,8 @@ export function ImportDrawer({ onClose }: { onClose: () => void }) {
             </div>
             <div className="text-base font-semibold text-gray-700">Drop the tender workbook here</div>
             <p className="mt-1 max-w-sm text-sm text-gray-400">
-              The client&apos;s own file works as-is — sheets and columns are detected automatically. Everything
-              is parsed in your browser; nothing is uploaded.
+              The client&apos;s own file works as-is — sheets and columns are detected automatically. A tender
+              on several sheets becomes one tender, at its furthest stage.
             </p>
             <button
               onClick={() => inputRef.current?.click()}
@@ -196,31 +198,17 @@ export function ImportDrawer({ onClose }: { onClose: () => void }) {
 
           <div className="rounded-lg border border-gray-200 bg-gray-50/60 p-3">
             <div className="mb-2 text-[11px] font-semibold tracking-wide text-gray-400 uppercase">On import</div>
-            <div className="flex flex-wrap items-center gap-4 text-sm">
-              <label className="flex items-center gap-1.5">
-                <input type="radio" checked={mode === "merge"} onChange={() => setMode("merge")} />
-                <span className="text-gray-700">Merge</span>
-              </label>
-              <label className="flex items-center gap-1.5">
-                <input type="radio" checked={mode === "replace"} onChange={() => setMode("replace")} />
-                <span className="text-gray-700">Replace everything</span>
-              </label>
-            </div>
-            <p className="mt-2 text-xs text-gray-500">
-              {mode === "merge" ? (
-                <>
-                  Matching on Tender ID: <strong className="text-gray-700">{diff.add} new</strong> rows added,{" "}
-                  <strong className="text-gray-700">{diff.update}</strong> existing rows updated. Stage and any loss
-                  reason already recorded are kept.
-                </>
-              ) : (
-                <>
-                  All {existing.length} current tenders are discarded and replaced with the {allRows.length} imported
-                  rows.
-                </>
-              )}
+            <p className="text-xs text-gray-500">
+              Matching on Tender ID: <strong className="text-gray-700">{diff.add} new</strong> rows,{" "}
+              <strong className="text-gray-700">{diff.update}</strong> on tenders already here. Existing tenders only
+              have their blank fields filled, and their stage stays as it is. It all saves together, or not at all.
             </p>
           </div>
+          {error && (
+            <div className="flex items-center gap-2 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-600">
+              <AlertCircle size={15} /> {error}
+            </div>
+          )}
 
           <div className="flex justify-end gap-2">
             <button
@@ -247,7 +235,7 @@ export function ImportDrawer({ onClose }: { onClose: () => void }) {
           </div>
           <div className="text-base font-semibold text-gray-700">Import complete</div>
           <p className="mt-1 text-sm text-gray-500">
-            {result.added} added · {result.updated} updated · {result.skipped} unchanged
+            {result.added} added · {result.updated} filled in · {result.skipped} unchanged
           </p>
           <button
             onClick={onClose}

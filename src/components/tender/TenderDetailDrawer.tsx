@@ -296,7 +296,7 @@ export function TenderDetailDrawer({
         <Section title="Commercials">
           <Field label="Estimated Cost">{tmoney(t.estimatedCost)}</Field>
           <Field label="Contract Value">{tmoney(t.contractValue)}</Field>
-          <Field label="Variance %">{t.variancePct == null ? "—" : `${t.variancePct}%`}</Field>
+          <Field label="Variance %">{t.variancePct == null ? "—" : `${t.variancePct.toFixed(2)}%`}</Field>
           <Field label="Fee">{tmoney(t.fee)}</Field>
           <Field label="GST">{tval(t.gst)}</Field>
           <Field label="Deposit Details">{tval(t.depositDetails)}</Field>
@@ -347,6 +347,8 @@ export function TenderDetailDrawer({
           </Field>
           <Field label="Additional Amount">{tmoney(t.additionalSecurityAmount)}</Field>
           <Field label="BG Charges">{tmoney(t.bgCharges)}</Field>
+          <Field label="Security Due">{tdate(t.securityDueDate)}</Field>
+          {t.additionalSecurityDueDate && <Field label="Additional Due">{tdate(t.additionalSecurityDueDate)}</Field>}
           <Field label="Released On">{tdate(t.securityReleasedOn)}</Field>
           {t.securityDetails && (
             <Field label="As recorded in the sheet" wide>
@@ -496,7 +498,16 @@ export function TenderDetailDrawer({
           <Field label="Stage Documents" wide>{tval(t.stageDocuments)}</Field>
           <Field label="Uploaded Documents" wide>{tval(t.uploadedDocuments)}</Field>
           <Field label="View Documents" wide>
-            {t.viewDocuments ? (
+            {t.viewDocumentsUrl ? (
+              <a
+                href={t.viewDocumentsUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1 text-brand-accent hover:underline"
+              >
+                {t.viewDocuments ?? "Open folder"} <ExternalLink size={12} />
+              </a>
+            ) : t.viewDocuments ? (
               /^https?:\/\//.test(t.viewDocuments) ? (
                 <a
                   href={t.viewDocuments}

@@ -18,6 +18,7 @@ export default function TenderDocumentsPage() {
   const documents = useTenderStore((s) => s.documents);
   // Tender documents carry no project of their own; the handoff created when a tender is won is
   // what links them to one.
+  const tenders = useTenderStore((s) => s.tenders);
   const handoffs = useTenderStore((s) => s.handoffs);
   const steps = useTenderStore((s) => s.documentSteps);
   const toggleDocument = useTenderStore((s) => s.toggleDocument);
@@ -139,7 +140,9 @@ export default function TenderDocumentsPage() {
                     onToggle={toggleDocument}
                     onAddRaBill={() => addRaBill(selected.id)}
                     projectId={
-                      handoffs.find((h) => h.tenderId === selected.tenderId)?.projectId ?? null
+                      tenders.find((t) => t.tenderId === selected.tenderId && t.projectId)?.projectId ??
+                      handoffs.find((h) => h.tenderId === selected.tenderId)?.projectId ??
+                      null
                     }
                     onAddType={addType}
                     onEdit={() => {
@@ -313,7 +316,14 @@ function DocumentDetail({
 
       {doc.viewDocuments && (
         <p className="mt-3 flex items-center gap-1.5 text-[11px] text-brand-accent">
-          <FolderOpen size={12} /> {doc.viewDocuments}
+          <FolderOpen size={12} />
+          {/^https?:\/\//.test(doc.viewDocuments) ? (
+            <a href={doc.viewDocuments} target="_blank" rel="noreferrer" className="hover:underline">
+              {doc.viewDocumentsLabel ?? "Open folder"}
+            </a>
+          ) : (
+            doc.viewDocuments
+          )}
         </p>
       )}
 

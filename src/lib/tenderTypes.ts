@@ -169,7 +169,15 @@ export interface Tender {
 
   stageDocuments?: string | null;
   uploadedDocuments?: string | null;
+  /** The label the client gave the folder. The link itself is in {@link viewDocumentsUrl}. */
   viewDocuments?: string | null;
+  viewDocumentsUrl?: string | null;
+  /** The competitive report's link, beside {@link priceBidStage} which holds its file name. */
+  priceBidUrl?: string | null;
+  /** The Variation / Tender Value / GST / TOTAL lines behind {@link contractValue}. */
+  contractBreakup?: string | null;
+  securityDueDate?: string | null;
+  additionalSecurityDueDate?: string | null;
   /** Files attached in-app (data URLs — UI-only until there is a backend to store them). */
   attachments?: TenderAttachment[];
   /** User-defined extra fields — the sheet has one-off columns per tender that no fixed schema covers. */
@@ -263,6 +271,8 @@ export interface TenderDocuments {
   raBills: DocPair[];
   progress?: string | null;
   viewDocuments?: string | null;
+  /** The Drive folder's name, when {@link viewDocuments} holds its link. */
+  viewDocumentsLabel?: string | null;
   /** Per-document-type soft/hard status — keyed by TrackerStep.key (competitiveReport, …). */
   [key: string]: unknown;
 }

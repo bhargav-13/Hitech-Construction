@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { TenderShell, TenderEmpty } from "@/components/tender/TenderShell";
 import { SortTh } from "@/components/vyapar/SortTh";
 import { ImportDialog } from "@/components/vyapar/ImportDialog";
+import { MaterialRates } from "@/components/tender/MaterialRates";
 import { materialImportConfig } from "@/lib/tenderImportConfigs";
 import { exportRowsToCsv } from "@/lib/vyaparExport";
 import { useTableSort } from "@/lib/useTableSort";
@@ -118,6 +119,8 @@ export default function TenderMaterialsPage() {
             </table>
           </div>
         )}
+
+        <MaterialRates />
       </div>
       {importing && <ImportDialog config={importConfig} onClose={() => setImporting(false)} onImported={() => setImporting(false)} />}
     </TenderShell>

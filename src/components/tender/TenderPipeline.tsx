@@ -28,6 +28,8 @@ import {
   followUpLabel,
   followUpTone,
   tdate,
+  today,
+  tparse,
   tmoney,
   tval,
 } from "@/lib/tenderHelpers";
@@ -158,6 +160,23 @@ const textCell = (value: string | number | null | undefined, width = 200) => (
   </span>
 );
 
+/** The client's folder label, opening the Drive folder when there is one. */
+const docLinkCell = (t: Tender) =>
+  t.viewDocumentsUrl ? (
+    <a
+      href={t.viewDocumentsUrl}
+      target="_blank"
+      rel="noreferrer"
+      onClick={(e) => e.stopPropagation()}
+      title={t.viewDocuments ?? undefined}
+      className="block max-w-[180px] truncate text-brand-accent hover:underline"
+    >
+      {t.viewDocuments ?? "Open folder"}
+    </a>
+  ) : (
+    textCell(t.viewDocuments, 180)
+  );
+
 /** EMD TYPE as the client's sheet has it: the instrument, plus whether it is paid/released. */
 const emdTypeCell = (t: Tender) =>
   t.emdMode ? (
@@ -203,7 +222,7 @@ const SHEET_ORDER_COLS: Col[] = [
   { key: "depositDetails", label: "Deposit Details", sort: (t) => t.depositDetails, cell: (t) => textCell(t.depositDetails, 180) },
   { key: "dlp", label: "DLP", sort: (t) => t.dlp, cell: (t) => textCell(t.dlp, 110) },
   { key: "stageDocuments", label: "Stage Documents", sort: (t) => t.stageDocuments, cell: (t) => textCell(t.stageDocuments, 180) },
-  { key: "viewDocuments", label: "View Documents", sort: (t) => t.viewDocuments, cell: (t) => textCell(t.viewDocuments, 180) },
+  { key: "viewDocuments", label: "View Documents", sort: (t) => t.viewDocuments, cell: docLinkCell },
   { key: "remarks", label: "Remarks", sort: (t) => t.remarks, cell: (t) => textCell(t.remarks, 220) },
   healthCol,
   {
@@ -232,7 +251,7 @@ const COLS: Record<PipelineVariant, Col[]> = {
     healthCol,
     { key: "estimatedCost", label: "Est. Cost", align: "right", sort: (t) => t.estimatedCost, cell: (t) => tmoney(t.estimatedCost) },
     { key: "contractValue", label: "Contract Value", align: "right", sort: (t) => t.contractValue, cell: (t) => tmoney(t.contractValue) },
-    { key: "variancePct", label: "Var %", align: "right", sort: (t) => t.variancePct, cell: (t) => (t.variancePct == null ? "—" : `${t.variancePct}%`) },
+    { key: "variancePct", label: "Var %", align: "right", sort: (t) => t.variancePct, cell: (t) => (t.variancePct == null ? "—" : `${t.variancePct.toFixed(2)}%`) },
     { key: "submissionDate", label: "Submitted", sort: (t) => t.submissionDate, cell: (t) => tdate(t.submissionDate) },
     { key: "nextFollowUp", label: "Next Follow Up", sort: (t) => t.nextFollowUp, cell: (t) => <FollowUpCell t={t} /> },
     { key: "emdState", label: "EMD", sort: (t) => t.emdState, cell: (t) => <EmdCell t={t} /> },
@@ -243,7 +262,7 @@ const COLS: Record<PipelineVariant, Col[]> = {
       cell: (t) =>
         t.status ? (
           <span className={`rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset ${STATUS_META[t.status].chip}`}>
-            {STATUS_META[t.status].label}
+            {t.statusLabel ?? STATUS_META[t.status].label}
           </span>
         ) : (
           <span className={`rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset ${STAGE_META[t.stage].chip}`}>
@@ -273,11 +292,20 @@ const HEADING: Record<PipelineVariant, { title: string; sub: string; empty: stri
   applied: { title: "Applied", sub: "Submitted bids and their outcomes. Won tenders become projects.", empty: "No applied tenders yet." },
 };
 
-/** Sorting and Research are deadline-driven; Applied is a historical record, so it sorts by date. */
+/**
+ * Sorting and Research are deadline-driven; Applied is a historical record, so it sorts by date.
+ * Latest deadline first, because most rows have lapsed and the live tenders must not end up last.
+ */
 const DEFAULT_SORT: Record<PipelineVariant, { key: string; dir: "asc" | "desc" }> = {
-  sorting: { key: "deadline", dir: "asc" },
-  research: { key: "deadline", dir: "asc" },
+  sorting: { key: "deadline", dir: "desc" },
+  research: { key: "deadline", dir: "desc" },
   applied: { key: "submissionDate", dir: "desc" },
+};
+
+/** Past its deadline with no decision recorded. A tender with no date is treated as live. */
+const isLapsed = (t: Tender) => {
+  const d = tparse(t.deadline);
+  return d != null && d < today();
 };
 
 export function TenderPipeline({ variant }: { variant: PipelineVariant }) {
@@ -308,6 +336,8 @@ export function TenderPipeline({ variant }: { variant: PipelineVariant }) {
   const [dept, setDept] = useState("ALL");
   const [cls, setCls] = useState("ALL");
   // Applied-only outcome filter — this is where Won and Lost tenders are isolated.
+  // Sorting and Research: the client hides lapsed tenders in the sheet rather than closing them.
+  const [lapsed, setLapsed] = useState<"ALL" | "LIVE" | "LAPSED">("ALL");
   const [outcome, setOutcome] = useState<"ALL" | TenderStage>(
     (params?.get("outcome") as TenderStage | null) ?? "ALL",
   );
@@ -366,6 +396,7 @@ export function TenderPipeline({ variant }: { variant: PipelineVariant }) {
     const q = search.trim().toLowerCase();
     return inScope.filter((t) => {
       if (variant === "applied" && outcome !== "ALL" && t.stage !== outcome) return false;
+      if (variant !== "applied" && lapsed !== "ALL" && isLapsed(t) !== (lapsed === "LAPSED")) return false;
       if (dept !== "ALL" && t.department !== dept) return false;
       if (cls !== "ALL" && t.classReq !== cls) return false;
       if (!q) return true;
@@ -375,14 +406,18 @@ export function TenderPipeline({ variant }: { variant: PipelineVariant }) {
         (t.tenderId ?? "").toLowerCase().includes(q)
       );
     });
-  }, [inScope, variant, outcome, dept, cls, search]);
+  }, [inScope, variant, outcome, lapsed, dept, cls, search]);
 
-  const filtersActive = source !== "ALL" || dept !== "ALL" || cls !== "ALL" || outcome !== "ALL" || search.trim() !== "";
+  const lapsedCount = useMemo(() => inScope.filter(isLapsed).length, [inScope]);
+
+  const filtersActive =
+    source !== "ALL" || dept !== "ALL" || cls !== "ALL" || outcome !== "ALL" || lapsed !== "ALL" || search.trim() !== "";
   const clearFilters = useCallback(() => {
     setSource("ALL");
     setDept("ALL");
     setCls("ALL");
     setOutcome("ALL");
+    setLapsed("ALL");
     setSearch("");
   }, []);
 
@@ -592,6 +627,26 @@ export function TenderPipeline({ variant }: { variant: PipelineVariant }) {
             </button>
           ))}
         </div>
+
+        {variant !== "applied" && (
+          <div className="flex items-center gap-1 rounded-lg border border-gray-200 bg-white p-0.5">
+            {([
+              ["ALL", `All ${inScope.length}`],
+              ["LIVE", `Live ${inScope.length - lapsedCount}`],
+              ["LAPSED", `Lapsed ${lapsedCount}`],
+            ] as const).map(([key, label]) => (
+              <button
+                key={key}
+                onClick={() => setLapsed(key)}
+                className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors duration-150 ${
+                  lapsed === key ? "bg-cyan-50 text-brand-accent" : "text-gray-500 hover:bg-gray-50"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        )}
 
         {variant === "applied" && (
           <div className="flex items-center gap-1 rounded-lg border border-gray-200 bg-white p-0.5">
@@ -1072,7 +1127,7 @@ function TenderCard({
             </span>
             {t.status && (
               <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ring-1 ring-inset ${STATUS_META[t.status].chip}`}>
-                {STATUS_META[t.status].label}
+                {t.statusLabel ?? STATUS_META[t.status].label}
               </span>
             )}
             {tone !== "none" && (

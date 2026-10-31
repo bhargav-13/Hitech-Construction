@@ -108,7 +108,9 @@ export function readWorkbook(data: ArrayBuffer): ParsedSheet[] {
 function cell(value: unknown): string | null {
   if (value === null || value === undefined) return null;
   if (value instanceof Date) {
-    return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`;
+    // SheetJS lands 10 seconds short of midnight in IST, which read as the day before.
+    const d = new Date(Math.round(value.getTime() / 60000) * 60000);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
   }
   const s = String(value).replace(/[\r\n]+/g, " ").trim();
   return s === "" || s === "-" ? null : s;
@@ -170,7 +172,7 @@ const STATUS_BY_LABEL: Record<string, { stage: TenderStage; status: TenderStatus
   "LOST": { stage: "LOST", status: "LOST" },
   "TECHNICALLY DISQUALIFIED": { stage: "LOST", status: "TECH_DISQUALIFIED" },
   "CANCELLED": { stage: "LOST", status: "CANCELLED" },
-  "RETENDERED": { stage: "APPLIED", status: "RETENDERED" },
+  "RETENDERED": { stage: "LOST", status: "RETENDERED" },
   "SUBMITTED / UNDER REVIEW": { stage: "APPLIED", status: "SUBMITTED" },
   "TECHNICAL OPENED": { stage: "APPLIED", status: "TECH_OPENED" },
   "TECHNICALLY QUALIFIED": { stage: "APPLIED", status: "TECH_QUALIFIED" },
@@ -242,7 +244,29 @@ export function toTenders(sheet: ParsedSheet, kind: SheetKind, idPrefix = "imp")
     // Same normalisation as scripts/generate-tender-seed.py.
     const emd = parseEmdType(t.emdType);
     t.emdMode = emd.mode;
-    t.emdState = emd.state ?? (t.stage === "SORTING" || t.stage === "RESEARCH" ? "PENDING" : "PAID");
+    // On an unbid tender EMD TYPE names what is acceptable, not a payment. RECEVIED/ NOT is the refund.
+    if (t.stage === "SORTING" || t.stage === "RESEARCH") t.emdState = "PENDING";
+    else if (t.receivedStatus === "RECEIVED") {
+      t.emdState = "RELEASED";
+      t.emdReleasedOn = t.dateOfReceived ?? null;
+    } else t.emdState = "PAID";
+
+    // SORTING's 2025 block keeps "fee/emd" together in the EMD cell.
+    const pair = /^([\d,.]+)\s*\/\s*([\d,.]+)/.exec(at(row, "EMD") ?? "");
+    if (pair) {
+      t.fee = Number(pair[1].replace(/,/g, ""));
+      t.emd = Number(pair[2].replace(/,/g, ""));
+    }
+    // CONTRACT VALUE is a breakup whose last line is the figure; a plain number passes through.
+    const breakup = at(row, "CONTRACT VALUE");
+    const total = /TOTAL\s*:\s*(-?[\d,.]+)/.exec(breakup ?? "");
+    if (total) {
+      t.contractValue = Number(total[1].replace(/,/g, ""));
+      t.contractBreakup = breakup;
+    }
+    // VAR.(%) is a fraction formatted as a percent; screens show percent points.
+    if (t.variancePct != null && Math.abs(t.variancePct) <= 1) t.variancePct = Math.round(t.variancePct * 1e6) / 1e4;
+
     Object.assign(t, parseSecurityDetails(t.securityDetails));
     t.durationMonths = parseDurationMonths(t.duration);
     t.validityDays = parseValidityDays(t.validity);

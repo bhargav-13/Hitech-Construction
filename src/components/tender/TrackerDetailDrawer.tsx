@@ -38,9 +38,11 @@ export function TrackerDetailDrawer({
   const done = steps.filter((s) => m[s.key] === true).length;
   const total = steps.length;
   const pending = total - done;
-  const pct = total ? Math.round((done / total) * 100) : 0;
+  // The client's rule: a work order issued means done, even with an optional step left open.
+  const complete = m.workOrder === true;
+  const pct = complete ? 100 : total ? Math.round((done / total) * 100) : 0;
   // Current stage = the first step still pending; if all are done there is no current stage.
-  const currentIndex = steps.findIndex((s) => m[s.key] !== true);
+  const currentIndex = complete ? -1 : steps.findIndex((s) => m[s.key] !== true);
   const current = currentIndex >= 0 ? steps[currentIndex] : null;
 
   function del() {

@@ -86,15 +86,20 @@ export async function listTenders(
   params: { page?: number; size?: number; stage?: string; source?: string; q?: string; projectId?: number } = {}
 ): Promise<Tender[]> {
   const qs = new URLSearchParams();
-  qs.set("page", String(params.page ?? 0));
   qs.set("size", String(params.size ?? 500));
   if (params.stage) qs.set("stage", params.stage);
   if (params.source) qs.set("source", params.source);
   if (params.q) qs.set("q", params.q);
   // Set only when scoping to a project — omitting it means "every tender", as before.
   if (params.projectId !== undefined) qs.set("projectId", String(params.projectId));
-  const page = await apiRequest<TenderPage>(`/api/v1/tenders?${qs.toString()}`);
-  return page.content.map(tenderFromApi);
+  // Every page: a list that stops at the first one silently loses the oldest tenders.
+  const rows: Tender[] = [];
+  for (let n = params.page ?? 0; ; n++) {
+    qs.set("page", String(n));
+    const page = await apiRequest<TenderPage>(`/api/v1/tenders?${qs.toString()}`);
+    rows.push(...page.content.map(tenderFromApi));
+    if (params.page !== undefined || n + 1 >= page.totalPages) return rows;
+  }
 }
 
 /** The tender(s) a project was handed off from — the Project workspace's Tender tab. */
@@ -104,9 +109,43 @@ export async function listTendersForProject(projectId: number): Promise<Tender[]
 }
 
 export async function createTenderApi(t: Partial<Tender>): Promise<Tender> {
-  const dto = await apiRequest<TenderApiResponse>(`/api/v1/tenders`, { method: "POST", body: tenderToApi(t) });
+  // Creating is the one write that may name a stage: dropping it landed Applied rows in Sorting.
+  const dto = await apiRequest<TenderApiResponse>(`/api/v1/tenders`, {
+    method: "POST",
+    body: { ...tenderToApi(t), stage: t.stage },
+  });
   return tenderFromApi(dto);
 }
+
+export interface TenderImportResult {
+  saved: boolean;
+  tendersAdded: number;
+  tendersFilled: number;
+  tendersUnchanged: number;
+  errors: { section: string; row: string; field: string; message: string }[];
+}
+
+/** One all-or-nothing load. Same tender ID twice becomes one tender; existing tenders only gain blanks. */
+export function importTendersApi(rows: Tender[]): Promise<TenderImportResult> {
+  return apiRequest<TenderImportResult>(`/api/v1/tenders/import`, {
+    method: "POST",
+    body: { tenders: rows.map((t) => ({ ...tenderToApi(t), stage: t.stage })) },
+  });
+}
+
+export interface MaterialRate {
+  id: number;
+  section: "DI_PIPE" | "SLUICE_VALVE" | "AIR_VALVE";
+  party: string;
+  make: string | null;
+  contact: string | null;
+  unit: string | null;
+  qty: number | null;
+  ratesJson: string;
+  sortOrder: number;
+}
+
+export const listMaterialRatesApi = () => apiRequest<MaterialRate[]>(`/api/v1/tenders/material-rates`);
 
 export async function updateTenderApi(id: string, patch: Partial<Tender>): Promise<Tender> {
   const dto = await apiRequest<TenderApiResponse>(`/api/v1/tenders/${numId(id)}`, { method: "PUT", body: tenderToApi(patch) });

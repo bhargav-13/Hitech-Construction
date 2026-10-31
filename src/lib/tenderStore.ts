@@ -19,6 +19,7 @@ import { MILESTONE_STEPS, DOCUMENT_STEPS, STAGE_META } from "./tenderTypes";
 import { taddMonths, tiso } from "./tenderHelpers";
 import { TENDER_SEED, MATERIAL_SEED, MILESTONE_SEED, DOCUMENT_SEED, HARDCOPY_SEED } from "./tenderSeed";
 import {
+  importTendersApi,
   listTenders,
   createTenderApi,
   updateTenderApi,
@@ -137,7 +138,7 @@ interface TenderState {
   updateTender: (id: string, patch: Partial<Tender>) => void;
   removeTender: (id: string) => void;
   /** Merge imported rows, matching on tenderId. Existing rows are patched, new ones appended. */
-  importTenders: (rows: Tender[], mode: "merge" | "replace") => ImportResult;
+  importTenders: (rows: Tender[]) => Promise<ImportResult>;
   /** Toggle a milestone step for a tender's tracker row. */
   toggleMilestone: (id: string, key: string) => void;
   /** Toggle a document's soft/hard availability. */
@@ -361,7 +362,7 @@ export const useTenderStore = create<TenderState>()(
         };
       },
 
-      linkProject: (id, projectId, patch) =>
+      linkProject: (id, projectId, patch) => {
         set((s) => {
           const t = s.tenders.find((x) => x.id === id);
           if (!t) return {};
@@ -372,7 +373,10 @@ export const useTenderStore = create<TenderState>()(
             tenders: s.tenders.map((x) => (x.id === id ? { ...x, projectId } : x)),
             handoffs: [handoff, ...s.handoffs.filter((h) => h.tenderRef !== id)],
           };
-        }),
+        });
+        // The link is the tender's own record: held only in the browser it was gone on reload.
+        persistTender(get, id);
+      },
 
       addTender: (t) => {
         set((s) => ({ tenders: [t, ...s.tenders] }));
@@ -401,34 +405,17 @@ export const useTenderStore = create<TenderState>()(
         if (get().backend) deleteTenderApi(id).catch(warn("Tender delete failed to sync"));
       },
 
-      importTenders: (rows, mode) => {
-        const result: ImportResult = { added: 0, updated: 0, skipped: 0 };
-        if (mode === "replace") {
-          set({ tenders: rows, lastUndo: null });
-          result.added = rows.length;
-          return result;
+      importTenders: async (rows) => {
+        // Rows held only in the browser looked imported and were gone on the next reload.
+        if (!get().backend) throw new Error("The server can't be reached, so nothing was imported.");
+        const r = await importTendersApi(rows);
+        if (r.errors.length) {
+          const e = r.errors[0];
+          throw new Error(`${r.errors.length} rows need fixing, so nothing was saved. First: ${e.row}: ${e.message}`);
         }
-        const current = get().tenders;
-        const byTenderId = new Map(current.filter((t) => t.tenderId).map((t) => [t.tenderId, t]));
-        const next = [...current];
-        for (const row of rows) {
-          const existing = row.tenderId ? byTenderId.get(row.tenderId) : undefined;
-          if (existing) {
-            const i = next.findIndex((t) => t.id === existing.id);
-            // Keep our own id, stage and any outcome intelligence the sheet does not carry.
-            const merged = { ...next[i], ...row, id: next[i].id, stage: next[i].stage };
-            if (JSON.stringify(merged) === JSON.stringify(next[i])) result.skipped += 1;
-            else {
-              next[i] = merged;
-              result.updated += 1;
-            }
-          } else {
-            next.unshift(row);
-            result.added += 1;
-          }
-        }
-        set({ tenders: next, lastUndo: null });
-        return result;
+        await get().hydrateFromBackend();
+        set({ lastUndo: null });
+        return { added: r.tendersAdded, updated: r.tendersFilled, skipped: r.tendersUnchanged };
       },
 
       toggleMilestone: (id, key) => {

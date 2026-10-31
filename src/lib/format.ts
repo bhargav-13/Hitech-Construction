@@ -15,7 +15,7 @@
  * from render paths, formatters and export helpers alike; `useVyaparSettings` pushes the real
  * value in once, at startup.
  */
-let amountDecimals = 3;
+let amountDecimals = 2;
 let quantityDecimals = 3;
 
 export function setAmountDecimals(places: number): void {

@@ -167,10 +167,11 @@ function MilestoneCard({
   const done = steps.filter((s) => m[s.key] === true).length;
   const total = steps.length;
   const pending = total - done;
-  const pct = total ? Math.round((done / total) * 100) : 0;
-  const complete = total > 0 && done === total;
+  // The client's rule: a work order issued means done, even with an optional step left open.
+  const complete = (total > 0 && done === total) || m.workOrder === true;
+  const pct = complete ? 100 : total ? Math.round((done / total) * 100) : 0;
   // Current stage = the first step still pending; highlighted so the eye lands on what's next.
-  const currentIndex = steps.findIndex((s) => m[s.key] !== true);
+  const currentIndex = complete ? -1 : steps.findIndex((s) => m[s.key] !== true);
   const current = currentIndex >= 0 ? steps[currentIndex] : null;
 
   return (
