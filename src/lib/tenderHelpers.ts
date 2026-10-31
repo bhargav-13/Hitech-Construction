@@ -18,6 +18,16 @@ export function tmoney(value?: number | null): string {
   return value == null ? "—" : inr(value);
 }
 
+/**
+ * The client's CONTRACT VALUE formula: the bid is the estimate moved by the variance, plus 18% GST.
+ * Nothing to show without an estimate and a non-zero variance, as in their sheet.
+ */
+export function contractCalc(estimated?: number | null, variancePct?: number | null) {
+  if (!estimated || !variancePct) return null;
+  const tenderValue = estimated * (1 + variancePct / 100);
+  return { variation: (estimated * variancePct) / 100, tenderValue, gst: tenderValue * 0.18, total: tenderValue * 1.18 };
+}
+
 /** Plain text with an em-dash fallback. */
 export function tval(value?: string | number | null): string {
   if (value == null || value === "") return "—";

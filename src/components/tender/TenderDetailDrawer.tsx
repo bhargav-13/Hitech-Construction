@@ -3,6 +3,7 @@
 import { useRef, useState } from "react";
 import Link from "next/link";
 import { Drawer } from "@/components/Drawer";
+import { inrNumber } from "@/lib/format";
 import type { Tender, TenderAttachment, TenderStage, TenderStatus } from "@/lib/tenderTypes";
 import {
   STAGE_META,
@@ -30,6 +31,7 @@ import {
   followUpTone,
   tdate,
   tiso,
+  contractCalc,
   tmoney,
   tval,
 } from "@/lib/tenderHelpers";
@@ -295,7 +297,7 @@ export function TenderDetailDrawer({
 
         <Section title="Commercials">
           <Field label="Estimated Cost">{tmoney(t.estimatedCost)}</Field>
-          <Field label="Contract Value">{t.contractBreakup ? <ContractBreakup text={t.contractBreakup} /> : tmoney(t.contractValue)}</Field>
+          <Field label="Contract Value"><ContractBreakup t={t} /></Field>
           <Field label="Variance %">{t.variancePct == null ? "—" : `${t.variancePct.toFixed(2)}%`}</Field>
           <Field label="Fee">{tmoney(t.fee)}</Field>
           <Field label="GST">{tval(t.gst)}</Field>
@@ -587,12 +589,29 @@ function Field({ label, children, wide }: { label: string; children: React.React
   );
 }
 
-/** The sheet's Variation / Tender Value / GST / TOTAL lines, with the total picked out. */
-function ContractBreakup({ text }: { text: string }) {
-  const lines = text.split(/\n+/).map((l) => /^(.+?)\s*:\s*(.+)$/.exec(l.trim())).filter((m) => m != null);
+/**
+ * Variation / Tender Value / GST / TOTAL, with the total picked out: the sheet's own text for a
+ * migrated tender, otherwise worked out with the client's formula. Neither gives the plain figure.
+ */
+function ContractBreakup({ t }: { t: Tender }) {
+  const calc = contractCalc(t.estimatedCost, t.variancePct);
+  const lines: [string, string][] = t.contractBreakup
+    ? t.contractBreakup.split(/\n+/).flatMap((l) => {
+        const m = /^(.+?)\s*:\s*(.+)$/.exec(l.trim());
+        return m ? [[m[1], m[2]] as [string, string]] : [];
+      })
+    : calc
+      ? [
+          ["Variation", inrNumber(calc.variation)],
+          ["Tender Value", inrNumber(calc.tenderValue)],
+          ["GST(18%)", inrNumber(calc.gst)],
+          ["TOTAL", inrNumber(calc.total)],
+        ]
+      : [];
+  if (lines.length === 0) return <>{tmoney(t.contractValue)}</>;
   return (
     <div className="inline-grid grid-cols-[auto_auto] gap-x-3">
-      {lines.map(([, label, value]) => {
+      {lines.map(([label, value]) => {
         const total = /^total$/i.test(label);
         return (
           <div key={label} className={`col-span-2 grid grid-cols-subgrid ${total ? "font-semibold text-gray-900" : ""}`}>

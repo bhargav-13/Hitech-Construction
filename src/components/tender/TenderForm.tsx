@@ -25,7 +25,7 @@ import {
   type TenderStatus,
 } from "@/lib/tenderTypes";
 import type { TenderCustomField } from "@/lib/tenderTypes";
-import { parseDurationMonths, parseValidityDays, parseLooseDate } from "@/lib/tenderHelpers";
+import { contractCalc, parseDurationMonths, parseValidityDays, parseLooseDate } from "@/lib/tenderHelpers";
 import { transitionsFor } from "@/lib/tenderStateMachine";
 import { ChevronDown, ChevronRight, Lock, Plus, Trash2 } from "lucide-react";
 
@@ -199,6 +199,14 @@ export function TenderForm({
 
   const set = (patch: Partial<Tender>) => setF((prev) => ({ ...prev, ...patch }));
   const num = (v: string): number | null => (v === "" ? null : Number(v));
+  // The client's formula: estimate and variance decide the contract value, as in their sheet. The
+  // saved breakup text is cleared because it no longer describes these figures.
+  const setBid = (patch: Pick<Partial<Tender>, "estimatedCost" | "variancePct">) =>
+    setF((prev) => {
+      const next = { ...prev, ...patch };
+      const calc = contractCalc(next.estimatedCost, next.variancePct);
+      return calc ? { ...next, contractValue: Math.round(calc.total * 100) / 100, contractBreakup: "" } : next;
+    });
 
   // --- User-defined custom fields (add/remove freely) ---
   const customFields = f.customFields ?? [];
@@ -409,7 +417,7 @@ export function TenderForm({
             <textarea className="input min-h-[60px]" value={f.nameOfWork ?? ""} onChange={(e) => set({ nameOfWork: e.target.value })} placeholder="Scope / title of the work" />
           </DrawerField>
           <DrawerField label="Estimated Cost (₹)">
-            <input type="number" className="input" value={f.estimatedCost ?? ""} onChange={(e) => set({ estimatedCost: num(e.target.value) })} />
+            <input type="number" className="input" value={f.estimatedCost ?? ""} onChange={(e) => setBid({ estimatedCost: num(e.target.value) })} />
           </DrawerField>
           <DrawerField label="Deadline">
             <DatePicker value={f.deadline ?? ""} onChange={(v) => set({ deadline: v })} />
@@ -594,7 +602,7 @@ export function TenderForm({
                 <input type="number" className="input" value={f.contractValue ?? ""} onChange={(e) => set({ contractValue: num(e.target.value) })} />
               </DrawerField>
               <DrawerField label="Variance %">
-                <input type="number" className="input" value={f.variancePct ?? ""} onChange={(e) => set({ variancePct: num(e.target.value) })} />
+                <input type="number" className="input" value={f.variancePct ?? ""} onChange={(e) => setBid({ variancePct: num(e.target.value) })} />
               </DrawerField>
               <DrawerField label="Submission Date">
                 <DatePicker value={f.submissionDate ?? ""} onChange={(v) => set({ submissionDate: v })} />
