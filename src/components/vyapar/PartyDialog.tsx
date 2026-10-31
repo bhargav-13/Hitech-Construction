@@ -149,14 +149,17 @@ export function PartyDialog({
       if (d.found && addr && !billingAddress.trim()) { setBillingAddress(addr); filled.push("billing address"); }
       const cancelled = d.status && !/active/i.test(d.status);
       const who = d.found ? `${d.legalName}${d.tradeName && d.tradeName !== d.legalName ? ` (${d.tradeName})` : ""}` : null;
+      // Same GSTIN already saved as another party in this company — say so before a duplicate is made.
+      const duplicate = d.existingPartyId != null && d.existingPartyId !== existing?.id ? d.existingPartyName : null;
       setGstLookup({
         busy: false,
-        tone: cancelled || !d.found ? "warn" : "ok",
+        tone: cancelled || !d.found || duplicate ? "warn" : "ok",
         msg: [
+          duplicate ? `⚠ This GSTIN is already saved as party "${duplicate}" — open that party instead of adding a new one.` : null,
           who ? `Found: ${who}${d.constitution ? ` · ${d.constitution}` : ""}.` : null,
           cancelled ? `GST status: ${d.status} — check before billing.` : null,
           filled.length ? `Filled ${filled.join(", ")}.` : "Nothing blank to fill.",
-          d.found ? "From public GST listings — check it before saving." : d.note ?? null,
+          d.note ?? (d.found ? "From public GST listings — check it before saving." : null),
         ].filter(Boolean).join(" "),
       });
     } catch (err) {

@@ -198,6 +198,9 @@ export interface GstinDetails {
   registrationType: string | null;
   sources: string[];
   note?: string;
+  /** A party in this company already saved with this GSTIN. */
+  existingPartyId?: number | null;
+  existingPartyName?: string | null;
 }
 
 export function lookupGstin(gstin: string): Promise<GstinDetails> {
