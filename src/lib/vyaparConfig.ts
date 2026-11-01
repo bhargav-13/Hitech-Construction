@@ -85,12 +85,31 @@ export function docFeature(type: string): string {
     case "PAYMENT_IN":
     case "PAYMENT_OUT":
     case "PARTY_TRANSFER":
-    case "PAYMENT_REQUEST":
       return "VYAPAR_PAYMENT";
+    case "PAYMENT_REQUEST":
+      return "VYAPAR_PAYMENT_REQUEST";
     default:
       return "VYAPAR_SALE_INVOICE";
   }
 }
+
+/**
+ * Vyapar-17 (KAN-31): who a bill or expense is really paid to. Government dues (GST, TDS, royalty,
+ * labour cess, local-body fees) are kept apart from supplier bills so they can be filtered, totalled
+ * and seen on the printed bill. Not the same thing as Payment Type, which is *how* it was paid
+ * (cash / which bank).
+ */
+export const PAYMENT_CATEGORIES = [
+  "Supplier / Party",
+  "Government - GST",
+  "Government - TDS",
+  "Government - Royalty / Mining",
+  "Government - Labour Cess / BOCW",
+  "Government - Municipal / Local Body",
+  "Government - Other",
+] as const;
+export const DEFAULT_PAYMENT_CATEGORY = PAYMENT_CATEGORIES[0];
+export const isGovernmentCategory = (c: string | null | undefined) => !!c && c.startsWith("Government");
 
 export const docBySlug = (slug: string) => DOC_CONFIGS.find((d) => d.slug === slug);
 export const docByType = (type: VyaparDocType) => DOC_CONFIGS.find((d) => d.type === type)!;
@@ -131,7 +150,7 @@ export const VYAPAR_NAV: NavNode[] = [
     children: [
       { label: "Purchase Bills", href: "/vyapar/purchase", feature: "VYAPAR_PURCHASE_BILL" },
       { label: "Payment-Out", href: "/vyapar/payment-out", feature: "VYAPAR_PAYMENT" },
-      { label: "Payment Request", href: "/vyapar/payment-request", feature: "VYAPAR_PAYMENT" },
+      { label: "Payment Request", href: "/vyapar/payment-request", feature: "VYAPAR_PAYMENT_REQUEST" },
       { label: "Expenses", href: "/vyapar/expenses", feature: "VYAPAR_EXPENSE" },
       { label: "Purchase Order", href: "/vyapar/purchase-order", feature: "VYAPAR_PURCHASE_ORDER" },
       { label: "Purchase Return / Dr. Note", href: "/vyapar/purchase-return", feature: "VYAPAR_PURCHASE_RETURN" },

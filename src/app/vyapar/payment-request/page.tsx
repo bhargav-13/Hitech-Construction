@@ -22,9 +22,14 @@ import { inr, bookDate } from "@/lib/format";
 import { todayIST, formatDateTimeIST } from "@/lib/datetime";
 
 /**
- * Vyapar → Payment Request (KAN-68). A site asks for money to pay a party; it is approved (on the
- * Payment Request chain from Settings → Multi Level Approval, or by anyone with Payments → Approve
- * when no chain is published); then Pay books an ordinary Payment-Out for the party.
+ * Vyapar → Payment Request (KAN-68).
+ *
+ * Payables tab: every party we owe, from the same balance the Parties screen shows (bills + credit
+ * expenses − payments-out − returns), and how much of it is already asked for. The accountant opens a
+ * party, ticks the bills to clear (or none — on account) and proposes how much to pay now. The
+ * request climbs the Payment Request chain (Settings → Multi Level Approval — e.g. Accountant →
+ * Super Admin, set per office/site); each approver may change the amount. Pay then books an ordinary
+ * Payment-Out linked to the ticked bills.
  */
 
 type Status = "PENDING" | "APPROVED" | "REJECTED" | "PAID" | "CANCELLED";
@@ -48,6 +53,33 @@ interface PaymentRequestApi {
   decisionNote: string | null;
   paymentId: number | null;
   approval: ApprovalState | null;
+  /** What the requester first asked for — `amount` is where it stands after approvers. */
+  proposedAmount: number | null;
+  /** The party's payable when the request was raised. */
+  dueAmount: number | null;
+  invoiceIds: number[];
+}
+
+interface Payable {
+  partyId: number;
+  partyName: string;
+  partyGroup: string | null;
+  phone: string | null;
+  due: number;
+  requested: number;
+  approved: number;
+  free: number;
+  openRequests: number;
+}
+
+interface OpenBill {
+  id: number;
+  docType: string;
+  type: string;
+  number: string;
+  date: string | null;
+  total: number;
+  balance: number;
 }
 
 const BASE = "/api/v1/vyapar/payment-requests";
@@ -79,7 +111,8 @@ function PaymentRequests() {
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState<"ALL" | Status>("ALL");
-  const [creating, setCreating] = useState(false);
+  const [tab, setTab] = useState<"PAYABLES" | "REQUESTS">(can("VYAPAR_PAYMENT_REQUEST:CREATE") ? "PAYABLES" : "REQUESTS");
+  const [creating, setCreating] = useState<{ partyId?: number } | null>(null);
   const [paying, setPaying] = useState<PaymentRequestApi | null>(null);
   const [deciding, setDeciding] = useState<{ row: PaymentRequestApi; approve: boolean } | null>(null);
   const [highlight, setHighlight] = useState<number | null>(null);
@@ -102,11 +135,14 @@ function PaymentRequests() {
   // ?new=1 (Add More, Alt-key shortcut) opens the form; ?open=<id> (approvals inbox) highlights a row.
   useEffect(() => {
     if (params?.get("new")) {
-      setCreating(true);
+      setCreating({});
       router.replace(pathname, { scroll: false });
     }
     const open = Number(params?.get("open"));
-    if (open) setHighlight(open);
+    if (open) {
+      setHighlight(open);
+      setTab("REQUESTS");
+    }
   }, [params, router, pathname]);
 
   const projectName = (id: number | null) => projects.find((p) => p.id === String(id))?.name ?? "—";
@@ -127,7 +163,7 @@ function PaymentRequests() {
   /** On a chain: whoever the rung waits on. No chain: Payments → Approve, not your own request. */
   const canDecide = (r: PaymentRequestApi) =>
     r.status === "PENDING" &&
-    (r.approval && r.approval.status === "PENDING" ? r.approval.canActNow : can("VYAPAR_PAYMENT:APPROVE") && (r.requestedBy !== myId || isSuperAdmin));
+    (r.approval && r.approval.status === "PENDING" ? r.approval.canActNow : can("VYAPAR_PAYMENT_REQUEST:APPROVE") && (r.requestedBy !== myId || isSuperAdmin));
 
   async function withdraw(r: PaymentRequestApi) {
     if (!confirm(`Withdraw ${r.requestNo}?`)) return;
@@ -144,15 +180,37 @@ function PaymentRequests() {
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <h2 className="text-base font-semibold text-gray-800">Payment Requests</h2>
-          <p className="mt-0.5 text-sm text-gray-500">Ask for money to pay a party. Once approved, Pay records it as a Payment-Out.</p>
+          <p className="mt-0.5 text-sm text-gray-500">See what we owe each party, propose how much to pay now, get it approved, then pay.</p>
         </div>
-        {can("VYAPAR_PAYMENT:CREATE") && (
-          <button onClick={() => setCreating(true)} className="flex items-center gap-1.5 rounded-lg bg-brand-accent px-4 py-2 text-sm font-semibold text-white hover:opacity-90">
+        {can("VYAPAR_PAYMENT_REQUEST:CREATE") && (
+          <button onClick={() => setCreating({})} className="flex items-center gap-1.5 rounded-lg bg-brand-accent px-4 py-2 text-sm font-semibold text-white hover:opacity-90">
             <Plus size={15} /> Add Payment Request
           </button>
         )}
       </div>
 
+      <div className="flex gap-1 border-b border-gray-200">
+        {(["PAYABLES", "REQUESTS"] as const).map((t) => (
+          <button
+            key={t}
+            onClick={() => setTab(t)}
+            className={`-mb-px border-b-2 px-4 py-2 text-sm font-medium ${tab === t ? "border-brand-accent text-brand-accent" : "border-transparent text-gray-500 hover:text-gray-700"}`}
+          >
+            {t === "PAYABLES" ? "Payables" : `Requests${rows ? ` (${rows.filter((r) => r.status === "PENDING" || r.status === "APPROVED").length} open)` : ""}`}
+          </button>
+        ))}
+      </div>
+
+      {tab === "PAYABLES" ? (
+        <Payables
+          projectId={projectScope ?? null}
+          canRequest={can("VYAPAR_PAYMENT_REQUEST:CREATE")}
+          reloadKey={rows}
+          onRequest={(partyId) => setCreating({ partyId })}
+          onShowRequests={(partyName) => { setSearch(partyName); setStatus("ALL"); setTab("REQUESTS"); }}
+        />
+      ) : (
+      <>
       <div className="grid gap-3 sm:grid-cols-3">
         <Tile label="Waiting for approval" value={inr(totals.pending)} tone="text-amber-600" />
         <Tile label="Approved, to pay" value={inr(totals.approved)} tone="text-sky-700" />
@@ -208,7 +266,14 @@ function PaymentRequests() {
                   <td className="px-3 py-2.5 text-gray-600">{projectName(r.projectId)}</td>
                   <td className="px-3 py-2.5 text-gray-600">{r.against?.replace(/^Against /, "") ?? "—"}</td>
                   <td className="px-3 py-2.5 whitespace-nowrap text-gray-600">{r.neededBy ? bookDate(r.neededBy) : "—"}</td>
-                  <td className="px-3 py-2.5 text-right font-semibold text-gray-900">{inr(Number(r.amount))}</td>
+                  <td className="px-3 py-2.5 text-right">
+                    <div className="font-semibold text-gray-900">{inr(Number(r.amount))}</div>
+                    {r.proposedAmount != null && Number(r.proposedAmount) !== Number(r.amount) && (
+                      <div className="text-[11px] text-amber-600" title="An approver changed the amount">proposed <span className="line-through">{inr(Number(r.proposedAmount))}</span></div>
+                    )}
+                    {r.dueAmount != null && Number(r.dueAmount) > 0 && <div className="text-[11px] text-gray-400">of {inr(Number(r.dueAmount))} due</div>}
+                    {r.invoiceIds.length > 0 && <div className="text-[11px] text-gray-400">{r.invoiceIds.length} bill{r.invoiceIds.length > 1 ? "s" : ""}</div>}
+                  </td>
                   <td className="px-3 py-2.5">
                     <div className="flex flex-col items-start gap-1">
                       <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ring-1 ring-inset ${STATUS_CLS[r.status]}`}>{STATUS_LABEL[r.status]}</span>
@@ -243,13 +308,16 @@ function PaymentRequests() {
           </table>
         </div>
       )}
+      </>
+      )}
 
       {creating && (
         <NewRequest
           defaultProjectId={projectScope ?? null}
+          defaultPartyId={creating.partyId ?? null}
           projects={projects}
-          onClose={() => setCreating(false)}
-          onSaved={() => { setCreating(false); void load(); }}
+          onClose={() => setCreating(null)}
+          onSaved={() => { setCreating(null); setTab("REQUESTS"); void load(); }}
         />
       )}
       {paying && <PayDialog row={paying} onClose={() => setPaying(null)} onPaid={() => { setPaying(null); void load(); }} />}
@@ -274,21 +342,127 @@ function Tile({ label, value, tone }: { label: string; value: string; tone: stri
   );
 }
 
+/** Everyone we owe, biggest first, with what is already asked for. */
+function Payables({
+  projectId,
+  canRequest,
+  reloadKey,
+  onRequest,
+  onShowRequests,
+}: {
+  projectId: number | null;
+  canRequest: boolean;
+  /** Changes whenever the request list reloads, so the requested columns follow. */
+  reloadKey: unknown;
+  onRequest: (partyId: number) => void;
+  onShowRequests: (partyName: string) => void;
+}) {
+  const [rows, setRows] = useState<Payable[] | null>(null);
+  const [error, setError] = useState("");
+  const [search, setSearch] = useState("");
+  const [onlyFree, setOnlyFree] = useState(false);
+  useEffect(() => {
+    apiRequest<Payable[]>(`${BASE}/payables${projectId ? `?projectId=${projectId}` : ""}`)
+      .then((r) => { setRows(r); setError(""); })
+      .catch((e) => { setError(e instanceof Error ? e.message : "Couldn't load payables."); setRows([]); });
+  }, [projectId, reloadKey]);
+  const shown = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return (rows ?? []).filter((r) => (!onlyFree || r.free > 0) && (!q || [r.partyName, r.partyGroup, r.phone].some((f) => f?.toLowerCase().includes(q))));
+  }, [rows, search, onlyFree]);
+  const sum = (k: "due" | "requested" | "approved" | "free") => shown.reduce((a, r) => a + Number(r[k]), 0);
+
+  return (
+    <div className="space-y-3">
+      <div className="grid gap-3 sm:grid-cols-4">
+        <Tile label="We owe (total due)" value={inr(sum("due"))} tone="text-rose-600" />
+        <Tile label="Asked for, waiting" value={inr(sum("requested"))} tone="text-amber-600" />
+        <Tile label="Approved, to pay" value={inr(sum("approved"))} tone="text-sky-700" />
+        <Tile label="Not yet requested" value={inr(sum("free"))} tone="text-gray-800" />
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="flex min-w-[220px] flex-1 items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 focus-within:border-cyan-500">
+          <Search size={15} className="text-gray-400" />
+          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search party, group, phone…" className="w-full bg-transparent text-sm outline-none" />
+        </div>
+        <label className="flex items-center gap-2 text-sm text-gray-600">
+          <input type="checkbox" checked={onlyFree} onChange={(e) => setOnlyFree(e.target.checked)} className="accent-cyan-600" />
+          Only not yet requested
+        </label>
+      </div>
+      {error && <div className="rounded-lg bg-rose-50 px-4 py-2 text-sm text-rose-600">{error}</div>}
+      {rows == null ? (
+        <div className="flex min-h-[200px] items-center justify-center gap-2 text-sm text-gray-400"><Spinner size={16} className="text-brand-accent" /> Loading…</div>
+      ) : shown.length === 0 ? (
+        <VyaparEmpty icon={HandCoins} title={rows.length ? "Nothing matches" : "Nothing owed"} hint="Parties with unpaid purchase bills or credit expenses show here." />
+      ) : (
+        <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white">
+          <table className="w-full min-w-[760px] text-sm">
+            <thead>
+              <tr className="border-b border-gray-100 bg-gray-50 text-left text-gray-500">
+                <th className="px-3 py-2 font-medium">Party</th>
+                <th className="px-3 py-2 text-right font-medium">Due</th>
+                <th className="px-3 py-2 text-right font-medium">Requested</th>
+                <th className="px-3 py-2 text-right font-medium">Approved</th>
+                <th className="px-3 py-2 text-right font-medium">Not requested</th>
+                <th className="px-3 py-2 font-medium">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {shown.map((r) => (
+                <tr key={r.partyId} className="border-b border-gray-50 last:border-b-0 even:bg-gray-50/40">
+                  <td className="px-3 py-2.5">
+                    <Link href={`/vyapar/parties?open=${r.partyId}`} className="font-medium text-gray-800 hover:text-brand-accent hover:underline">{r.partyName}</Link>
+                    {(r.partyGroup || r.phone) && <div className="text-[11px] text-gray-400">{[r.partyGroup, r.phone].filter(Boolean).join(" · ")}</div>}
+                  </td>
+                  <td className="px-3 py-2.5 text-right font-semibold text-rose-600 tabular-nums">{inr(Number(r.due))}</td>
+                  <td className="px-3 py-2.5 text-right text-amber-600 tabular-nums">{Number(r.requested) ? inr(Number(r.requested)) : "—"}</td>
+                  <td className="px-3 py-2.5 text-right text-sky-700 tabular-nums">{Number(r.approved) ? inr(Number(r.approved)) : "—"}</td>
+                  <td className="px-3 py-2.5 text-right font-medium text-gray-800 tabular-nums">{inr(Number(r.free))}</td>
+                  <td className="px-3 py-2.5">
+                    <div className="flex flex-wrap items-center gap-2">
+                      {canRequest && (
+                        <button onClick={() => onRequest(r.partyId)} className="flex items-center gap-1 rounded-md bg-brand-accent px-2 py-1 text-xs font-medium text-white hover:opacity-90">
+                          <Plus size={12} /> Propose payment
+                        </button>
+                      )}
+                      {r.openRequests > 0 && (
+                        <button onClick={() => onShowRequests(r.partyName)} className="text-xs text-brand-accent hover:underline">
+                          {r.openRequests} open request{r.openRequests > 1 ? "s" : ""}
+                        </button>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function NewRequest({
   defaultProjectId,
+  defaultPartyId,
   projects,
   onClose,
   onSaved,
 }: {
   defaultProjectId: number | null;
+  defaultPartyId: number | null;
   projects: { id: string; name: string }[];
   onClose: () => void;
   onSaved: () => void;
 }) {
   const [parties, setParties] = useState<Party[]>([]);
   const [projectId, setProjectId] = useState(defaultProjectId ? String(defaultProjectId) : "");
-  const [partyId, setPartyId] = useState("");
+  const [partyId, setPartyId] = useState(defaultPartyId ? String(defaultPartyId) : "");
   const [amount, setAmount] = useState("");
+  const [amountTouched, setAmountTouched] = useState(false);
+  const [bills, setBills] = useState<OpenBill[] | null>(null);
+  const [picked, setPicked] = useState<number[]>([]);
   const [against, setAgainst] = useState(AGAINST[0]);
   const [neededBy, setNeededBy] = useState("");
   const [note, setNote] = useState("");
@@ -301,6 +475,21 @@ function NewRequest({
     () => vyapar.partiesForProject(parties, projectId || null).map((p) => ({ value: String(p.id), label: p.name })),
     [parties, projectId],
   );
+  // Balance < 0 = we owe them (Vyapar's "To Pay").
+  const due = Math.max(0, -(parties.find((p) => String(p.id) === partyId)?.balance ?? 0));
+
+  // The party's unpaid bills — tick some and the amount follows, until it's typed by hand.
+  useEffect(() => {
+    setBills(null);
+    setPicked([]);
+    if (!partyId) return;
+    apiRequest<OpenBill[]>(`${BASE}/payables/${partyId}/bills`).then(setBills).catch(() => setBills([]));
+  }, [partyId]);
+  useEffect(() => {
+    if (amountTouched) return;
+    const fromBills = (bills ?? []).filter((b) => picked.includes(b.id)).reduce((a, b) => a + Number(b.balance), 0);
+    setAmount(picked.length ? String(Math.round(fromBills * 100) / 100) : due > 0 ? String(due) : "");
+  }, [picked, bills, due, amountTouched]);
 
   async function save() {
     if (!partyId) return setError("Pick the party to be paid.");
@@ -310,7 +499,15 @@ function NewRequest({
     try {
       await apiRequest(BASE, {
         method: "POST",
-        body: { projectId: projectId ? Number(projectId) : null, partyId: Number(partyId), amount: Number(amount), against, neededBy: neededBy || null, note: note.trim() || null },
+        body: {
+          projectId: projectId ? Number(projectId) : null,
+          partyId: Number(partyId),
+          amount: Number(amount),
+          against,
+          neededBy: neededBy || null,
+          note: note.trim() || null,
+          invoiceIds: picked,
+        },
       });
       onSaved();
     } catch (e) {
@@ -327,11 +524,50 @@ function NewRequest({
           <Select value={projectId} onChange={setProjectId} placeholder="Select project" options={[{ value: "", label: "No project" }, ...projects.map((p) => ({ value: p.id, label: p.name }))]} />
         </DrawerField>
         <DrawerField label="Party to pay" required>
-          <Select value={partyId} onChange={setPartyId} placeholder="Select party" options={partyOptions} />
+          <Select value={partyId} onChange={(v) => { setPartyId(v); setAmountTouched(false); }} placeholder="Select party" options={partyOptions} />
         </DrawerField>
+        {partyId && (
+          <div className="rounded-lg border border-gray-200">
+            <div className="flex items-center justify-between border-b border-gray-100 bg-gray-50 px-3 py-2 text-sm">
+              <span className="text-gray-600">Total due to this party</span>
+              <span className="font-semibold text-rose-600">{inr(due)}</span>
+            </div>
+            {bills == null ? (
+              <div className="flex items-center gap-2 px-3 py-3 text-xs text-gray-400"><Spinner size={12} /> Loading bills…</div>
+            ) : bills.length === 0 ? (
+              <p className="px-3 py-3 text-xs text-gray-400">No unpaid bills — the payment will go on account.</p>
+            ) : (
+              <div className="max-h-56 overflow-y-auto">
+                <p className="px-3 pt-2 text-[11px] text-gray-400">Tick the bills this should clear (optional). Oldest are settled first.</p>
+                {bills.map((b) => (
+                  <label key={b.id} className="flex cursor-pointer items-center gap-2 px-3 py-1.5 text-sm hover:bg-gray-50">
+                    <input
+                      type="checkbox"
+                      checked={picked.includes(b.id)}
+                      onChange={(e) => setPicked((prev) => (e.target.checked ? [...prev, b.id] : prev.filter((x) => x !== b.id)))}
+                      className="accent-cyan-600"
+                    />
+                    <span className="flex-1 truncate text-gray-700">{b.type} {b.number || "—"}</span>
+                    <span className="text-[11px] text-gray-400">{b.date ? bookDate(b.date) : ""}</span>
+                    <span className="w-24 text-right font-medium text-gray-800 tabular-nums">{inr(Number(b.balance))}</span>
+                  </label>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
         <div className="grid grid-cols-2 gap-3">
-          <DrawerField label="Amount" required>
-            <input type="number" inputMode="decimal" min="0" value={amount} onChange={(e) => setAmount(e.target.value)} className="input" placeholder="0" />
+          <DrawerField label="Amount to pay now" required>
+            <input
+              type="number"
+              inputMode="decimal"
+              min="0"
+              value={amount}
+              onChange={(e) => { setAmount(e.target.value); setAmountTouched(true); }}
+              className="input"
+              placeholder="0"
+            />
+            {due > 0 && Number(amount) > due && <p className="mt-1 text-[11px] text-amber-600">More than the {inr(due)} due — the extra is an advance.</p>}
           </DrawerField>
           <DrawerField label="Needed by">
             <DatePicker value={neededBy} onChange={setNeededBy} min={todayIST()} placeholder="Any time" />
@@ -350,13 +586,18 @@ function NewRequest({
 
 function DecideDialog({ row, approve, onClose, onDone }: { row: PaymentRequestApi; approve: boolean; onClose: () => void; onDone: () => void }) {
   const [note, setNote] = useState("");
+  const [amount, setAmount] = useState(String(row.amount));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   async function go() {
+    if (approve && !(Number(amount) > 0)) return setError("Enter the amount you approve.");
     setBusy(true);
     setError("");
     try {
-      await apiRequest(`${BASE}/${row.id}/decide`, { method: "POST", body: { approve, note: note.trim() || null } });
+      await apiRequest(`${BASE}/${row.id}/decide`, {
+        method: "POST",
+        body: { approve, note: note.trim() || null, amount: approve ? Number(amount) : null },
+      });
       onDone();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Couldn't record the decision.");
@@ -368,6 +609,18 @@ function DecideDialog({ row, approve, onClose, onDone }: { row: PaymentRequestAp
       <div className="w-full max-w-md space-y-3 rounded-2xl bg-white p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
         <h3 className="text-base font-semibold text-gray-800">{approve ? "Approve" : "Reject"} {row.requestNo}</h3>
         <p className="text-sm text-gray-600">{inr(Number(row.amount))} to {row.partyName}{row.against ? ` · ${row.against}` : ""}</p>
+        <div className="grid grid-cols-3 gap-2 rounded-lg bg-gray-50 p-2.5 text-xs">
+          <div><div className="text-gray-400">Due to party</div><div className="font-semibold text-rose-600">{row.dueAmount != null ? inr(Number(row.dueAmount)) : "—"}</div></div>
+          <div><div className="text-gray-400">Proposed by {row.requestedByName?.split(" ")[0] ?? "requester"}</div><div className="font-semibold text-gray-800">{inr(Number(row.proposedAmount ?? row.amount))}</div></div>
+          <div><div className="text-gray-400">Now</div><div className="font-semibold text-gray-800">{inr(Number(row.amount))}</div></div>
+        </div>
+        {approve && (
+          <label className="block">
+            <span className="mb-1 block text-xs font-medium text-gray-500">Amount to approve</span>
+            <input type="number" inputMode="decimal" min="0" value={amount} onChange={(e) => setAmount(e.target.value)} className="input" />
+            {Number(amount) !== Number(row.amount) && <span className="mt-1 block text-[11px] text-amber-600">You are changing the amount from {inr(Number(row.amount))}.</span>}
+          </label>
+        )}
         <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={3} className="input resize-none" placeholder={approve ? "Note (optional)" : "Why it's rejected (optional)"} />
         {error && <p className="text-sm text-rose-600">{error}</p>}
         <div className="flex justify-end gap-2">

@@ -639,6 +639,7 @@ export async function invoicePrintModel(
   const detailRows: [string, string][] = [];
   if (invoice.stateOfSupply) detailRows.push(["Place of Supply:", invoice.stateOfSupply]);
   detailRows.push(["Payment:", invoice.isCash || invoice.paidAmount > 0 ? invoice.paymentType : "Credit"]);
+  if (invoice.paymentCategory) detailRows.push(["Payment For:", invoice.paymentCategory]);
 
   const addresses: { title: string; lines: string[] }[] = [];
   const place = (name: string | null, address: string | null, gstin: string | null) =>

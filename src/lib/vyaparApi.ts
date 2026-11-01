@@ -170,6 +170,8 @@ export interface Invoice {
   paymentType: string;
   /** Cheque / NEFT number for the amount received with the document. */
   paymentReference: string | null;
+  /** Vyapar-17: Supplier / Party, or one of the Government kinds — see PAYMENT_CATEGORIES. */
+  paymentCategory?: string | null;
   /** Walk-in details for a cash bill with no saved party behind it. */
   billingName: string | null;
   billingAddress: string | null;
@@ -353,6 +355,8 @@ export interface InvoiceInput {
   paidAmount?: number;
   paymentType?: string;
   paymentReference?: string | null;
+  /** null = leave as is; "" clears it. */
+  paymentCategory?: string | null;
   billingName?: string | null;
   billingAddress?: string | null;
   billToName?: string | null;

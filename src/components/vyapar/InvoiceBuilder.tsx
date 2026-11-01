@@ -38,6 +38,7 @@ import { shareInvoice } from "@/components/vyapar/TxnRowActions";
 import { useVyaparSettings } from "@/lib/useVyaparSettings";
 import { useFormDraft } from "@/lib/formDraft";
 import { DraftBanner } from "@/components/vyapar/DraftBanner";
+import { DEFAULT_PAYMENT_CATEGORY, PAYMENT_CATEGORIES } from "@/lib/vyaparConfig";
 import { useItemMasters, type ManagedUnit } from "@/lib/useItemMasters";
 import { DEFAULT_UNITS } from "@/lib/useItemSettings";
 import type { PoDraft } from "@/lib/poHandoff";
@@ -398,6 +399,11 @@ export function InvoiceBuilder({
   const [receiveOn, setReceiveOn] = useState(existing ? (existing.paidAmount ?? 0) > 0 : isCash);
   /** Cheque/NEFT number for the received portion. */
   const [paymentReference, setPaymentReference] = useState(existing?.paymentReference ?? "");
+  // Vyapar-17: supplier bill or a Government due (GST, TDS, royalty…). Bills only.
+  const hasCategory = docType === "PURCHASE";
+  const [paymentCategory, setPaymentCategory] = useState<string>(
+    existing?.paymentCategory ?? (hasCategory ? DEFAULT_PAYMENT_CATEGORY : "")
+  );
   // Payment mode for the received portion — Vyapar's "Payment Type" picker on a paid invoice.
   const [paymentMode, setPaymentMode] = useState(
     existing?.paymentType && existing.paymentType !== "Credit" ? existing.paymentType : "Cash"
@@ -699,7 +705,7 @@ export function InvoiceBuilder({
   const signature = JSON.stringify({
     partyId, selectedProjectId, invoicePrefix, invoiceNo, invoiceDate, dueDate, stateOfSupply, addr,
     terms, notes, discountPercent, discountAmount, roundOffOn, priceHasTax, received, isCash,
-    paymentMode, paymentReference, receiveOn, partyText, lines,
+    paymentMode, paymentReference, paymentCategory, receiveOn, partyText, lines,
     description, imageDataUrl, documentName, documentDataUrl,
   });
   // Captured on the first render only — state, not a ref, so nothing is read during render.
@@ -942,6 +948,7 @@ export function InvoiceBuilder({
         // up against the account the user picked. See bankScope.useBankAccountResolver.
         bankAccountId: noPayment || displayReceived <= 0 ? null : bankAccountFor(paymentMode),
         paymentReference: displayReceived > 0 ? paymentReference || null : null,
+        ...(hasCategory ? { paymentCategory } : {}),
         // Only meaningful on a cash bill with no party — otherwise the party carries the address.
         billingName: !partyId && partyText.trim() ? partyText.trim() : null,
         billingAddress: !partyId && billingAddress.trim() ? billingAddress.trim() : null,
@@ -1684,6 +1691,15 @@ export function InvoiceBuilder({
               attachment buttons. Vyapar shows all of this whether or not money has been received;
               hiding it until a Received amount was typed was our own invention. */}
           <div className="space-y-3 rounded-xl border border-gray-200 p-4">
+            {hasCategory && (
+              <Field label="Payment For">
+                <Select
+                  value={paymentCategory}
+                  onChange={setPaymentCategory}
+                  options={PAYMENT_CATEGORIES.map((c) => ({ value: c, label: c }))}
+                />
+              </Field>
+            )}
             {!noPayment && (
               <>
                 <Field label="Payment Type">

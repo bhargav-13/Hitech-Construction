@@ -30,6 +30,7 @@ import { ApprovalBadge } from "@/components/approval/ApprovalBadge";
 import { DOC_APPROVAL_TYPE, useApprovalStates } from "@/lib/approvals";
 import { isBackgroundRefresh, useAutoRefresh } from "@/lib/autoRefresh";
 import { todayIST } from "@/lib/datetime";
+import { PAYMENT_CATEGORIES, isGovernmentCategory } from "@/lib/vyaparConfig";
 
 const PAYMENT_TYPES = ["Cash", "Credit", "Bank", "UPI", "Cheque"];
 
@@ -239,6 +240,8 @@ export function InvoiceWorkspace({
       // `options` here is only a floor — the real list is whatever the rows contain, since a
       // payment type is a bank/cash account name rather than a fixed vocabulary. See useColumnFilters.
       paymentType: { get: (i: Invoice) => i.paymentType, type: "select" as const, options: PAYMENT_TYPES },
+      // Vyapar-17: supplier bill vs a Government due. Older bills have none — they read as supplier.
+      paymentCategory: { get: (i: Invoice) => i.paymentCategory || PAYMENT_CATEGORIES[0], type: "select" as const, options: [...PAYMENT_CATEGORIES] },
       amount: { get: (i: Invoice) => i.total, type: "number" as const },
       balance: { get: (i: Invoice) => i.balance, type: "number" as const },
       status: { get: (i: Invoice) => i.status, type: "select" as const, options: ["Paid", "Partial", "Unpaid", "Cancelled"] },
@@ -255,6 +258,7 @@ export function InvoiceWorkspace({
       number: (i) => fullInvoiceNo(i),
       party: (i) => i.partyName,
       paymentType: (i) => i.paymentType,
+      paymentCategory: (i) => i.paymentCategory || PAYMENT_CATEGORIES[0],
       amount: (i) => i.total,
       balance: (i) => i.balance,
       status: (i) => i.status,
@@ -380,6 +384,7 @@ export function InvoiceWorkspace({
         { key: "status", label: "Status", value: (i) => i.status },
         { key: "paymentType", label: "Payment Type", value: (i) => i.paymentType },
         { key: "paymentReference", label: "Payment Reference", value: (i) => i.paymentReference ?? "" },
+        ...(docType === "PURCHASE" ? [{ key: "paymentCategory", label: "Payment For", value: (i: Invoice) => i.paymentCategory || PAYMENT_CATEGORIES[0] }] : []),
         { key: "dueDate", label: "Due Date", value: (i) => i.dueDate ?? "" }
       );
     }
@@ -596,6 +601,7 @@ export function InvoiceWorkspace({
                 {/* Vyapar carries a Transaction column naming the document type on every list. */}
                 {!isPoList && <th className="px-4 py-2 text-left font-medium">Transaction</th>}
                 {!NON_PAYMENT && <FilterTh label="Payment Type" sortKey="paymentType" activeKey={sortKey} dir={sortDir} onSort={toggle} filterKey="paymentType" type="select" options={filterOptions.paymentType} filter={filters.paymentType} onApply={setFilter} />}
+                {docType === "PURCHASE" && <FilterTh label="Payment For" sortKey="paymentCategory" activeKey={sortKey} dir={sortDir} onSort={toggle} filterKey="paymentCategory" type="select" options={filterOptions.paymentCategory} filter={filters.paymentCategory} onApply={setFilter} />}
                 {isPoList && <th className="px-4 py-2 text-left font-medium">PO Status</th>}
                 {isPoList && <th className="px-4 py-2 text-left font-medium">Approval</th>}
                 <FilterTh label="Amount" sortKey="amount" activeKey={sortKey} dir={sortDir} onSort={toggle} align="right" filterKey="amount" type="number" filter={filters.amount} onApply={setFilter} />
@@ -621,6 +627,15 @@ export function InvoiceWorkspace({
                   <td className="px-4 py-2.5 text-gray-700">{i.partyName ?? "—"}</td>
                   {!isPoList && <td className="px-4 py-2.5 text-gray-600">{noun}</td>}
                   {!NON_PAYMENT && <td className="px-4 py-2.5 text-gray-600">{i.paymentType}</td>}
+                  {docType === "PURCHASE" && (
+                    <td className="px-4 py-2.5">
+                      {isGovernmentCategory(i.paymentCategory) ? (
+                        <span className="rounded bg-violet-50 px-1.5 py-0.5 text-[11px] font-medium text-violet-700">{i.paymentCategory}</span>
+                      ) : (
+                        <span className="text-gray-500">{i.paymentCategory || PAYMENT_CATEGORIES[0]}</span>
+                      )}
+                    </td>
+                  )}
                   {isPoList && (
                     <td className="px-4 py-2.5">
                       <span className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${
