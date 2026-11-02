@@ -13,7 +13,7 @@ import { apiRequest } from "@/lib/api";
  * checks the values against the document before pressing it.
  */
 
-export type ScanKind = "BILL" | "RECEIPT" | "PAYMENT" | "CONTACT" | "TENDER" | "ITEM_LIST";
+export type ScanKind = "BILL" | "RECEIPT" | "PAYMENT" | "CONTACT" | "TENDER" | "ITEM_LIST" | "BOQ";
 
 export interface ScannedParty {
   name: string | null;
@@ -152,6 +152,21 @@ export interface ScannedItemList {
   uncertainFields: string[];
 }
 
+/** A tender's Bill of Quantities / price schedule — every row, priced or not. */
+export interface ScannedBoq {
+  rows: {
+    srNo: string | null;
+    description: string | null;
+    unit: string | null;
+    quantity: number | null;
+    rate: number | null;
+    amount: number | null;
+    /** A heading / parent row with no quantity of its own. */
+    heading: boolean | null;
+  }[];
+  uncertainFields: string[];
+}
+
 export interface ScanResultMap {
   BILL: ScannedBill;
   RECEIPT: ScannedReceipt;
@@ -159,6 +174,7 @@ export interface ScanResultMap {
   CONTACT: ScannedContact;
   TENDER: ScannedTender;
   ITEM_LIST: ScannedItemList;
+  BOQ: ScannedBoq;
 }
 
 export type Progress = (message: string) => void;
@@ -235,6 +251,15 @@ export async function scanDocument<K extends ScanKind>(
   opts.onProgress?.("Reading with AI…");
   const hints: Record<string, string> = {};
   for (const [k, v] of Object.entries(opts.hints ?? {})) if (v && v.trim()) hints[k] = v.trim();
+  const res = await apiRequest<{ kind: string; model: string; data: ScanResultMap[K] }>("/api/v1/scan", {
+    method: "POST",
+    body: { kind, pages, hints },
+  });
+  return clean(res.data) as ScanResultMap[K];
+}
+
+/** Scan page images that are already prepared — for a long document read a few pages at a time. */
+export async function scanPages<K extends ScanKind>(kind: K, pages: string[], hints: Record<string, string> = {}): Promise<ScanResultMap[K]> {
   const res = await apiRequest<{ kind: string; model: string; data: ScanResultMap[K] }>("/api/v1/scan", {
     method: "POST",
     body: { kind, pages, hints },
@@ -427,6 +452,63 @@ export async function pdfText(file: Blob, maxPages = 40): Promise<{ text: string
     out.push(`--- page ${n} ---\n${lines.join("\n")}`);
   }
   return { text: out.join("\n\n"), pages: doc.numPages };
+}
+
+/** One run of text on a PDF page, top-down coordinates in PDF points. */
+export interface PdfRun {
+  s: string;
+  x: number;
+  /** Baseline, measured from the top of the page. */
+  y: number;
+  w: number;
+  h: number;
+}
+
+/**
+ * Every page's text runs with their positions — for reading a table by its columns (a tender's
+ * BOQ). Empty arrays for pages with no text layer (scans).
+ */
+export async function pdfTextRuns(file: Blob, onProgress?: Progress): Promise<PdfRun[][]> {
+  onProgress?.("Opening PDF…");
+  const lib = await pdfjs();
+  const doc = await lib.getDocument({ data: new Uint8Array(await file.arrayBuffer()) }).promise;
+  const out: PdfRun[][] = [];
+  for (let n = 1; n <= doc.numPages; n++) {
+    onProgress?.(`Reading page ${n} of ${doc.numPages}…`);
+    const page = (await doc.getPage(n)) as unknown as PdfPage & {
+      getTextContent(): Promise<{ items: { str: string; transform: number[]; width: number; height: number }[] }>;
+    };
+    const height = page.getViewport({ scale: 1 }).height;
+    const { items } = await page.getTextContent();
+    out.push(
+      items
+        .filter((it) => it.str && it.str.trim())
+        .map((it) => ({ s: it.str, x: it.transform[4], y: height - it.transform[5], w: it.width, h: it.height || Math.abs(it.transform[3]) })),
+    );
+  }
+  return out;
+}
+
+/** Pages [from, from + count) of a PDF as JPEG data URLs, for scanning a long document in batches. */
+export async function pdfPageImages(file: Blob, from: number, count: number): Promise<{ pages: string[]; total: number }> {
+  const lib = await pdfjs();
+  const doc = await lib.getDocument({ data: new Uint8Array(await file.arrayBuffer()) }).promise;
+  const pages: string[] = [];
+  for (let n = from; n < Math.min(doc.numPages + 1, from + count); n++) {
+    const page = await doc.getPage(n);
+    const base = page.getViewport({ scale: 1 });
+    const viewport = page.getViewport({ scale: PAGE_PX / Math.max(base.width, base.height) });
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(viewport.width);
+    canvas.height = Math.round(viewport.height);
+    const ctx = canvas.getContext("2d");
+    if (!ctx) continue;
+    ctx.fillStyle = "#fff";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    await page.render({ canvasContext: ctx, viewport }).promise;
+    pages.push(drawToJpeg(canvas, canvas.width, canvas.height));
+  }
+  return { pages, total: doc.numPages };
 }
 
 // ---- helpers the forms share -------------------------------------------------------------------

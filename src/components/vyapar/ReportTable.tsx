@@ -1,13 +1,20 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { createContext, useContext, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Download, FileSpreadsheet, FileText, Printer, Search, Settings2, X } from "lucide-react";
 import { VyaparEmpty } from "@/components/vyapar/VyaparShell";
 import { Modal } from "@/components/Modal";
 import { FilterTh, useColumnFilters, type FilterType } from "@/components/vyapar/ColumnFilter";
 import { useTableSort } from "@/lib/useTableSort";
-import { exportRowsToCsv, downloadPdf, printRows } from "@/lib/vyaparExport";
+import { exportRowsToCsv, downloadPdf, printRows, type ReportPrintDetail } from "@/lib/vyaparExport";
+
+/**
+ * The period a report covers, as Vyapar prints it under the title — "Date: 30/04/2026" or
+ * "Duration: From 01/04/2026 to 30/04/2026". The reports screen provides it; every ReportTable on it
+ * prints it unless given its own subtitle.
+ */
+export const ReportPeriodContext = createContext<string | undefined>(undefined);
 
 /**
  * The table every Vyapar report renders through.
@@ -45,6 +52,8 @@ export function ReportTable<T>({
   minWidth = 720,
   /** Where clicking a row goes — the document behind it. Rows without one stay inert. */
   rowHref,
+  /** Grey total rows under the table in the print-out and PDF ("Total", "Money In - Money Out"). */
+  totals,
 }: {
   title: string;
   subtitle?: string;
@@ -54,8 +63,11 @@ export function ReportTable<T>({
   detail?: ReportDetail<T>;
   minWidth?: number;
   rowHref?: (row: T) => string | null;
+  totals?: (string | number)[][];
 }) {
   const router = useRouter();
+  const period = useContext(ReportPeriodContext);
+  subtitle ??= period;
   const [q, setQ] = useState("");
   const [picking, setPicking] = useState(false);
   const [previewing, setPreviewing] = useState(false);
@@ -93,14 +105,28 @@ export function ReportTable<T>({
   const body = sorted.map((r) => printCols.map((c) => c.value(r)));
   const rightFrom = printCols.findIndex((c) => c.align === "right");
 
+  // Item lines, Sub Total and Description under each row — on when "Print options" says so.
+  const printDetail: ReportPrintDetail | undefined =
+    withDetail && detail
+      ? {
+          head: detail.head,
+          rows: sorted.map((r) => detail.rows(r)),
+          footer: sorted.map((r) => detail.footer?.(r) ?? []),
+          notes: sorted.map((r) => detail.note?.(r) ?? null),
+          alignRightFrom: detail.alignRightFrom,
+        }
+      : undefined;
   const asPdf = () =>
     downloadPdf(title, head, body, {
       subtitle,
       // Wide reports go landscape rather than squeezing eleven columns onto a portrait page.
       landscape: printCols.length > 7,
       rightAlignFrom: rightFrom >= 0 ? rightFrom : undefined,
+      detail: printDetail,
+      totals,
     });
-  const asPrint = () => printRows(title, head, body, subtitle);
+  const asPrint = () =>
+    printRows(title, head, body, subtitle, { rightAlignFrom: rightFrom >= 0 ? rightFrom : undefined, detail: printDetail, totals });
   const asCsv = () => exportRowsToCsv(filename, head, body);
 
   return (
@@ -211,6 +237,7 @@ export function ReportTable<T>({
           columns={printCols}
           rows={sorted}
           detail={withDetail ? detail : undefined}
+          totals={totals}
           onPrint={asPrint}
           onPdf={asPdf}
           onCsv={asCsv}
@@ -229,6 +256,8 @@ export interface ReportDetail<T> {
   rows: (row: T) => (string | number)[][];
   /** Trailing summary lines under a row's detail block ("Sub Total", "Round off"). */
   footer?: (row: T) => [string, string][];
+  /** "Description: …" printed under the row, as Vyapar does. */
+  note?: (row: T) => string | null | undefined;
   alignRightFrom?: number;
 }
 
@@ -348,6 +377,7 @@ function ReportPreview<T>({
   columns,
   rows,
   detail,
+  totals,
   onPrint,
   onPdf,
   onCsv,
@@ -358,6 +388,7 @@ function ReportPreview<T>({
   columns: ReportColumn<T>[];
   rows: T[];
   detail?: ReportDetail<T>;
+  totals?: (string | number)[][];
   onPrint: () => void;
   onPdf: () => void;
   onCsv: () => void;
@@ -377,7 +408,7 @@ function ReportPreview<T>({
 
         <div className="flex-1 overflow-auto px-6 py-5">
           <h3 className="text-center text-lg font-bold text-gray-900 underline">{title}</h3>
-          {subtitle && <p className="mt-1 text-center text-sm text-gray-500">{subtitle}</p>}
+          {subtitle && <p className="mt-2 text-sm font-bold text-gray-900">{subtitle}</p>}
 
           <table className="mt-5 w-full border-collapse text-xs">
             <thead>
@@ -393,6 +424,16 @@ function ReportPreview<T>({
               {shown.map((r, ri) => (
                 <ReportPreviewRow key={ri} row={r} columns={columns} detail={detail} />
               ))}
+              {rows.length <= shown.length &&
+                (totals ?? []).map((t, ti) => (
+                  <tr key={`t${ti}`} className="bg-gray-200 font-bold">
+                    {t.map((c, ci) => (
+                      <td key={ci} className={`px-2 py-1.5 ${columns[ci]?.align === "right" ? "text-right tabular-nums" : ""}`}>
+                        {c}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
             </tbody>
           </table>
 
@@ -445,6 +486,7 @@ function ReportPreviewRow<T>({
 }) {
   const lines = detail?.rows(row) ?? [];
   const footer = detail?.footer?.(row) ?? [];
+  const note = detail?.note?.(row);
   const right = detail?.alignRightFrom ?? detail?.head.length ?? 0;
 
   return (
@@ -456,9 +498,10 @@ function ReportPreviewRow<T>({
           </td>
         ))}
       </tr>
-      {lines.length > 0 && (
+      {(lines.length > 0 || note) && (
         <tr className="border-b border-gray-200">
           <td colSpan={columns.length} className="px-2 pb-2">
+            {lines.length > 0 && (
             <table className="w-full border-collapse text-[11px]">
               <thead>
                 <tr className="bg-gray-50 text-left text-gray-500">
@@ -481,6 +524,7 @@ function ReportPreviewRow<T>({
                 ))}
               </tbody>
             </table>
+            )}
             {footer.length > 0 && (
               <div className="mt-1 flex flex-col items-end gap-0.5 text-[11px] text-gray-600">
                 {footer.map(([label, value]) => (
@@ -490,6 +534,11 @@ function ReportPreviewRow<T>({
                   </div>
                 ))}
               </div>
+            )}
+            {note && (
+              <p className="mt-1 text-[11px] text-gray-700">
+                <b>Description:</b> {note}
+              </p>
             )}
           </td>
         </tr>

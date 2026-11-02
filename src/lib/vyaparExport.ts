@@ -191,52 +191,119 @@ export async function exportRowsToXlsx(
 }
 
 /**
- * Open a clean, print-ready sheet in a new window, letterheaded with the firm's logo and
- * details when a profile has been set up.
+ * Item lines printed under each row of a report — Vyapar's Day Book / Sale Report layout, where a
+ * bill's items sit in their own small table beneath it, then "Sub Total", then its description.
+ * Every array is parallel to the report's rows.
  */
-export async function printRows(title: string, head: string[], rows: Cell[][], subtitle?: string) {
+export interface ReportPrintDetail {
+  head: string[];
+  rows: Cell[][][];
+  footer?: [string, string][][];
+  notes?: (string | null | undefined)[];
+  alignRightFrom?: number;
+}
+
+/** Extra content for a report print-out / PDF beyond its plain rows. */
+export interface ReportPrintExtras {
+  rightAlignFrom?: number;
+  detail?: ReportPrintDetail;
+  /** Grey, bold rows under the table — "Total", "Money In - Money Out". */
+  totals?: Cell[][];
+}
+
+/** Vyapar prints its reports with a grey header row unless the user picked a colour in Templates. */
+const DEFAULT_REPORT_ACCENT = "#212529";
+const VYAPAR_GREY: [number, number, number] = [217, 217, 217];
+
+/** The letterhead line under the firm name, Vyapar's way: "Phone no.: … Email: …". */
+function contactLine(firm: { phone?: string | null; email?: string | null; gstin?: string | null } | null): string {
+  if (!firm) return "";
+  return [firm.phone ? `Phone no.: ${firm.phone}` : null, firm.email ? `Email: ${firm.email}` : null, firm.gstin ? `GSTIN: ${firm.gstin}` : null]
+    .filter(Boolean)
+    .join("  ");
+}
+
+/**
+ * Open a print-ready sheet in a new window, laid out like Vyapar's own report print-outs: the firm
+ * centred at the top, the report name centred and underlined, the period on the left, a grey header
+ * row and plain ruled rows.
+ */
+export async function printRows(title: string, head: string[], rows: Cell[][], subtitle?: string, extras?: ReportPrintExtras) {
   const w = window.open("", "_blank", "width=980,height=720");
   if (!w) return;
-  const [firm, appLogo] = await Promise.all([getCachedFirmProfile(), getAppLogo()]);
+  const [firm, tpl] = await Promise.all([getCachedFirmProfile(), getTemplate("REPORT")]);
   const esc = (v: Cell) =>
     String(v ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  // Same fallback as the PDF letterhead: the product's own mark until a firm logo is uploaded.
-  const mark = firm?.logoDataUrl || appLogo;
-  const letterhead = firm?.businessName || mark
-    ? `<div class="letterhead">
-        ${mark ? `<img src="${mark}" alt="" />` : ""}
-        <div>
-          ${firm?.businessName ? `<div class="biz">${esc(firm.businessName)}</div>` : ""}
-          <div class="biz-meta">${[firm?.address, firm?.gstin ? `GSTIN ${firm.gstin}` : null, firm?.phone, firm?.email].filter(Boolean).map(esc).join(" · ")}</div>
-        </div>
-      </div>`
-    : "";
+  const name = tpl.companyName.trim() || firm?.businessName || "";
+  const address = tpl.companyAddress.trim() || firm?.address || "";
+  const logo = tpl.showLogo ? firm?.logoDataUrl : null;
+  const contact = contactLine(firm ? { ...firm, gstin: tpl.showGstin ? firm.gstin : null } : null);
+  const footerNote = tpl.footerNote.trim() || firm?.footerNote || "";
+  const custom = tpl.accent.trim().toLowerCase() !== DEFAULT_REPORT_ACCENT;
+  const right = (i: number, from?: number) => (from != null && i >= from ? ' class="r"' : "");
+  const from = extras?.rightAlignFrom;
+  const d = extras?.detail;
+
+  const body = rows
+    .map((r, ri) => {
+      let html = `<tr class="main">${r.map((c, i) => `<td${right(i, from)}>${esc(c)}</td>`).join("")}</tr>`;
+      const lines = d?.rows[ri] ?? [];
+      const foot = d?.footer?.[ri] ?? [];
+      const note = d?.notes?.[ri];
+      if (lines.length || foot.length || note) {
+        const dr = d?.alignRightFrom ?? d?.head.length ?? 0;
+        html += `<tr class="sub"><td colspan="${head.length}">`;
+        if (lines.length) {
+          html += `<table class="items"><thead><tr>${d!.head.map((h, i) => `<th${right(i, dr)}>${esc(h)}</th>`).join("")}</tr></thead><tbody>${lines
+            .map((l) => `<tr${/^total$/i.test(String(l[1] ?? l[0] ?? "")) ? ' class="t"' : ""}>${l.map((c, i) => `<td${right(i, dr)}>${esc(c)}</td>`).join("")}</tr>`)
+            .join("")}</tbody></table>`;
+        }
+        if (foot.length) html += `<div class="foot">${foot.map(([k, v]) => `<div><span>${esc(k)}</span><span>${esc(v)}</span></div>`).join("")}</div>`;
+        if (note) html += `<div class="note"><b>Description:</b> ${esc(note)}</div>`;
+        html += `</td></tr>`;
+      }
+      return html;
+    })
+    .join("");
+  const totals = (extras?.totals ?? []).map((r) => `<tr class="total">${r.map((c, i) => `<td${right(i, from)}>${esc(c)}</td>`).join("")}</tr>`).join("");
+
   w.document.write(`<!doctype html><html><head><title>${esc(title)}</title>
 <meta charset="utf-8" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;700&display=swap" rel="stylesheet" />
 <style>
   *{box-sizing:border-box}
-  body{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;color:#0f172a;margin:32px}
-  .letterhead{display:flex;align-items:center;gap:12px;margin-bottom:14px;padding-bottom:14px;border-bottom:1px solid #e2e8f0}
-  .letterhead img{height:44px;width:44px;object-fit:contain}
-  .biz{font-size:15px;font-weight:700}
-  .biz-meta{font-size:11px;color:#64748b;margin-top:2px}
-  h1{font-size:18px;margin:0 0 4px}
-  .sub{color:#64748b;font-size:12px;margin-bottom:18px}
-  table{width:100%;border-collapse:collapse;font-size:12px}
-  th{background:#f1f5f9;text-align:left;padding:8px;border-bottom:1px solid #cbd5e1;font-weight:600}
-  td{padding:7px 8px;border-bottom:1px solid #e2e8f0}
-  tr:nth-child(even) td{background:#f8fafc}
-  td:nth-child(n+4){text-align:right}
-  .footer-note{margin-top:16px;font-size:11px;color:#94a3b8}
-  @media print{body{margin:12mm} .noprint{display:none}}
+  body{font-family:Roboto,Arial,sans-serif;color:#000;margin:28px;font-size:12px}
+  .firm{text-align:center;position:relative;min-height:40px}
+  .firm img{position:absolute;left:0;top:0;height:46px;max-width:90px;object-fit:contain}
+  .biz{font-size:17px;font-weight:700}
+  .meta{font-size:11px;margin-top:3px}
+  h1{text-align:center;font-size:22px;font-weight:700;text-decoration:underline;margin:22px 0 14px}
+  .period{font-size:15px;font-weight:700;margin-bottom:12px}
+  table{width:100%;border-collapse:collapse}
+  th{background:${custom ? esc(tpl.accent) : "#d9d9d9"};color:${custom ? "#fff" : "#000"};text-align:left;padding:6px;font-weight:700}
+  td{padding:6px;vertical-align:top}
+  tr.main td{border-top:1px solid #bbb;font-weight:700}
+  .r{text-align:right}
+  tr.sub td{padding:4px 0 8px 0}
+  table.items{width:calc(100% - 60px);margin-left:60px}
+  table.items th{background:#d9d9d9;color:#000;font-weight:700}
+  table.items td{font-weight:400;border-bottom:1px solid #ccc}
+  table.items tr.t td{font-weight:700;border-bottom:1px solid #000}
+  .foot{display:flex;flex-direction:column;align-items:flex-end;margin-top:4px}
+  .foot div{display:flex;justify-content:space-between;width:320px;border-bottom:1px solid #000;padding:3px 6px}
+  .note{margin-top:6px;font-weight:400}
+  tr.total td{background:#d9d9d9;font-weight:700}
+  .footer-note{margin-top:16px;font-size:11px;color:#666}
+  @media print{body{margin:10mm}}
 </style></head><body>
-${letterhead}
+${name || logo ? `<div class="firm">${logo ? `<img src="${logo}" alt="" />` : ""}${name ? `<div class="biz">${esc(name)}</div>` : ""}${address ? `<div class="meta">${esc(address)}</div>` : ""}${contact ? `<div class="meta">${esc(contact)}</div>` : ""}</div>` : ""}
 <h1>${esc(title)}</h1>
-<div class="sub">${esc(subtitle ?? "")}${subtitle ? " · " : ""}Generated ${new Date().toLocaleString("en-IN")}</div>
-<table><thead><tr>${head.map((h) => `<th>${esc(h)}</th>`).join("")}</tr></thead>
-<tbody>${rows.map((r) => `<tr>${r.map((c) => `<td>${esc(c)}</td>`).join("")}</tr>`).join("")}</tbody></table>
-${firm?.footerNote ? `<div class="footer-note">${esc(firm.footerNote)}</div>` : ""}
-<script>window.onload=()=>window.print()</script>
+${subtitle ? `<div class="period">${esc(subtitle)}</div>` : ""}
+<table><thead><tr>${head.map((h, i) => `<th${right(i, from)}>${esc(h)}</th>`).join("")}</tr></thead>
+<tbody>${body}${totals}</tbody></table>
+${footerNote ? `<div class="footer-note">${esc(footerNote)}</div>` : ""}
+<script>window.onload=()=>setTimeout(()=>window.print(),300)</script>
 </body></html>`);
   w.document.close();
 }
@@ -401,10 +468,49 @@ function splitTax(lines: InvoiceLine[], firm: FirmProfile | null, party: Party |
   };
 }
 
+// Roboto — the face Vyapar's PDFs use, and unlike jsPDF's built-in fonts it has a ₹ glyph. Fetched
+// once from jsDelivr (pinned) on the first export, so it doesn't ship in the app bundle.
+const ROBOTO = {
+  normal: "https://cdn.jsdelivr.net/npm/@expo-google-fonts/roboto@0.2.3/Roboto_400Regular.ttf",
+  bold: "https://cdn.jsdelivr.net/npm/@expo-google-fonts/roboto@0.2.3/Roboto_700Bold.ttf",
+};
+let robotoLoad: Promise<{ normal: string; bold: string } | null> | null = null;
+
+function robotoFiles(): Promise<{ normal: string; bold: string } | null> {
+  const b64 = async (url: string) => {
+    const buf = new Uint8Array(await (await fetch(url)).arrayBuffer());
+    let bin = "";
+    for (let i = 0; i < buf.length; i += 0x8000) bin += String.fromCharCode(...buf.subarray(i, i + 0x8000));
+    return btoa(bin);
+  };
+  robotoLoad ??= Promise.all([b64(ROBOTO.normal), b64(ROBOTO.bold)])
+    .then(([normal, bold]) => ({ normal, bold }))
+    .catch(() => {
+      robotoLoad = null; // offline: this export falls back to Helvetica, the next one tries again
+      return null;
+    });
+  return robotoLoad;
+}
+
+type JsPdfDoc = InstanceType<typeof import("jspdf").jsPDF>;
+
+/** Register Roboto on this document. Returns the font to use, or Helvetica when it couldn't load. */
+async function registerReportFont(doc: JsPdfDoc): Promise<"Roboto" | "helvetica"> {
+  const files = await robotoFiles();
+  if (!files) return "helvetica";
+  doc.addFileToVFS("Roboto-Regular.ttf", files.normal);
+  doc.addFont("Roboto-Regular.ttf", "Roboto", "normal");
+  doc.addFileToVFS("Roboto-Bold.ttf", files.bold);
+  doc.addFont("Roboto-Bold.ttf", "Roboto", "bold");
+  return "Roboto";
+}
+
 /**
- * Download a real, selectable-text PDF (not a screenshot). Uses jsPDF + autotable so the file
- * has proper vector text, repeating headers and page numbers — letterheaded with the firm's
- * logo and details from Vyapar Settings ▸ Firm Profile when one has been set up.
+ * Download a real, selectable-text PDF (not a screenshot), laid out the way Vyapar's own report
+ * PDFs are: the firm's name centred with "Phone no.: … Email: …" under it, the report's name
+ * centred, bold and underlined, the period on the left ("Date: 30/04/2026"), a grey header row,
+ * plain ruled rows, item lines under each bill when asked for, and grey total rows at the end.
+ * Name, address, logo, GSTIN, footer and colour still come from Templates → "Reports & lists".
  */
 export async function downloadPdf(
   title: string,
@@ -418,11 +524,8 @@ export async function downloadPdf(
     template?: DocTemplate;
     /** Return the document instead of downloading it. */
     preview?: boolean;
-  }
+  } & Omit<ReportPrintExtras, "rightAlignFrom">
 ) {
-  // jsPDF's built-in fonts have no ₹ glyph — it printed as "¹" and broke the column widths. Every
-  // caller passes `inr()` strings, so swap the symbol here once rather than at forty call sites.
-  rows = rows.map((r) => r.map((c) => (typeof c === "string" ? c.replace(/₹\s?/g, "Rs. ") : c)));
   const [{ jsPDF }, autoTableMod, firmProfile, tpl] = await Promise.all([
     import("jspdf"),
     import("jspdf-autotable"),
@@ -441,89 +544,191 @@ export async function downloadPdf(
         footerNote: tpl.footerNote.trim() || firmProfile.footerNote,
       }
     : null;
-  const accentRgb = (() => {
+  const custom = tpl.accent.trim().toLowerCase() !== DEFAULT_REPORT_ACCENT;
+  const headFill = (() => {
+    if (!custom) return VYAPAR_GREY;
     const m = /^#?([0-9a-f]{6})$/i.exec(tpl.accent.trim());
     const n = m ? parseInt(m[1], 16) : 0x212529;
-    return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+    return [(n >> 16) & 255, (n >> 8) & 255, n & 255] as [number, number, number];
   })();
+  const headText: [number, number, number] = custom ? [255, 255, 255] : [0, 0, 0];
 
   const doc = new jsPDF({ orientation: opts?.landscape ? "landscape" : "portrait", unit: "pt", format: "a4" });
+  const font = await registerReportFont(doc);
+  // Helvetica has no ₹ — it printed as "¹" and broke the column widths. Roboto has it.
+  const clean = (c: Cell) => (font === "Roboto" ? String(c ?? "") : String(c ?? "").replace(/₹\s?/g, "Rs. "));
   const pageWidth = doc.internal.pageSize.getWidth();
-  const margin = 40;
-  let headerBottom = 34;
-  let textX = margin;
+  const margin = 32;
+  let y = 34;
 
-  // ---- Letterhead: logo + business name/GSTIN/address, when a firm profile is set up ----
+  // ---- Letterhead: name centred, contact line under it; logo on the left when there is one ----
   if (firm?.logoDataUrl) {
     try {
       const { width, height } = await imageSize(firm.logoDataUrl);
-      const logoH = 34;
-      const logoW = Math.min(70, logoH * (width / height));
-      doc.addImage(firm.logoDataUrl, "PNG", margin, 20, logoW, logoH);
-      textX = margin + logoW + 12;
+      const logoH = 40;
+      doc.addImage(firm.logoDataUrl, "PNG", margin, 18, Math.min(80, logoH * (width / height)), logoH);
     } catch {
       // A broken logo shouldn't block the export.
     }
   }
   if (firm?.businessName) {
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(13);
-    doc.setTextColor(15, 23, 42);
-    doc.text(firm.businessName, textX, 34);
-
-    const metaLine = [firm.address, firm.gstin ? `GSTIN ${firm.gstin}` : null, firm.phone, firm.email].filter(Boolean).join("  ·  ");
-    if (metaLine) {
-      doc.setFont("helvetica", "normal");
-      doc.setFontSize(8);
-      doc.setTextColor(100);
-      doc.text(metaLine, textX, 47, { maxWidth: pageWidth - textX - margin });
+    doc.setFont(font, "bold");
+    doc.setFontSize(14);
+    doc.setTextColor(0);
+    doc.text(firm.businessName, pageWidth / 2, y, { align: "center" });
+    doc.setFont(font, "normal");
+    doc.setFontSize(8.5);
+    for (const line of [firm.address, contactLine(firm)].filter(Boolean) as string[]) {
+      y += 12;
+      doc.text(line, pageWidth / 2, y, { align: "center", maxWidth: pageWidth - margin * 2 - 100 });
     }
-    headerBottom = 62;
-    doc.setDrawColor(226, 232, 240);
-    doc.line(margin, headerBottom, pageWidth - margin, headerBottom);
-    headerBottom += 20;
+    y += 26;
+  } else {
+    y += 6;
   }
-  doc.setTextColor(0);
 
-  // ---- Document title ----
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(14);
-  doc.text(title, margin, headerBottom);
+  // ---- Report name: centred, bold, underlined ----
+  doc.setFont(font, "bold");
+  doc.setFontSize(17);
+  doc.text(clean(title), pageWidth / 2, y, { align: "center" });
+  const tw = doc.getTextWidth(clean(title));
+  doc.setLineWidth(0.9);
+  doc.setDrawColor(0);
+  doc.line(pageWidth / 2 - tw / 2, y + 3, pageWidth / 2 + tw / 2, y + 3);
+  y += 26;
 
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(9);
-  doc.setTextColor(110);
-  const sub = `${opts?.subtitle ? opts.subtitle + "  ·  " : ""}Generated ${new Date().toLocaleString("en-IN")}`;
-  doc.text(sub, margin, headerBottom + 16);
-  doc.setTextColor(0);
+  // ---- Period, on the left ----
+  if (opts?.subtitle) {
+    doc.setFontSize(12);
+    doc.text(clean(opts.subtitle), margin, y);
+    y += 14;
+  }
 
-  // jsPDF's built-in fonts have no rupee glyph, so render it as "Rs." in the PDF only.
-  const clean = (c: Cell) => String(c ?? "").replace(/₹/g, "Rs.");
   const from = opts?.rightAlignFrom;
   const columnStyles: Record<number, { halign: "right" }> = {};
   if (from != null) for (let i = from; i < head.length; i++) columnStyles[i] = { halign: "right" };
-
-  autoTable(doc, {
-    head: [head.map(clean)],
-    body: rows.map((r) => r.map(clean)),
-    startY: headerBottom + 30,
-    styles: { fontSize: 8.5, cellPadding: 5, lineColor: [226, 232, 240], lineWidth: 0.5 },
-    headStyles: { fillColor: accentRgb, textColor: [255, 255, 255], fontStyle: "bold" },
-    alternateRowStyles: { fillColor: [248, 250, 252] },
-    columnStyles,
-    margin: { left: margin, right: margin, bottom: 46 },
+  const base = {
+    theme: "plain",
+    styles: { font, fontSize: 8.5, cellPadding: { top: 4, bottom: 4, left: 4, right: 4 }, textColor: [0, 0, 0] },
+    headStyles: { fillColor: headFill, textColor: headText, fontStyle: "bold" },
+    margin: { left: margin, right: margin, bottom: 40 },
     didDrawPage: () => {
-      const page = doc.getNumberOfPages();
       const pageH = doc.internal.pageSize.getHeight();
-      doc.setDrawColor(226, 232, 240);
-      doc.line(margin, pageH - 34, pageWidth - margin, pageH - 34);
-      doc.setFontSize(8);
-      doc.setTextColor(150);
-      if (firm?.footerNote) doc.text(firm.footerNote, margin, pageH - 20, { maxWidth: pageWidth - margin * 2 - 60 });
-      doc.text(`Page ${page}`, pageWidth - margin, pageH - 20, { align: "right" });
+      doc.setFont(font, "normal");
+      doc.setFontSize(7.5);
+      doc.setTextColor(120);
+      if (firm?.footerNote) doc.text(clean(firm.footerNote), margin, pageH - 18, { maxWidth: pageWidth - margin * 2 - 60 });
+      doc.text(`Page ${doc.getNumberOfPages()}`, pageWidth - margin, pageH - 18, { align: "right" });
       doc.setTextColor(0);
     },
-  });
+  };
+  // A thin rule under every row, no grid — Vyapar's ruled-paper look.
+  const ruleBelow = (data: { section: string; cell: { x: number; y: number; width: number; height: number } }) => {
+    if (data.section !== "body") return;
+    doc.setDrawColor(200);
+    doc.setLineWidth(0.5);
+    doc.line(data.cell.x, data.cell.y + data.cell.height, data.cell.x + data.cell.width, data.cell.y + data.cell.height);
+  };
+  const lastY = () => (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY;
+  const totalRows = (opts?.totals ?? []).map((r) =>
+    r.map((c) => ({ content: clean(c), styles: { fillColor: VYAPAR_GREY, fontStyle: "bold" } })),
+  );
+
+  const d = opts?.detail;
+  const hasDetail = !!d && rows.some((_, i) => (d.rows[i]?.length ?? 0) > 0 || !!d.notes?.[i]);
+  if (!hasDetail) {
+    autoTable(doc, {
+      ...base,
+      head: [head.map(clean)],
+      body: [...rows.map((r) => r.map(clean)), ...totalRows],
+      startY: y,
+      columnStyles,
+      bodyStyles: { fontStyle: "normal" },
+      didDrawCell: ruleBelow,
+    });
+  } else {
+    // Row by row: the bill, then its items as an indented table, Sub Total, Description.
+    let at = y;
+    const dr = d!.alignRightFrom ?? d!.head.length;
+    const detailCols: Record<number, { halign: "right" }> = {};
+    for (let i = dr; i < d!.head.length; i++) detailCols[i] = { halign: "right" };
+    const width = pageWidth - margin * 2;
+    rows.forEach((r, ri) => {
+      autoTable(doc, {
+        ...base,
+        head: ri === 0 ? [head.map(clean)] : undefined,
+        showHead: ri === 0 ? "firstPage" : "never",
+        body: [r.map(clean)],
+        startY: at,
+        columnStyles,
+        bodyStyles: { fontStyle: "bold" },
+        didDrawCell: (data: { section: string; cell: { x: number; y: number; width: number; height: number } }) => {
+          // A rule above each bill separates the entries.
+          if (data.section !== "body") return;
+          doc.setDrawColor(150);
+          doc.setLineWidth(0.6);
+          doc.line(data.cell.x, data.cell.y, data.cell.x + data.cell.width, data.cell.y);
+        },
+      });
+      at = lastY();
+      const lines = d!.rows[ri] ?? [];
+      if (lines.length) {
+        autoTable(doc, {
+          ...base,
+          head: [d!.head.map(clean)],
+          body: lines.map((l) => {
+            const isTotal = l.some((c) => /^total$/i.test(String(c ?? "")));
+            return l.map((c) => (isTotal ? { content: clean(c), styles: { fontStyle: "bold" } } : clean(c)));
+          }),
+          startY: at + 4,
+          margin: { ...base.margin, left: margin + 50 },
+          tableWidth: width - 50,
+          styles: { ...base.styles, fontSize: 8 },
+          headStyles: { fillColor: VYAPAR_GREY, textColor: [0, 0, 0], fontStyle: "bold" },
+          columnStyles: detailCols,
+          didDrawCell: ruleBelow,
+        });
+        at = lastY();
+      }
+      const foot = d!.footer?.[ri] ?? [];
+      if (foot.length) {
+        doc.setFont(font, "normal");
+        doc.setFontSize(8);
+        for (const [k, v] of foot) {
+          at += 13;
+          if (at > doc.internal.pageSize.getHeight() - 50) {
+            doc.addPage();
+            at = 40;
+          }
+          doc.text(clean(k), pageWidth - margin - 180, at);
+          doc.text(clean(v), pageWidth - margin - 4, at, { align: "right" });
+          doc.setDrawColor(0);
+          doc.setLineWidth(0.5);
+          doc.line(pageWidth - margin - 190, at + 4, pageWidth - margin, at + 4);
+        }
+        at += 6;
+      }
+      const note = d!.notes?.[ri];
+      if (note) {
+        at += 14;
+        if (at > doc.internal.pageSize.getHeight() - 50) {
+          doc.addPage();
+          at = 40;
+        }
+        doc.setFontSize(8.5);
+        doc.setFont(font, "bold");
+        doc.text("Description:", margin + 2, at);
+        const lw = doc.getTextWidth("Description: ");
+        doc.setFont(font, "normal");
+        doc.text(clean(note), margin + 2 + lw, at, { maxWidth: width - lw - 4 });
+        at += 4;
+      }
+      at += 2;
+    });
+    if (totalRows.length) {
+      autoTable(doc, { ...base, body: totalRows, startY: at + 2, columnStyles, showHead: "never" });
+    }
+  }
 
   if (opts?.preview) return doc;
   doc.save(`${title.replace(/[^\w\-]+/g, "-").toLowerCase()}-${todayIST()}.pdf`);

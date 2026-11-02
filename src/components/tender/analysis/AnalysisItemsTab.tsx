@@ -1,11 +1,13 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import {
   BookOpen,
   ChevronDown,
   ChevronRight,
+  FileUp,
   FolderPlus,
+  Heading,
   Pencil,
   Plus,
   Search,
@@ -16,6 +18,7 @@ import { Modal } from "@/components/Modal";
 import { Select } from "@/components/Select";
 import { RowMenu, RowMenuDivider, RowMenuItem } from "@/components/RowMenu";
 import { LibraryItemPicker } from "@/components/tender/analysis/LibraryItemPicker";
+import { BoqPdfImport } from "@/components/tender/analysis/BoqPdfImport";
 import { inr } from "@/lib/format";
 import { expenseAmount, findLibraryRate, groupedBoq, isSubSr } from "@/lib/tenderAnalysisCalc";
 import { useAnalysisStore } from "@/lib/tenderAnalysisStore";
@@ -38,6 +41,21 @@ export function AnalysisItemsTab({ analysis, totals }: { analysis: TenderAnalysi
   const renameGroup = useAnalysisStore((s) => s.renameGroup);
   const removeGroup = useAnalysisStore((s) => s.removeGroup);
   const library = useAnalysisStore((s) => s.library);
+  const moveBoqLines = useAnalysisStore((s) => s.moveBoqLines);
+  const removeBoqLines = useAnalysisStore((s) => s.removeBoqLines);
+  const lineToTitle = useAnalysisStore((s) => s.lineToTitle);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [importing, setImporting] = useState<File | null>(null);
+  const [imported, setImported] = useState(0);
+  /** Lines ticked for "Move to title" / delete. */
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const toggleSelected = (lineId: string) =>
+    setSelected((p) => {
+      const n = new Set(p);
+      if (n.has(lineId)) n.delete(lineId);
+      else n.add(lineId);
+      return n;
+    });
 
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<"all" | "loss" | "unpriced">("all");
@@ -108,6 +126,25 @@ export function AnalysisItemsTab({ analysis, totals }: { analysis: TenderAnalysi
         )}
 
         <div className="ml-auto flex items-center gap-2">
+          <input
+            ref={fileRef}
+            type="file"
+            accept="application/pdf,image/jpeg,image/png"
+            className="hidden"
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              e.target.value = "";
+              if (f) setImporting(f);
+            }}
+          />
+          <button
+            type="button"
+            onClick={() => fileRef.current?.click()}
+            title="Read every item from the department's BOQ PDF"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-700 transition-all duration-150 hover:border-brand-accent hover:text-brand-accent active:scale-95"
+          >
+            <FileUp size={13} /> Import BOQ (PDF)
+          </button>
           <button
             type="button"
             onClick={() => setNewFamily(true)}
@@ -117,6 +154,55 @@ export function AnalysisItemsTab({ analysis, totals }: { analysis: TenderAnalysi
           </button>
         </div>
       </div>
+
+      {imported > 0 && (
+        <p className="rounded-lg bg-emerald-50 px-3 py-2 text-xs text-emerald-700">
+          {imported} item{imported === 1 ? "" : "s"} imported from the PDF. Tick lines and use Move to title to arrange them, or
+          use the heading icon on a line to make it a title.
+        </p>
+      )}
+
+      {selected.size > 0 && (
+        <div className="sticky top-2 z-10 flex flex-wrap items-center gap-2 rounded-lg border border-cyan-200 bg-cyan-50 px-3 py-2 text-xs text-gray-700 shadow-sm">
+          <span className="font-semibold">{selected.size} selected</span>
+          <span className="text-gray-400">Move to</span>
+          <div className="w-64">
+            <Select
+              value=""
+              onChange={(key) => {
+                if (!key) return;
+                if (key === "__new") {
+                  setNewFamily(true);
+                  return;
+                }
+                moveBoqLines(analysis.id, [...selected], key);
+                setSelected(new Set());
+                setCollapsed((p) => {
+                  const n = new Set(p);
+                  n.delete(key);
+                  return n;
+                });
+              }}
+              placeholder="Pick a title"
+              options={[...analysis.groups.map((g) => ({ value: g.key, label: g.label })), { value: "__new", label: "+ New title…" }]}
+            />
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              if (!confirm(`Delete ${selected.size} line${selected.size === 1 ? "" : "s"}?`)) return;
+              removeBoqLines(analysis.id, [...selected]);
+              setSelected(new Set());
+            }}
+            className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-rose-600 hover:bg-rose-50"
+          >
+            <Trash2 size={12} /> Delete
+          </button>
+          <button type="button" onClick={() => setSelected(new Set())} className="ml-auto text-gray-500 hover:underline">
+            Clear
+          </button>
+        </div>
+      )}
 
       {added > 0 && (
         <p className="rounded-lg bg-emerald-50 px-3 py-2 text-xs text-emerald-700">
@@ -171,6 +257,19 @@ export function AnalysisItemsTab({ analysis, totals }: { analysis: TenderAnalysi
                 onAddLine={() => setPicking({ key: g.key, label: g.label })}
                 onRename={() => setRenaming({ key: g.key, label: g.label })}
                 onDelete={() => setDeleting({ key: g.key, label: g.label, count: g.lines.length })}
+                selected={selected}
+                onSelect={toggleSelected}
+                onSelectAll={(on) =>
+                  setSelected((p) => {
+                    const n = new Set(p);
+                    for (const c of g.lines) {
+                      if (on) n.add(c.line.id);
+                      else n.delete(c.line.id);
+                    }
+                    return n;
+                  })
+                }
+                onMakeTitle={(lineId) => lineToTitle(analysis.id, lineId)}
               />
             ))}
             {visible.length === 0 && (
@@ -223,8 +322,27 @@ export function AnalysisItemsTab({ analysis, totals }: { analysis: TenderAnalysi
           hint="Earthwork, DI K7 pipe supply, Road restoration — the headings this schedule is built from."
           onClose={() => setNewFamily(false)}
           onSave={(label) => {
-            addGroup(analysis.id, label);
+            const key = addGroup(analysis.id, label);
+            // Opened from the selection bar's "+ New title…": the ticked lines go straight into it.
+            if (selected.size) {
+              moveBoqLines(analysis.id, [...selected], key);
+              setSelected(new Set());
+            }
             setNewFamily(false);
+          }}
+        />
+      )}
+
+      {importing && (
+        <BoqPdfImport
+          analysis={analysis}
+          file={importing}
+          onClose={() => setImporting(null)}
+          onDone={(n) => {
+            setImporting(null);
+            setImported(n);
+            // Open everything so the imported rows are in view.
+            setCollapsed(new Set());
           }}
         />
       )}
@@ -295,6 +413,10 @@ function GroupRows({
   onAddLine,
   onRename,
   onDelete,
+  selected,
+  onSelect,
+  onSelectAll,
+  onMakeTitle,
 }: {
   group: BoqGroupCalc;
   collapsed: boolean;
@@ -306,7 +428,12 @@ function GroupRows({
   onAddLine: () => void;
   onRename: () => void;
   onDelete: () => void;
+  selected: Set<string>;
+  onSelect: (lineId: string) => void;
+  onSelectAll: (on: boolean) => void;
+  onMakeTitle: (lineId: string) => void;
 }) {
+  const allTicked = group.lines.length > 0 && group.lines.every((c) => selected.has(c.line.id));
   // The header always shows now. It used to be hidden for a family of one, on the grounds that a
   // heading over a single line is noise — but a family is something somebody named and it carries
   // the button that adds its next line, so hiding it hides the way forward.
@@ -316,6 +443,16 @@ function GroupRows({
       {(
         <tr className="border-b border-gray-100 bg-gray-50/70">
           <td className="px-3 py-2">
+            <div className="flex items-center gap-1.5">
+            {!collapsed && group.lines.length > 0 && (
+              <input
+                type="checkbox"
+                checked={allTicked}
+                onChange={(e) => onSelectAll(e.target.checked)}
+                aria-label={`Select every item in ${group.label}`}
+                className="accent-cyan-600"
+              />
+            )}
             <button
               type="button"
               onClick={onToggle}
@@ -324,6 +461,7 @@ function GroupRows({
             >
               {collapsed ? <ChevronRight size={15} /> : <ChevronDown size={15} />}
             </button>
+            </div>
           </td>
           {/* Spans Item + Qty + Unit + Tender rate. A title's name is long — "Excavation trench Soft
               Murrum/Clay/Sand (all lifts)" — and squeezing it into the Item column alone wrapped it
@@ -412,13 +550,22 @@ function GroupRows({
         group.lines.map((c) => {
           const l = c.line;
           return (
-            <tr key={l.id} className={`border-b border-gray-100 ${c.isLoss ? "bg-rose-50/40" : "hover:bg-gray-50/60"}`}>
+            <tr key={l.id} className={`border-b border-gray-100 ${selected.has(l.id) ? "bg-cyan-50/60" : c.isLoss ? "bg-rose-50/40" : "hover:bg-gray-50/60"}`}>
               <td className="px-3 py-1.5">
+                <div className="flex items-center gap-1.5">
+                <input
+                  type="checkbox"
+                  checked={selected.has(l.id)}
+                  onChange={() => onSelect(l.id)}
+                  aria-label={`Select ${l.description || "line"}`}
+                  className="accent-cyan-600"
+                />
                 <TextCell
                   value={l.srNo}
                   onCommit={(v) => onEdit(l.id, { srNo: v })}
                   className={`w-12 text-xs tabular-nums ${isSubSr(l.srNo) ? "pl-3 text-gray-400" : "font-medium text-gray-600"}`}
                 />
+                </div>
               </td>
               <td className="px-3 py-1.5">
                 <div className="flex items-center gap-1.5">
@@ -472,6 +619,15 @@ function GroupRows({
 
               <td className="px-2 py-1.5">
                 <div className="flex items-center justify-end gap-1">
+                  <button
+                    type="button"
+                    onClick={() => onMakeTitle(l.id)}
+                    title="Use as title — the lines below it, up to the next line without quantity, move under it"
+                    aria-label={`Use ${l.description || "line"} as a title`}
+                    className="text-gray-300 transition-colors duration-150 hover:text-brand-accent"
+                  >
+                    <Heading size={13} />
+                  </button>
                   {hasLibraryRate(l) && (
                     <button
                       type="button"

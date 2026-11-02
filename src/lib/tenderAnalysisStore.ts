@@ -98,6 +98,23 @@ export interface AnalysisState {
   removeBoqLine: (id: string, lineId: string) => void;
   /** Replace the whole schedule — what an import means here. */
   importBoqLines: (id: string, lines: BoqLine[], groups: BoqGroup[]) => void;
+  /**
+   * Add rows read from a BOQ PDF. All go under one title (an existing one, or a new one named
+   * `newTitle`) unless `headingsAsTitles`, when each heading row opens its own title.
+   */
+  appendBoqRows: (
+    id: string,
+    rows: { srNo: string; description: string; unit: string; qty: number; rate: number; heading: boolean }[],
+    opts: { groupKey?: string; newTitle?: string; headingsAsTitles?: boolean },
+  ) => number;
+  /** Re-file lines under another title, keeping their order. */
+  moveBoqLines: (id: string, lineIds: string[], groupKey: string) => void;
+  removeBoqLines: (id: string, lineIds: string[]) => void;
+  /**
+   * Turn a line into a title: it opens a new title just after its own, taking the lines below it
+   * up to the next line with no quantity (the next heading). The line itself goes.
+   */
+  lineToTitle: (id: string, lineId: string) => void;
   /** Pull a line's rates in from the rate library, matched on its description + unit. */
   applyLibraryRates: (id: string, lineId: string) => boolean;
 
@@ -277,6 +294,77 @@ export const useAnalysisStore = create<AnalysisState>()(
         }),
 
       importBoqLines: (id, lines, groups) => edit(set, id, (a) => ({ ...a, boqLines: lines, groups })),
+
+      appendBoqRows: (id, rows, opts) => {
+        let added = 0;
+        edit(set, id, (a) => {
+          const groups = [...a.groups];
+          const lines: BoqLine[] = [];
+          const open = (label: string) => {
+            const key = uid("g");
+            groups.push({ key, label: label.replace(/\s+/g, " ").trim().slice(0, 160) || "Imported BOQ" });
+            return key;
+          };
+          let key = opts.groupKey && groups.some((g) => g.key === opts.groupKey) ? opts.groupKey : null;
+          for (const r of rows) {
+            if (opts.headingsAsTitles && r.heading) {
+              key = open(r.description);
+              continue;
+            }
+            key ??= open(opts.newTitle ?? "Imported BOQ");
+            lines.push({
+              id: uid("bl"),
+              srNo: r.srNo,
+              groupKey: key,
+              description: r.description,
+              qty: r.qty,
+              unit: r.unit,
+              rate: r.rate,
+              materialRate: null,
+              labourRate: null,
+              otherRate: null,
+            });
+          }
+          added = lines.length;
+          return { ...a, boqLines: [...a.boqLines, ...lines], groups };
+        });
+        return added;
+      },
+
+      moveBoqLines: (id, lineIds, groupKey) =>
+        edit(set, id, (a) => {
+          const ids = new Set(lineIds);
+          // Moved lines go to the end of their new title, in the order they had.
+          const moved = a.boqLines.filter((l) => ids.has(l.id)).map((l) => ({ ...l, groupKey }));
+          return { ...a, boqLines: [...a.boqLines.filter((l) => !ids.has(l.id)), ...moved] };
+        }),
+
+      removeBoqLines: (id, lineIds) =>
+        edit(set, id, (a) => {
+          const ids = new Set(lineIds);
+          return { ...a, boqLines: a.boqLines.filter((l) => !ids.has(l.id)) };
+        }),
+
+      lineToTitle: (id, lineId) =>
+        edit(set, id, (a) => {
+          const line = a.boqLines.find((l) => l.id === lineId);
+          if (!line) return a;
+          const same = a.boqLines.filter((l) => l.groupKey === line.groupKey);
+          const after = same.slice(same.indexOf(line) + 1);
+          const stop = after.findIndex((l) => !l.qty && !l.rate);
+          const taken = new Set((stop < 0 ? after : after.slice(0, stop)).map((l) => l.id));
+          const key = uid("g");
+          const at = a.groups.findIndex((g) => g.key === line.groupKey);
+          const groups = [...a.groups];
+          groups.splice(at < 0 ? groups.length : at + 1, 0, {
+            key,
+            label: line.description.replace(/\s+/g, " ").trim().slice(0, 160) || "New title",
+          });
+          const boqLines = a.boqLines
+            .filter((l) => l.id !== lineId)
+            .map((l) => (taken.has(l.id) ? { ...l, groupKey: key } : l));
+          return { ...a, boqLines, groups };
+        }),
 
       applyLibraryRates: (id, lineId) => {
         const a = get().analyses.find((x) => x.id === id);

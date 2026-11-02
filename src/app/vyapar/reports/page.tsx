@@ -18,7 +18,7 @@ import { Spinner } from "@/components/Spinner";
 import { DatePicker } from "@/components/DatePicker";
 import { Select } from "@/components/Select";
 // `ReportDetail` is aliased: this file already has a component of that name (the report shell).
-import { ReportTable, type ReportColumn, type ReportDetail as ReportLineDetail } from "@/components/vyapar/ReportTable";
+import { ReportPeriodContext, ReportTable, type ReportColumn, type ReportDetail as ReportLineDetail } from "@/components/vyapar/ReportTable";
 import { inr, qty, bookDate, toIsoDate } from "@/lib/format";
 import { useVyaparProjectId } from "@/lib/projectScope";
 import * as vyapar from "@/lib/vyaparApi";
@@ -301,6 +301,16 @@ function ReportDetail({ id, onBack }: { id: ReportId; onBack: () => void }) {
           <Spinner size={16} className="text-brand-accent" /> Loading…
         </div>
       ) : (
+        <ReportPeriodContext.Provider
+          value={
+            // Vyapar's line under the title: "Date: 30/04/2026" for one day, else the duration.
+            effFrom && effTo && effFrom === effTo
+              ? `Date: ${bookDate(effFrom)}`
+              : effFrom || effTo
+                ? `Duration: From ${effFrom ? bookDate(effFrom) : "the start"} to ${effTo ? bookDate(effTo) : "today"}`
+                : undefined
+          }
+        >
         <ReportMetaContext.Provider
           value={{ title: meta.title, filename: meta.title.toLowerCase().replace(/[^a-z0-9]+/g, "-") }}
         >
@@ -316,6 +326,7 @@ function ReportDetail({ id, onBack }: { id: ReportId; onBack: () => void }) {
             onDownload={download}
           />
         </ReportMetaContext.Provider>
+        </ReportPeriodContext.Provider>
       )}
     </div>
   );
@@ -421,30 +432,95 @@ function ReportBody({
   }
 
   if (id === "daybook") {
-    // Everything that happened, documents and payments together, oldest first (KAN-70).
-    type Entry = { date: string | null; type: string; name: string; ref: string; in: number; out: number; href: string | null };
+    // Everything that happened, documents and payments together, oldest first (KAN-70) — in Vyapar's
+    // own Day Book columns, with each bill's items, Sub Total and Description under it.
+    type Entry = {
+      key: string;
+      date: string | null;
+      name: string;
+      type: string;
+      paymentType: string;
+      total: number;
+      received: number | null;
+      paid: number | null;
+      balance: number | null;
+      invoice: Invoice | null;
+      note: string | null;
+      href: string | null;
+    };
+    const moneyIn = (t: string) => t === "SALE" || t === "PURCHASE_RETURN";
+    const moneyOut = (t: string) => t === "PURCHASE" || t === "SALE_RETURN" || t === "EXPENSE";
     const entries: Entry[] = [
-      ...allInvoices.map((i) => ({
-        date: i.invoiceDate,
-        type: vyapar.DOC_LABEL[i.docType],
-        name: i.partyName ?? "—",
-        ref: fullInvoiceNo(i),
-        in: i.docType === "SALE" || i.docType === "PURCHASE_RETURN" ? i.total : 0,
-        out: i.docType === "PURCHASE" || i.docType === "SALE_RETURN" || i.docType === "EXPENSE" ? i.total : 0,
-        href: docTypeHref(i.docType, i.id),
-      })),
+      ...allInvoices
+        .filter((i) => moneyIn(i.docType) || moneyOut(i.docType))
+        .map((i) => ({
+          key: `i${i.id}`,
+          date: i.invoiceDate,
+          // An expense is listed under its category, the way Vyapar's Day Book shows it.
+          name: (i.docType === "EXPENSE" ? i.lines[0]?.itemName : null) ?? i.partyName ?? i.billingName ?? "—",
+          type: vyapar.DOC_LABEL[i.docType],
+          paymentType: i.paidAmount > 0 || i.isCash ? i.paymentType : "Credit",
+          total: i.total,
+          received: moneyIn(i.docType) ? i.paidAmount : null,
+          paid: moneyOut(i.docType) ? i.paidAmount : null,
+          balance: i.balance,
+          invoice: i.docType === "EXPENSE" ? null : i,
+          note: i.description?.trim() || i.notes?.trim() || null,
+          href: docTypeHref(i.docType, i.id),
+        })),
       ...payments.map((p) => ({
+        key: `p${p.id}`,
         date: p.paymentDate,
-        type: p.direction === "IN" ? "Payment-In" : "Payment-Out",
         name: p.partyName ?? "—",
-        ref: p.reference ?? "—",
-        in: p.direction === "IN" ? p.amount : 0,
-        out: p.direction === "OUT" ? p.amount : 0,
+        type: p.direction === "IN" ? "Payment-in" : "Payment-out",
+        paymentType: p.mode,
+        total: p.amount,
+        received: p.direction === "IN" ? p.amount : null,
+        paid: p.direction === "OUT" ? p.amount : null,
+        balance: null,
+        invoice: null,
+        note: p.notes?.trim() || null,
         href: txnHref(p.direction === "IN" ? "Payment-In" : "Payment-Out", p.id),
       })),
     ].sort((a, b) => toIsoDate(a.date ?? "").localeCompare(toIsoDate(b.date ?? "")));
-    const inSum = sum(entries.map((e) => e.in));
-    const outSum = sum(entries.map((e) => e.out));
+    const inSum = sum(entries.map((e) => e.received ?? 0));
+    const outSum = sum(entries.map((e) => e.paid ?? 0));
+    const money = (v: number | null) => (v == null ? "" : inr(v));
+    const columns: ReportColumn<Entry>[] = [
+      { key: "date", label: "Date", value: (e) => fmt(e.date), sortValue: (e) => toIsoDate(e.date ?? ""), printOptional: true },
+      { key: "name", label: "Name", value: (e) => e.name },
+      { key: "type", label: "Txn Type", value: (e) => e.type, type: "select" },
+      { key: "paymentType", label: "Payment Type", value: (e) => e.paymentType, type: "select" },
+      { key: "total", label: "Total Amount", value: (e) => inr(e.total), sortValue: (e) => e.total, type: "number", align: "right" },
+      { key: "received", label: "Received Amount", value: (e) => money(e.received), sortValue: (e) => e.received, type: "number", align: "right" },
+      { key: "paid", label: "Paid Amount", value: (e) => money(e.paid), sortValue: (e) => e.paid, type: "number", align: "right" },
+      { key: "balance", label: "Balance Amount", value: (e) => money(e.balance), sortValue: (e) => e.balance, type: "number", align: "right" },
+    ];
+    const detail: ReportLineDetail<Entry> = {
+      label: "Item details and descriptions",
+      defaultOn: true,
+      head: ["#", "Item Name", "HSN/ SAC", "Quantity", "Price/ Unit", "Amount"],
+      alignRightFrom: 3,
+      rows: (e) => {
+        const lines = e.invoice?.lines ?? [];
+        if (!lines.length) return [];
+        return [
+          ...lines.map((l, n) => [
+            n + 1,
+            l.itemName,
+            l.hsn?.trim() || (l.itemId != null ? (itemById.get(l.itemId)?.hsn ?? "") : ""),
+            qty(l.quantity),
+            inr(l.rate),
+            inr(l.amount),
+          ]),
+          ["", "Total", "", qty(sum(lines.map((l) => l.quantity))), "", inr(sum(lines.map((l) => l.amount)))],
+        ];
+      },
+      footer: (e) => (e.invoice?.lines.length ? [["Sub Total:", inr(e.invoice.subTotal)]] : []),
+      note: (e) => e.note,
+    };
+    // The print-out carries Name … Balance; Date is on screen only (the period is in the heading).
+    const blank = (n: number) => Array<string>(n).fill("");
     return (
       <>
         <SummaryStrip
@@ -452,15 +528,27 @@ function ReportBody({
             { label: "Entries", value: String(entries.length) },
             { label: "Money in", value: inr(inSum) },
             { label: "Money out", value: inr(outSum) },
-            { label: "Net", value: inr(inSum - outSum) },
+            { label: "Money In - Money Out", value: inr(inSum - outSum) },
           ]}
-          onDownload={() => onDownload(entries.map((e) => [e.date ?? "", e.type, e.name, e.ref, e.in, e.out]), ["Date", "Type", "Name", "Reference", "In", "Out"])}
+          onDownload={() =>
+            onDownload(
+              entries.map((e) => [e.date ?? "", e.name, e.type, e.paymentType, e.total, e.received ?? "", e.paid ?? "", e.balance ?? ""]),
+              ["Date", "Name", "Txn Type", "Payment Type", "Total Amount", "Received Amount", "Paid Amount", "Balance Amount"],
+            )
+          }
         />
-        <SimpleTable
-          head={["Date", "Type", "Name", "Reference", "Money In", "Money Out"]}
-          rows={entries.map((e) => [fmt(e.date), e.type, e.name, e.ref, e.in ? inr(e.in) : "—", e.out ? inr(e.out) : "—"])}
-          links={entries.map((e) => e.href)}
-          alignRight={[4, 5]}
+        <ReportTable
+          title="Day Book Report"
+          filename="day-book"
+          minWidth={1000}
+          columns={columns}
+          rows={entries}
+          detail={detail}
+          rowHref={(e) => e.href}
+          totals={[
+            ["Total", ...blank(3), inr(inSum), inr(outSum), ""],
+            ["Money In - Money Out", ...blank(5), inr(inSum - outSum)],
+          ]}
         />
       </>
     );
