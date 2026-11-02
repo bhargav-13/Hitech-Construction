@@ -344,35 +344,56 @@ function Thread({ q, mode, myId, onChanged, onDeleted }: { q: QueryApi; mode: "m
   );
 }
 
+/** The language a message is really written in — the script wins over the picker it was sent with. */
+function writtenIn(text: string, language: string | null): QueryLanguage {
+  if (/[઀-૿]/.test(text)) return "gu";
+  if (/[ऀ-ॿ]/.test(text)) return "hi";
+  return language === "gu" || language === "hi" ? (language as QueryLanguage) : "en";
+}
+
 /**
- * "Translate to English" under a Gujarati / Hindi message (KAN-57). Shown for anything written in a
- * non-English script or marked gu/hi; the translation is fetched once and kept on screen.
+ * Translate under every message, into each of the other two languages (KAN-57). It used to offer
+ * English only, and only under Gujarati / Hindi messages — so an English reply from HR could never
+ * be read in Gujarati or Hindi. The reader's own language (the composer's picker) comes first.
  */
 function Translate({ text, language, light }: { text: string; language: string | null; light: boolean }) {
-  const [out, setOut] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [out, setOut] = useState<{ to: QueryLanguage; text: string } | null>(null);
+  const [busy, setBusy] = useState<QueryLanguage | null>(null);
   const [err, setErr] = useState("");
-  const foreign = (language && language !== "en") || /[ऀ-૿]/.test(text);
-  if (!foreign) return null;
-  if (out) return <p className={`mt-1 border-t pt-1 text-[12px] italic ${light ? "border-white/30 text-white/90" : "border-gray-100 text-gray-600"}`}>{out}</p>;
+  const source = writtenIn(text, language);
+  const mine = (() => {
+    try { return (localStorage.getItem("hitech.query.lang") as QueryLanguage) || "en"; } catch { return "en" as QueryLanguage; }
+  })();
+  const targets = LANGS.filter((l) => l.value !== source).sort((a, b) => Number(b.value === mine) - Number(a.value === mine));
+
+  async function go(to: QueryLanguage) {
+    setBusy(to);
+    setErr("");
+    try {
+      setOut({ to, text: (await translateText(text, to)).translation });
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Couldn't translate.");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  const link = `flex items-center gap-1 text-[11px] font-medium hover:underline ${light ? "text-white/90" : "text-brand-accent"}`;
   return (
     <div className="mt-1">
-      <button
-        onClick={async () => {
-          setBusy(true);
-          setErr("");
-          try {
-            setOut((await translateText(text, "en")).translation);
-          } catch (e) {
-            setErr(e instanceof Error ? e.message : "Couldn't translate.");
-          } finally {
-            setBusy(false);
-          }
-        }}
-        className={`flex items-center gap-1 text-[11px] font-medium hover:underline ${light ? "text-white/90" : "text-brand-accent"}`}
-      >
-        {busy ? <Loader2 size={11} className="animate-spin" /> : <Languages size={11} />} Translate to English
-      </button>
+      {out && (
+        <p lang={out.to} className={`mb-1 border-t pt-1 text-[12px] italic ${light ? "border-white/30 text-white/90" : "border-gray-100 text-gray-600"}`}>
+          {out.text}
+        </p>
+      )}
+      <div className="flex flex-wrap items-center gap-x-2.5 gap-y-0.5">
+        <Languages size={11} className={light ? "text-white/80" : "text-gray-400"} />
+        {targets.map((l) => (
+          <button key={l.value} onClick={() => void go(l.value)} disabled={busy != null} className={`${link} ${out?.to === l.value ? "underline" : ""}`}>
+            {busy === l.value && <Loader2 size={11} className="animate-spin" />} {l.label}
+          </button>
+        ))}
+      </div>
       {err && <p className={`text-[11px] ${light ? "text-white" : "text-rose-600"}`}>{err}</p>}
     </div>
   );
