@@ -14,6 +14,7 @@ import { findAnalysis, useAnalysisStore } from "@/lib/tenderAnalysisStore";
 import { useTenderStore } from "@/lib/tenderStore";
 import { tmoney } from "@/lib/tenderHelpers";
 import { ClipboardList } from "lucide-react";
+import { useCan } from "@/lib/permissions";
 
 /**
  * The analysis workspace for one tender.
@@ -31,6 +32,14 @@ export default function TenderAnalysisPage() {
   const tenderRef = params.id;
 
   const [tab, setTab] = useState<Tab>("Items");
+  // KAN-87: two switches under Tender -> Health Analysis in Roles & Access. Without Costs & Margins
+  // the page is the schedule only (no verdict bar, no cost columns, no rate library); without
+  // Scenarios that tab is gone. Granted to every existing analysis role on deploy (V104).
+  const can = useCan();
+  const showCosts = can("TENDER_ANALYSIS_COSTS");
+  const showScenarios = showCosts && can("TENDER_ANALYSIS_SCENARIOS");
+  const tabs = TABS.filter((t) => (t === "Scenarios" ? showScenarios : t === "Rate library" ? showCosts : true));
+  const current: Tab = tabs.includes(tab) ? tab : "Items";
 
   const tender = useTenderStore((s) => s.tenders.find((t) => t.id === tenderRef));
   const analyses = useAnalysisStore((s) => s.analyses);
@@ -115,20 +124,22 @@ export default function TenderAnalysisPage() {
           </div>
         </header>
 
-        <AnalysisVerdictBar
-          totals={totals!}
-          bidPct={analysis.bidPct}
-          onBidChange={(v) => setBidPct(analysis.id, v)}
-        />
+        {showCosts && (
+          <AnalysisVerdictBar
+            totals={totals!}
+            bidPct={analysis.bidPct}
+            onBidChange={(v) => setBidPct(analysis.id, v)}
+          />
+        )}
 
         <nav className="flex gap-1 overflow-x-auto border-b border-gray-200">
-          {TABS.map((t) => (
+          {tabs.map((t) => (
             <button
               key={t}
               type="button"
               onClick={() => setTab(t)}
               className={`shrink-0 border-b-2 px-3.5 py-2.5 text-sm transition-colors duration-150 ${
-                tab === t
+                current === t
                   ? "border-brand-accent font-medium text-brand-accent"
                   : "border-transparent text-gray-500 hover:text-gray-800"
               }`}
@@ -138,9 +149,9 @@ export default function TenderAnalysisPage() {
           ))}
         </nav>
 
-        {tab === "Items" && <AnalysisItemsTab analysis={analysis} totals={totals!} />}
-        {tab === "Scenarios" && <AnalysisScenariosTab analysis={analysis} />}
-        {tab === "Rate library" && <AnalysisLibraryTab analysis={analysis} />}
+        {current === "Items" && <AnalysisItemsTab analysis={analysis} totals={totals!} showCosts={showCosts} />}
+        {current === "Scenarios" && <AnalysisScenariosTab analysis={analysis} />}
+        {current === "Rate library" && <AnalysisLibraryTab analysis={analysis} />}
       </div>
     </TenderShell>
   );

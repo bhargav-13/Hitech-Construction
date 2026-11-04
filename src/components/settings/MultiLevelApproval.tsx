@@ -48,7 +48,10 @@ import type {
  */
 
 type Step = { roleIds: number[]; scope: ApprovalScope };
-type Draft = { mode: ApprovalMode; published: boolean; skipEmpty: boolean; levels: Step[] };
+type Draft = { mode: ApprovalMode; published: boolean; skipEmpty: boolean; levels: Step[]; autoApproveUpto?: number | null };
+
+/** Kinds whose records carry an amount, so a "no approval up to ₹…" range makes sense (KAN-86). */
+const AMOUNT_KINDS = new Set(["PAYMENT_REQUEST"]);
 type Tab = "default" | "rules" | "test";
 
 const toDraft = (c: ApprovalChain): Draft => ({
@@ -56,12 +59,14 @@ const toDraft = (c: ApprovalChain): Draft => ({
   published: c.published,
   skipEmpty: c.skipEmpty ?? true,
   levels: c.levels.map((l) => ({ roleIds: [...l.roleIds], scope: l.scope ?? "ANY" })),
+  autoApproveUpto: c.autoApproveUpto ?? null,
 });
 
 const toInput = (d: Draft): ApprovalChainInput => ({
   mode: d.mode,
   published: d.published,
   skipEmpty: d.skipEmpty,
+  autoApproveUpto: d.autoApproveUpto ?? 0,
   // Reporting-chain mode derives its levels at submit time, so don't send a ladder for it.
   levels: d.mode === "EXPLICIT" ? d.levels.map((l) => ({ roleIds: l.roleIds, scope: l.scope })) : [],
 });
@@ -283,7 +288,7 @@ function DefaultChain({ chain, roles, onSaved }: { chain: ApprovalChain; roles: 
           step, limit a step to the applicant&apos;s own office/site, and use office/site rules.
         </div>
       ) : (
-        <StepsEditor draft={draft} setDraft={setDraft} roles={roles} />
+        <StepsEditor draft={draft} setDraft={setDraft} roles={roles} amountKind={AMOUNT_KINDS.has(chain.entityType)} />
       )}
 
       {saveError && <p className="text-sm text-rose-600">{saveError}</p>}
@@ -411,7 +416,7 @@ function ProjectChain({
                 : `Pick the role for each step ${project.name} needs, in order.`}
             </p>
           )}
-          <StepsEditor draft={draft} setDraft={setDraft} roles={roles} />
+          <StepsEditor draft={draft} setDraft={setDraft} roles={roles} amountKind={AMOUNT_KINDS.has(chain.entityType)} />
         </>
       )}
 
@@ -457,9 +462,45 @@ const PROJECT_OF: Record<string, string> = {
 const COMPANY_WIDE = new Set(["PAYROLL_RUN", "TENDER_SUBMISSION", "TASK_COMPLETION"]);
 
 /** The steps list + the skip switch — shared by the default chain and office/site rules. */
-function StepsEditor({ draft, setDraft, roles }: { draft: Draft; setDraft: (d: Draft) => void; roles: RoleResponse[] }) {
+function StepsEditor({
+  draft,
+  setDraft,
+  roles,
+  amountKind = false,
+}: {
+  draft: Draft;
+  setDraft: (d: Draft) => void;
+  roles: RoleResponse[];
+  amountKind?: boolean;
+}) {
   return (
     <div className="space-y-2">
+      {amountKind && (
+        <div className="flex flex-wrap items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50/60 px-3 py-2.5 text-sm text-slate-700">
+          <span className="font-medium">No approval needed up to</span>
+          <div className="relative">
+            <span className="absolute top-1/2 left-2.5 -translate-y-1/2 text-slate-400">₹</span>
+            <input
+              type="number"
+              min={0}
+              step="1"
+              inputMode="decimal"
+              value={draft.autoApproveUpto ?? ""}
+              placeholder="e.g. 5000"
+              onChange={(e) => {
+                const v = e.target.value === "" ? null : Math.max(0, Number(e.target.value));
+                setDraft({ ...draft, autoApproveUpto: v && v > 0 ? v : null });
+              }}
+              className="w-36 rounded-lg border border-slate-200 bg-white py-1.5 pr-2 pl-6 text-sm tabular-nums focus:border-brand-accent focus:outline-none"
+            />
+          </div>
+          <span className="block w-full text-xs text-slate-500">
+            {draft.autoApproveUpto
+              ? `Requests of ₹1 – ₹${draft.autoApproveUpto.toLocaleString("en-IN")} are approved the moment they are raised and never reach the approval list; above that they climb the steps below.`
+              : "Leave empty and every request, however small, goes through the steps below."}
+          </span>
+        </div>
+      )}
       {draft.levels.map((step, idx) => (
         <LevelRow
           key={idx}
@@ -501,6 +542,9 @@ function StepsEditor({ draft, setDraft, roles }: { draft: Draft; setDraft: (d: D
 
 // ---------------------------------------------------------------- Office/site rules
 
+/** Sentinel for the "All projects" choice in the office/site picker (KAN-77). */
+const ALL_PROJECTS = -1;
+
 function RulesTab({ chain, roles, projects }: { chain: ApprovalChain; roles: RoleResponse[]; projects: ProjectResponse[] }) {
   const [rules, setRules] = useState<ApprovalChain[] | null>(null);
   const [error, setError] = useState("");
@@ -527,9 +571,21 @@ function RulesTab({ chain, roles, projects }: { chain: ApprovalChain; roles: Rol
 
   async function save() {
     if (!editing?.projectId) return setError("Pick the office/site first.");
+    // KAN-77: "All projects" writes the same steps as a rule on every office/site at once.
+    const targets = editing.projectId === ALL_PROJECTS ? projects.map((p) => p.id) : [editing.projectId];
+    if (editing.projectId === ALL_PROJECTS) {
+      const replacing = targets.filter((id) => used.has(id)).length;
+      if (
+        !confirm(
+          `Give all ${targets.length} offices/sites these steps?` + (replacing ? ` ${replacing} existing rule${replacing === 1 ? "" : "s"} will be replaced.` : ""),
+        )
+      )
+        return;
+    }
     setSaving(true);
     try {
-      await saveApprovalRule(chain.entityType, editing.projectId, { ...toInput({ ...editing.draft, mode: "EXPLICIT" }), published: true });
+      const body = { ...toInput({ ...editing.draft, mode: "EXPLICIT" }), published: true };
+      for (const id of targets) await saveApprovalRule(chain.entityType, id, body);
       setEditing(null);
       await load();
     } catch (err) {
@@ -595,6 +651,9 @@ function RulesTab({ chain, roles, projects }: { chain: ApprovalChain; roles: Rol
               className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm"
             >
               <option value="">Choose…</option>
+              {editing.projectId == null || editing.projectId === ALL_PROJECTS ? (
+                <option value={ALL_PROJECTS}>All projects (every office/site — {projects.length})</option>
+              ) : null}
               {projects.map((p) => (
                 <option key={p.id} value={p.id} disabled={used.has(p.id) && p.id !== editing.projectId}>
                   {p.name}
@@ -603,7 +662,7 @@ function RulesTab({ chain, roles, projects }: { chain: ApprovalChain; roles: Rol
               ))}
             </select>
           </label>
-          <StepsEditor draft={editing.draft} setDraft={(d) => setEditing({ ...editing, draft: d })} roles={roles} />
+          <StepsEditor draft={editing.draft} setDraft={(d) => setEditing({ ...editing, draft: d })} roles={roles} amountKind={AMOUNT_KINDS.has(chain.entityType)} />
           <div className="flex gap-2">
             <button
               disabled={saving || !editing.projectId || editing.draft.levels.length === 0 || editing.draft.levels.some((l) => !l.roleIds.length)}

@@ -1201,12 +1201,16 @@ export interface ApprovalChain {
   /** Null = the company default; set = the rule for this office/site (project). */
   projectId: number | null;
   projectName: string | null;
+  /** KAN-86: amounts up to this need no approval at all. Null = none. */
+  autoApproveUpto?: number | null;
 }
 
 export interface ApprovalChainInput {
   mode?: ApprovalMode;
   published?: boolean;
   skipEmpty?: boolean;
+  /** 0 switches the no-approval range off; omitted leaves it as it is. */
+  autoApproveUpto?: number;
   levels?: { roleIds: number[]; scope: ApprovalScope }[];
 }
 

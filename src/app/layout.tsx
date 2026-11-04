@@ -3,6 +3,7 @@ import { Inter, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 import { SessionGuard } from "@/components/SessionGuard";
 import { WebLocationReporter } from "@/components/WebLocationReporter";
+import { TenderAnalysisSync } from "@/components/tender/TenderAnalysisSync";
 import { GlobalFilePreview } from "@/components/GlobalFilePreview";
 
 // Inter — the workhorse UI typeface used across production ERP / SaaS dashboards.
@@ -37,6 +38,7 @@ export default function RootLayout({
       <body className="h-full">
         <SessionGuard />
         <WebLocationReporter />
+        <TenderAnalysisSync />
         {children}
         <GlobalFilePreview />
       </body>

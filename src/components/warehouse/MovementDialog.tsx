@@ -17,6 +17,7 @@ import * as vyapar from "@/lib/vyaparApi";
 import type { Item, Party } from "@/lib/vyaparApi";
 import { AlertTriangle } from "lucide-react";
 import { todayIST } from "@/lib/datetime";
+import { getPendingPoItems, type ApiPendingPoItem } from "@/lib/warehouseApi";
 
 /**
  * Record one stock movement.
@@ -76,6 +77,9 @@ export function MovementDialog({
   const [issuedToUserId, setIssuedToUserId] = useState("");
   const [counterWarehouseId, setCounterWarehouseId] = useState("");
   const [sourceDocNo, setSourceDocNo] = useState("");
+  /** KAN-81: the PO this receipt is against. Picked from the POs still waiting on this item. */
+  const [poId, setPoId] = useState("");
+  const [openPos, setOpenPos] = useState<ApiPendingPoItem[]>([]);
   const [note, setNote] = useState("");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
@@ -85,6 +89,27 @@ export function MovementDialog({
   const unit = unitEdit ?? preset?.unit ?? "Nos";
   const setItemText = setItemTextEdit;
   const setUnit = setUnitEdit;
+
+  // Which POs are still waiting on the chosen item (receipts only).
+  useEffect(() => {
+    if (kind !== "RECEIPT" || itemId == null) {
+      setOpenPos([]);
+      setPoId("");
+      return;
+    }
+    let cancelled = false;
+    getPendingPoItems()
+      .then((rows) => {
+        if (cancelled) return;
+        const mine = rows.filter((r) => r.itemId === itemId && r.pending > 0);
+        setOpenPos(mine);
+        setPoId((cur) => (mine.some((r) => String(r.poId) === cur) ? cur : mine.length === 1 ? String(mine[0].poId) : ""));
+      })
+      .catch(() => !cancelled && setOpenPos([]));
+    return () => {
+      cancelled = true;
+    };
+  }, [kind, itemId]);
 
   const meta = MOVEMENT_META[kind];
   const isIssue = kind === "ISSUE";
@@ -154,6 +179,7 @@ export function MovementDialog({
           sourceDocNo: sourceDocNo.trim() || null,
           requestId: null,
           note: note.trim() || null,
+          poId: isReceipt && poId ? Number(poId) : null,
         });
       }
       onClose();
@@ -308,17 +334,55 @@ export function MovementDialog({
               />
             </DrawerField>
             <DrawerField
-              label="Against order / bill"
-              hint="The purchase order or bill this came in against, so the two can be reconciled."
+              label={poId ? "Challan / bill no." : "Against order / bill"}
+              hint={poId ? "The delivery challan or bill that came with it." : "The purchase order or bill this came in against, so the two can be reconciled."}
             >
               <input
                 value={sourceDocNo}
                 onChange={(e) => setSourceDocNo(e.target.value)}
-                placeholder="e.g. PO-1244"
+                placeholder={poId ? "e.g. DC-5521" : "e.g. PO-1244"}
                 className="input"
               />
             </DrawerField>
           </div>
+        )}
+
+        {/* KAN-81: tie the receipt to its PO so it shows as received on the PO, its material
+            request and Pending PO items. Only POs still waiting on this item are offered. */}
+        {isReceipt && itemId != null && openPos.length > 0 && (
+          <DrawerField
+            label="Purchase order"
+            hint={
+              poId
+                ? "Counts as received on this PO and on the material request it was ordered for."
+                : `${openPos.length === 1 ? "A PO is" : `${openPos.length} POs are`} still waiting on this item — pick one so this delivery counts against it.`
+            }
+          >
+            <Select
+              value={poId}
+              onChange={(v) => {
+                setPoId(v);
+                const po = openPos.find((p) => String(p.poId) === v);
+                if (!po) return;
+                if (po.vendorId && !partyId) setPartyId(String(po.vendorId));
+                if (!quantity) setQuantity(String(po.pending));
+                if (!rate && po.rate) setRate(String(po.rate));
+              }}
+              placeholder="Not against a PO"
+              options={[
+                { value: "", label: "Not against a PO" },
+                ...openPos.map((p) => ({
+                  value: String(p.poId),
+                  label: `${p.poNo ?? `PO #${p.poId}`} · ${p.vendorName ?? "—"} · ${fmtQty(p.pending)} ${p.unit ?? ""} pending`,
+                })),
+              ]}
+            />
+          </DrawerField>
+        )}
+        {isReceipt && itemId != null && openPos.length > 0 && !poId && (
+          <p className="-mt-2 flex items-center gap-1.5 text-xs text-amber-700">
+            <AlertTriangle size={13} /> Without a PO this delivery will not reduce what is pending on any order.
+          </p>
         )}
 
         {isIssue && (

@@ -102,7 +102,12 @@ function statusOf(r: LiveLocationApi, sites: LiveSite[], now: number): Status {
       key: "stale",
       tone: "amber",
       label: r.recordedAt ? `Not updating · last ${ago(r.recordedAt, now)}` : "No location from phone yet",
-      warning: phoneProblem,
+      // KAN-73: "location is on but not tracked" — nothing has reached the server, so say what to do.
+      warning:
+        phoneProblem ??
+        (!r.trackingState
+          ? "Their phone hasn't sent anything yet. Ask them to open Hitech on the phone (the website in Chrome/Safari works too), go to Punch, and allow location when asked — the Punch screen shows whether it is sharing. A browser only shares while the page is open."
+          : "The phone stopped sending. Ask them to open Hitech on the phone again and keep Location (GPS) on."),
     };
   }
   if (sites.length > 0) {

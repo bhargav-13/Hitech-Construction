@@ -3,6 +3,7 @@
 import { ProcurementShell, ProcurementHeader } from "@/components/procurement/ProcurementShell";
 import { PurchaseDocumentList } from "@/components/procurement/PurchaseDocumentList";
 import { usePurchaseOrders } from "@/lib/purchaseApi";
+import { PoTrackingButtons } from "@/components/procurement/PoTrackingPanels";
 
 /**
  * Purchase Orders, inside Procurement.
@@ -21,6 +22,7 @@ export default function ProcurementPurchaseOrdersPage() {
       <ProcurementHeader
         title="Purchase Orders"
         subtitle="Orders raised on suppliers. Click a row for its lines, amounts and payment status."
+        right={<PoTrackingButtons />}
       />
       <PurchaseDocumentList
         rows={rows}

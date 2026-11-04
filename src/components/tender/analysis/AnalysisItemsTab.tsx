@@ -33,7 +33,20 @@ import type { AnalysisTotals, BoqGroupCalc, BoqLine, CostComponent, TenderAnalys
  * by hand, which is where its numbers drifted. Pricing on the item means a line's margin is
  * readable on the line, and the totals cannot disagree with the rows that make them up.
  */
-export function AnalysisItemsTab({ analysis, totals }: { analysis: TenderAnalysis; totals: AnalysisTotals }) {
+/**
+ * `showCosts` false (KAN-87: role without Roles & Access -> Health Analysis - Costs & Margins) leaves
+ * only the schedule itself: item, qty, unit, tender rate and amount. Buying rates, margins, overheads
+ * and the below-cost flags are not rendered at all.
+ */
+export function AnalysisItemsTab({
+  analysis,
+  totals,
+  showCosts = true,
+}: {
+  analysis: TenderAnalysis;
+  totals: AnalysisTotals;
+  showCosts?: boolean;
+}) {
   const updateBoqLine = useAnalysisStore((s) => s.updateBoqLine);
   const removeBoqLine = useAnalysisStore((s) => s.removeBoqLine);
   const applyLibraryRates = useAnalysisStore((s) => s.applyLibraryRates);
@@ -110,12 +123,12 @@ export function AnalysisItemsTab({ analysis, totals }: { analysis: TenderAnalysi
         <FilterChip active={filter === "all"} onClick={() => setFilter("all")} tone="neutral">
           All {totals.linesTotal}
         </FilterChip>
-        {totals.lossLineCount > 0 && (
+        {showCosts && totals.lossLineCount > 0 && (
           <FilterChip active={filter === "loss"} onClick={() => setFilter(filter === "loss" ? "all" : "loss")} tone="bad">
             <TriangleAlert size={12} /> {totals.lossLineCount} below cost
           </FilterChip>
         )}
-        {unpriced > 0 && (
+        {showCosts && unpriced > 0 && (
           <FilterChip
             active={filter === "unpriced"}
             onClick={() => setFilter(filter === "unpriced" ? "all" : "unpriced")}
@@ -140,10 +153,10 @@ export function AnalysisItemsTab({ analysis, totals }: { analysis: TenderAnalysi
           <button
             type="button"
             onClick={() => fileRef.current?.click()}
-            title="Read every item from the department's BOQ PDF"
+            title="Read every item from the BOQ — a PDF, a scanned PDF or a phone photo (OCR)"
             className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-700 transition-all duration-150 hover:border-brand-accent hover:text-brand-accent active:scale-95"
           >
-            <FileUp size={13} /> Import BOQ (PDF)
+            <FileUp size={13} /> Import BOQ (PDF / photo · OCR)
           </button>
           <button
             type="button"
@@ -218,7 +231,7 @@ export function AnalysisItemsTab({ analysis, totals }: { analysis: TenderAnalysi
       </p>
 
       <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white">
-        <table className="w-full min-w-[1180px] text-sm">
+        <table className={`w-full text-sm ${showCosts ? "min-w-[1180px]" : "min-w-[720px]"}`}>
           <thead className="border-b border-gray-200 bg-gray-50 text-[11px] tracking-wide text-gray-500 uppercase">
             <tr>
               <th className="px-3 py-2 text-left font-medium">Sr</th>
@@ -227,12 +240,16 @@ export function AnalysisItemsTab({ analysis, totals }: { analysis: TenderAnalysi
               <th className="px-3 py-2 text-left font-medium">Unit</th>
               <th className="border-l border-gray-200 px-3 py-2 text-right font-medium">Tender rate</th>
               <th className="px-3 py-2 text-right font-medium">Amount</th>
-              <th className="border-l border-gray-200 px-3 py-2 text-right font-medium">Material</th>
-              <th className="px-3 py-2 text-right font-medium">Labour</th>
-              <th className="px-3 py-2 text-right font-medium">Other</th>
-              <th className="px-3 py-2 text-right font-medium">Cost/unit</th>
-              <th className="border-l border-gray-200 px-3 py-2 text-right font-medium">Margin/unit</th>
-              <th className="px-3 py-2 text-right font-medium">Line margin</th>
+              {showCosts && (
+                <>
+                  <th className="border-l border-gray-200 px-3 py-2 text-right font-medium">Material</th>
+                  <th className="px-3 py-2 text-right font-medium">Labour</th>
+                  <th className="px-3 py-2 text-right font-medium">Other</th>
+                  <th className="px-3 py-2 text-right font-medium">Cost/unit</th>
+                  <th className="border-l border-gray-200 px-3 py-2 text-right font-medium">Margin/unit</th>
+                  <th className="px-3 py-2 text-right font-medium">Line margin</th>
+                </>
+              )}
               <th className="w-16" />
             </tr>
           </thead>
@@ -270,11 +287,12 @@ export function AnalysisItemsTab({ analysis, totals }: { analysis: TenderAnalysi
                   })
                 }
                 onMakeTitle={(lineId) => lineToTitle(analysis.id, lineId)}
+                showCosts={showCosts}
               />
             ))}
             {visible.length === 0 && (
               <tr>
-                <td colSpan={13} className="px-4 py-12 text-center text-sm text-gray-400">
+                <td colSpan={showCosts ? 13 : 7} className="px-4 py-12 text-center text-sm text-gray-400">
                   {analysis.groups.length === 0
                     ? "No titles yet. Add one, then add its items from the Library."
                     : "No items match this filter."}
@@ -288,23 +306,29 @@ export function AnalysisItemsTab({ analysis, totals }: { analysis: TenderAnalysi
                 Totals
               </td>
               <td className="px-3 py-3 text-right tabular-nums">{inr(totals.tenderValue)}</td>
-              <td className="border-l border-gray-200 px-3 py-3 text-right tabular-nums">{inr(totals.material)}</td>
-              <td className="px-3 py-3 text-right tabular-nums">{inr(totals.labour)}</td>
-              <td className="px-3 py-3 text-right tabular-nums">{inr(totals.other)}</td>
-              <td className="px-3 py-3 text-right tabular-nums">{inr(totals.directCost)}</td>
-              <td colSpan={2} className="border-l border-gray-200 px-3 py-3 text-right tabular-nums text-emerald-600">
-                {inr(totals.tenderValue - totals.directCost)}
-              </td>
+              {showCosts && (
+                <>
+                  <td className="border-l border-gray-200 px-3 py-3 text-right tabular-nums">{inr(totals.material)}</td>
+                  <td className="px-3 py-3 text-right tabular-nums">{inr(totals.labour)}</td>
+                  <td className="px-3 py-3 text-right tabular-nums">{inr(totals.other)}</td>
+                  <td className="px-3 py-3 text-right tabular-nums">{inr(totals.directCost)}</td>
+                  <td colSpan={2} className="border-l border-gray-200 px-3 py-3 text-right tabular-nums text-emerald-600">
+                    {inr(totals.tenderValue - totals.directCost)}
+                  </td>
+                </>
+              )}
               <td />
             </tr>
           </tfoot>
         </table>
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-[1fr_320px]">
-        <ExpensesCard analysis={analysis} totals={totals} />
-        <SummaryCard totals={totals} />
-      </div>
+      {showCosts && (
+        <div className="grid gap-4 lg:grid-cols-[1fr_320px]">
+          <ExpensesCard analysis={analysis} totals={totals} />
+          <SummaryCard totals={totals} />
+        </div>
+      )}
 
       {picking && (
         <LibraryItemPicker
@@ -417,6 +441,7 @@ function GroupRows({
   onSelect,
   onSelectAll,
   onMakeTitle,
+  showCosts,
 }: {
   group: BoqGroupCalc;
   collapsed: boolean;
@@ -432,6 +457,7 @@ function GroupRows({
   onSelect: (lineId: string) => void;
   onSelectAll: (on: boolean) => void;
   onMakeTitle: (lineId: string) => void;
+  showCosts: boolean;
 }) {
   const allTicked = group.lines.length > 0 && group.lines.every((c) => selected.has(c.line.id));
   // The header always shows now. It used to be hidden for a family of one, on the grounds that a
@@ -473,7 +499,7 @@ function GroupRows({
               </span>
               <span className="shrink-0 font-normal whitespace-nowrap text-gray-400">
                 {group.lines.length} {group.lines.length === 1 ? "item" : "items"}
-                {group.lossCount > 0 && (
+                {showCosts && group.lossCount > 0 && (
                   <span className="ml-2 text-rose-600">· {group.lossCount} below cost</span>
                 )}
               </span>
@@ -514,16 +540,20 @@ function GroupRows({
             </div>
           </td>
           <td className="px-3 py-2 text-right font-semibold tabular-nums text-gray-700">{inr(group.amount)}</td>
-          <td colSpan={3} className="border-l border-gray-200" />
-          <td className="px-3 py-2 text-right font-semibold tabular-nums text-gray-500">{inr(group.costAmount)}</td>
-          <td className="border-l border-gray-200" />
-          <td
-            className={`px-3 py-2 text-right font-semibold tabular-nums ${
-              group.margin == null ? "text-gray-300" : group.margin < 0 ? "text-rose-600" : "text-emerald-600"
-            }`}
-          >
-            {group.margin == null ? "—" : inr(group.margin)}
-          </td>
+          {showCosts && (
+            <>
+              <td colSpan={3} className="border-l border-gray-200" />
+              <td className="px-3 py-2 text-right font-semibold tabular-nums text-gray-500">{inr(group.costAmount)}</td>
+              <td className="border-l border-gray-200" />
+              <td
+                className={`px-3 py-2 text-right font-semibold tabular-nums ${
+                  group.margin == null ? "text-gray-300" : group.margin < 0 ? "text-rose-600" : "text-emerald-600"
+                }`}
+              >
+                {group.margin == null ? "—" : inr(group.margin)}
+              </td>
+            </>
+          )}
           <td />
         </tr>
       )}
@@ -531,7 +561,7 @@ function GroupRows({
       {!collapsed && (
         <tr className="border-b border-gray-100">
           <td />
-          <td colSpan={12} className="py-2 pr-3 pl-10">
+          <td colSpan={showCosts ? 12 : 6} className="py-2 pr-3 pl-10">
             <button
               type="button"
               onClick={onAddLine}
@@ -550,7 +580,7 @@ function GroupRows({
         group.lines.map((c) => {
           const l = c.line;
           return (
-            <tr key={l.id} className={`border-b border-gray-100 ${selected.has(l.id) ? "bg-cyan-50/60" : c.isLoss ? "bg-rose-50/40" : "hover:bg-gray-50/60"}`}>
+            <tr key={l.id} className={`border-b border-gray-100 ${selected.has(l.id) ? "bg-cyan-50/60" : showCosts && c.isLoss ? "bg-rose-50/40" : "hover:bg-gray-50/60"}`}>
               <td className="px-3 py-1.5">
                 <div className="flex items-center gap-1.5">
                 <input
@@ -569,7 +599,7 @@ function GroupRows({
               </td>
               <td className="px-3 py-1.5">
                 <div className="flex items-center gap-1.5">
-                  {c.isLoss && <TriangleAlert size={13} className="shrink-0 text-rose-500" />}
+                  {showCosts && c.isLoss && <TriangleAlert size={13} className="shrink-0 text-rose-500" />}
                   <TextCell
                     value={l.description}
                     onCommit={(v) => onEdit(l.id, { description: v })}
@@ -589,6 +619,8 @@ function GroupRows({
               </td>
               <td className="px-3 py-1.5 text-right tabular-nums text-gray-600">{inr(c.amount)}</td>
 
+              {showCosts && (
+                <>
               {COST_COMPONENTS.map(({ key }, i) => (
                 <td key={key} className={`px-3 py-1.5 text-right ${i === 0 ? "border-l border-gray-100" : ""}`}>
                   <NumCell
@@ -616,6 +648,8 @@ function GroupRows({
               >
                 {c.lineMargin == null ? "—" : inr(c.lineMargin)}
               </td>
+                </>
+              )}
 
               <td className="px-2 py-1.5">
                 <div className="flex items-center justify-end gap-1">
@@ -628,7 +662,7 @@ function GroupRows({
                   >
                     <Heading size={13} />
                   </button>
-                  {hasLibraryRate(l) && (
+                  {showCosts && hasLibraryRate(l) && (
                     <button
                       type="button"
                       onClick={() => onLibrary(l.id)}

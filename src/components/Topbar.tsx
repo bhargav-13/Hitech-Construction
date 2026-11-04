@@ -1,7 +1,8 @@
 "use client";
 
 import { usePathname } from "next/navigation";
-import { FolderKanban, UserCircle } from "lucide-react";
+import { FolderKanban } from "lucide-react";
+import { ProfileMenu } from "./ProfileMenu";
 import { useProjects } from "@/lib/useProjects";
 import { useProjectScope } from "@/lib/projectScope";
 import { GlobalSearch } from "./GlobalSearch";
@@ -24,9 +25,7 @@ export function Topbar({ title }: { title: string }) {
       <div className="flex items-center gap-4 text-sm text-brand-accent">
         <GlobalSearch />
         <NotificationBell />
-        <button className="text-orange-500 hover:text-orange-600">
-          <UserCircle size={26} />
-        </button>
+        <ProfileMenu />
       </div>
     </header>
   );

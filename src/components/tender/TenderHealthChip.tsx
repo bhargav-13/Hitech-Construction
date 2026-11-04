@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { findAnalysis, useAnalysisStore } from "@/lib/tenderAnalysisStore";
 import { analysisTotals } from "@/lib/tenderAnalysisCalc";
+import { useCan } from "@/lib/permissions";
 import type { HealthBand, TenderAnalysis } from "@/lib/tenderAnalysisTypes";
 
 /**
@@ -51,6 +52,8 @@ export function TenderHealthChip({
   const analyses = useAnalysisStore((s) => s.analyses);
   const found = findAnalysis(analyses, tender);
   const analysis = given ?? found;
+  // KAN-87: the margin is a costing figure — roles without Costs & Margins just see "Analysed".
+  const showCosts = useCan()("TENDER_ANALYSIS_COSTS");
 
   const pad = size === "md" ? "px-2.5 py-1 text-xs" : "px-2 py-0.5 text-[11px]";
 
@@ -62,6 +65,15 @@ export function TenderHealthChip({
       >
         <span className={`h-1.5 w-1.5 rounded-full ${DOT_CLASS.none}`} />
         Not analysed
+      </span>
+    );
+  }
+
+  if (!showCosts) {
+    return (
+      <span className={`inline-flex items-center gap-1.5 rounded-full ring-1 ring-inset ${BAND_CLASS.none} ${pad}`} title="Health analysis started">
+        <span className={`h-1.5 w-1.5 rounded-full ${DOT_CLASS.none}`} />
+        Analysed
       </span>
     );
   }

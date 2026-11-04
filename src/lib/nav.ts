@@ -37,9 +37,7 @@ export const NAV_ITEMS: NavItem[] = [
 export const NAV_BREAK_AFTER = new Set(["Report", "Team Schedule", "Payroll", "Live Map", "Equipment", "Audit"]);
 
 // Routes visible when the user can open ANY of these modules (instead of one NAV_MODULE code).
-export const NAV_ANY_MODULE: Record<string, string[]> = {
-  "/templates": ["VYAPAR", "PROCUREMENT", "PAYROLL"],
-};
+export const NAV_ANY_MODULE: Record<string, string[]> = {};
 
 // Maps each nav route to its backend module code. A sidebar item is only shown when the signed-in
 // user's role carries "<MODULE>:VIEW" — so e.g. a user without DASHBOARD:VIEW never sees Dashboard.
@@ -62,6 +60,8 @@ export const NAV_MODULE: Record<string, string> = {
   "/asset": "ASSET",
   // Switched on/off per role in Roles & Access (V74 granted it to every existing role).
   "/library": "LIBRARY",
+  // KAN-88: its own switch in Roles & Access (V104), no longer "anyone who prints documents".
+  "/templates": "TEMPLATES",
   "/settings": "SETTINGS",
   "/services": "SERVICES",
 };

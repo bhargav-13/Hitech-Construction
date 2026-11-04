@@ -198,6 +198,8 @@ export interface ApiMovementInput {
   /** Set when this issue fills a request — the line's issued quantity moves with it. */
   requestId: number | null;
   note: string | null;
+  /** KAN-81: a receipt against this purchase order — it then counts as received on the PO. */
+  poId?: number | null;
 }
 
 export const getMovements = (warehouseId?: number) =>
@@ -251,6 +253,8 @@ export interface ApiRequestLine {
   remark: string | null;
   statusNote: string | null;
   statusChangedOn: string | null;
+  /** KAN-81: what has arrived for this line — receipts against the request or the POs it is on. */
+  receivedQuantity?: number;
 }
 
 export interface ApiMaterialRequest {
@@ -298,6 +302,52 @@ export const decideRequest = (id: number, action: "APPROVE" | "REJECT", note?: s
 
 export const deleteRequest = (id: number) =>
   apiRequest<void>(`${BASE}/requests/${id}`, { method: "DELETE" });
+
+// ---- KAN-80 / KAN-81: PO receipts and request ordering ----
+
+/** One PO line, with how much of it has reached a store. */
+export interface ApiPendingPoItem {
+  poId: number;
+  poNo: string | null;
+  poDate: string | null;
+  vendorId: number | null;
+  vendorName: string | null;
+  projectId: number | null;
+  projectName: string | null;
+  itemId: number | null;
+  itemName: string | null;
+  unit: string | null;
+  rate: number | null;
+  ordered: number;
+  received: number;
+  pending: number;
+}
+
+export const getPendingPoItems = (projectId?: number | null, all = false) => {
+  const q = new URLSearchParams();
+  if (projectId) q.set("projectId", String(projectId));
+  if (all) q.set("all", "true");
+  const qs = q.toString();
+  return apiRequest<ApiPendingPoItem[]>(`${BASE}/pending-po-items${qs ? `?${qs}` : ""}`);
+};
+
+export const receiveAgainstPo = (body: { poId: number; itemId: number; warehouseId: number; quantity: number; movedOn?: string | null; note?: string | null }) =>
+  apiRequest<ApiMovement>(`${BASE}/po-receipts`, { method: "POST", body });
+
+export interface ApiPoOption {
+  poId: number;
+  poNo: string | null;
+  poDate: string | null;
+  vendorName: string | null;
+  /** How much of this request line's item the PO carries (0 = not on it). */
+  orderedOfItem: number;
+}
+
+export const getPoOptions = (requestId: number, lineId: number) =>
+  apiRequest<ApiPoOption[]>(`${BASE}/requests/${requestId}/lines/${lineId}/po-options`);
+
+export const orderRequestLine = (requestId: number, lineId: number, body: { poId: number; quantity: number }) =>
+  apiRequest<void>(`${BASE}/requests/${requestId}/lines/${lineId}/order`, { method: "POST", body });
 
 // ---------------------------------------------------------------- checkouts
 

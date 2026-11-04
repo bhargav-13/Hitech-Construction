@@ -132,6 +132,7 @@ function toRequest(r: api.ApiMaterialRequest): MaterialRequest {
       lineStatus: l.lineStatus,
       orderedQuantity: l.orderedQuantity ?? 0,
       poRefs: l.poRefs,
+      receivedQuantity: l.receivedQuantity ?? 0,
       remark: l.remark,
       statusNote: l.statusNote,
       statusChangedOn: l.statusChangedOn,
@@ -337,6 +338,7 @@ export const useWarehouseStore = create<WarehouseState>()((set, get) => ({
       sourceDocNo: m.sourceDocNo,
       requestId: numOrNull(m.requestId),
       note: m.note,
+      poId: m.poId ?? null,
     });
     // Reloaded rather than appended: an issue against a request also moves that request's status,
     // and guessing which way is how the two end up disagreeing.

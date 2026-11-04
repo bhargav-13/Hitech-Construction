@@ -5,7 +5,8 @@ import { AppShell } from "@/components/AppShell";
 import { Spinner } from "@/components/Spinner";
 import { useAuthStore } from "@/lib/authStore";
 import { useMyProfile, useTodayAttendance } from "@/lib/usePayrollLive";
-import { ApiError, getMyFace, saveMyFace, getMyLocations, getTeam } from "@/lib/api";
+import { ApiError, apiRequest, getMyFace, saveMyFace, getMyLocations, getTeam } from "@/lib/api";
+import Link from "next/link";
 import type { GeoPointApi, LocationApi } from "@/lib/api";
 import { isSameFace } from "@/lib/faceApi";
 import { FaceCapture, type FaceCaptureResult } from "@/components/payroll/FaceCapture";
@@ -13,6 +14,7 @@ import { SitePhotosCapture } from "@/components/payroll/SitePhotosCapture";
 import type { SitePhoto } from "@/components/payroll/SitePhotosCapture";
 import { PunchPhotoThumbs } from "@/components/payroll/PunchPhotos";
 import { MapPolygonPreview } from "@/components/payroll/MapPolygonPreview";
+import { LiveTrackingCard } from "@/components/payroll/LiveTrackingCard";
 import {
   CheckCircle,
   Clock,
@@ -93,6 +95,8 @@ export default function PunchPage() {
   // "On payroll" = the member has a real payroll profile. Attendance, face enrolment and the punch
   // itself all hit the backend now — nothing is client-only anymore.
   const { profile, loading: profileLoading } = useMyProfile(user?.id ?? null);
+  /** KAN-79: today's unticked checklist items when a punch-out was refused. */
+  const [checklistBlock, setChecklistBlock] = useState<string[] | null>(null);
   const { today, punch, refresh: refreshToday } = useTodayAttendance();
 
   // Enrolled reference face, loaded from the backend so it works on any device the member signs into.
@@ -153,6 +157,18 @@ export default function PunchPage() {
       setStatus("error");
       setMessage("No work site is assigned to you yet. Ask your admin to assign one in Payroll → Locations.");
       return;
+    }
+    // KAN-79: today's checklist must be done before punching out (the server refuses it too).
+    if (type === "out") {
+      try {
+        const check = await apiRequest<{ pending: string[]; canPunchOut: boolean }>("/api/v1/payroll/attendance/punch-out-check");
+        if (!check.canPunchOut) {
+          setChecklistBlock(check.pending);
+          return;
+        }
+      } catch {
+        /* the punch itself is checked on the server */
+      }
     }
     setStatus("detecting");
     setMessage("Getting your location…");
@@ -310,6 +326,9 @@ export default function PunchPage() {
             {new Date().toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}
           </div>
         </div>
+
+        {/* KAN-73: is this phone feeding the Live Map? Says why not, and how to fix it. */}
+        <LiveTrackingCard />
 
         {/* Face enrolment — required once before punching */}
         {!enrolled ? (
@@ -470,6 +489,37 @@ export default function PunchPage() {
           )}
         </div>
       </div>
+
+      {checklistBlock && (
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/40 p-4" onMouseDown={() => setChecklistBlock(null)}>
+          <div onMouseDown={(e) => e.stopPropagation()} className="w-full max-w-sm space-y-3 rounded-2xl bg-white p-5 shadow-2xl" role="alertdialog" aria-labelledby="cl-title">
+            <div className="flex items-center gap-2">
+              <span className="flex h-9 w-9 items-center justify-center rounded-full bg-amber-100 text-amber-600">
+                <XCircle size={18} />
+              </span>
+              <h3 id="cl-title" className="text-base font-semibold text-gray-800">Complete your checklist first</h3>
+            </div>
+            <p className="text-sm text-gray-600">
+              You can punch out once today&apos;s checklist is done. {checklistBlock.length} {checklistBlock.length === 1 ? "item is" : "items are"} still pending:
+            </p>
+            <ul className="max-h-48 space-y-1 overflow-y-auto rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900">
+              {checklistBlock.map((n, i) => (
+                <li key={i} className="flex gap-2">
+                  <span className="text-amber-500">•</span> {n}
+                </li>
+              ))}
+            </ul>
+            <div className="flex gap-2">
+              <button onClick={() => setChecklistBlock(null)} className="flex-1 rounded-lg border border-gray-200 px-3 py-2 text-sm font-medium text-gray-600 hover:bg-gray-50">
+                Close
+              </button>
+              <Link href="/taskopad/checklist" className="flex-1 rounded-lg bg-brand-accent px-3 py-2 text-center text-sm font-semibold text-white hover:opacity-90">
+                Open checklist
+              </Link>
+            </div>
+          </div>
+        </div>
+      )}
 
       {modal?.kind === "enroll" && (
         <FaceCapture

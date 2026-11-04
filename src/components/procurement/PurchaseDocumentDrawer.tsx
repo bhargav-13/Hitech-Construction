@@ -17,6 +17,7 @@ import { inr } from "@/lib/format";
 import type { Invoice } from "@/lib/vyaparApi";
 import { DOC_STATUS_CLS } from "@/components/procurement/PurchaseDocumentList";
 import { ModuleAttachments } from "@/components/files/ModuleAttachments";
+import { getPendingPoItems, getRequests } from "@/lib/warehouseApi";
 
 /**
  * One purchase order or bill in full, opened by clicking its row.
@@ -54,6 +55,41 @@ export function PurchaseDocumentDrawer({
   }, [documentId]);
 
   const lines = doc.lines ?? [];
+  const isPo = doc.docType === "PURCHASE_ORDER";
+  // KAN-80/81, as on Onsite's PO screen: per line, how much has reached a store and which
+  // material request it was ordered for.
+  const [receivedByItem, setReceivedByItem] = useState<Map<number, number> | null>(null);
+  const [mrByItem, setMrByItem] = useState<Map<number, string>>(new Map());
+  useEffect(() => {
+    if (!isPo) return;
+    let cancelled = false;
+    getPendingPoItems(null, true)
+      .then((rows) => {
+        if (cancelled) return;
+        const m = new Map<number, number>();
+        for (const r of rows) if (r.poId === documentId && r.itemId != null) m.set(r.itemId, r.received);
+        setReceivedByItem(m);
+      })
+      .catch(() => !cancelled && setReceivedByItem(null));
+    const no = (doc.invoiceNo ?? "").trim().toUpperCase();
+    if (no) {
+      getRequests()
+        .then((reqs) => {
+          if (cancelled) return;
+          const m = new Map<number, string>();
+          for (const r of reqs)
+            for (const l of r.lines) {
+              const refs = (l.poRefs ?? "").split(/[,;\n]/).map((x) => x.replace(/\(.*?\)/g, "").trim().toUpperCase());
+              if (refs.includes(no)) m.set(l.itemId, m.has(l.itemId) ? `${m.get(l.itemId)}, ${r.number}` : r.number);
+            }
+          setMrByItem(m);
+        })
+        .catch(() => {});
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [isPo, documentId, doc.invoiceNo]);
   // The PO's approval ladder, as on Onsite's PO screen: who raised it, each level's decision, and
   // Recall for the person who raised it.
   const approvalType = DOC_APPROVAL_TYPE[doc.docType] ?? null;
@@ -223,6 +259,7 @@ export function PurchaseDocumentDrawer({
                     <th className="px-3 py-2 text-right">Rate</th>
                     <th className="px-3 py-2 text-right">Tax</th>
                     <th className="px-3 py-2 text-right">Amount</th>
+                    {isPo && receivedByItem && <th className="px-3 py-2 text-right">Status</th>}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
@@ -231,6 +268,9 @@ export function PurchaseDocumentDrawer({
                       <td className="px-3 py-2">
                         <div className="text-gray-800">{l.itemName}</div>
                         {l.description && <div className="text-[11px] text-gray-400">{l.description}</div>}
+                        {isPo && l.itemId != null && mrByItem.get(l.itemId) && (
+                          <div className="text-[11px] text-gray-500">Material Request No.: {mrByItem.get(l.itemId)}</div>
+                        )}
                       </td>
                       <td className="px-3 py-2 text-right whitespace-nowrap text-gray-600 tabular-nums">
                         {l.quantity} {l.unit ?? ""}
@@ -242,6 +282,20 @@ export function PurchaseDocumentDrawer({
                       <td className="px-3 py-2 text-right font-medium whitespace-nowrap text-gray-800 tabular-nums">
                         {inr(l.amount ?? 0)}
                       </td>
+                      {isPo && receivedByItem && (
+                        <td className="px-3 py-2 text-right whitespace-nowrap">
+                          {(() => {
+                            const got = l.itemId != null ? receivedByItem.get(l.itemId) ?? 0 : 0;
+                            const done = got >= (l.quantity ?? 0) && (l.quantity ?? 0) > 0;
+                            return (
+                              <>
+                                <div className={`text-xs font-semibold ${done ? "text-emerald-700" : "text-amber-700"}`}>{done ? "Received" : "Open"}</div>
+                                <div className="text-[11px] text-gray-500 tabular-nums">{got.toLocaleString("en-IN")} received</div>
+                              </>
+                            );
+                          })()}
+                        </td>
+                      )}
                     </tr>
                   ))}
                 </tbody>

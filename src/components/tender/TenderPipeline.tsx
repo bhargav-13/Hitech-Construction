@@ -41,8 +41,7 @@ import { TenderForm } from "@/components/tender/TenderForm";
 import { ImportDrawer } from "@/components/tender/ImportDrawer";
 import { LossReasonModal } from "@/components/tender/LossReasonModal";
 import { ConfirmDialog } from "@/components/tender/ConfirmDialog";
-import { useAuthStore } from "@/lib/authStore";
-import { isSuperAdminRole } from "@/lib/taskPermissions";
+import { useCan } from "@/lib/permissions";
 import { TenderHealthChip } from "@/components/tender/TenderHealthChip";
 import { HandoffDialog } from "@/components/tender/HandoffDialog";
 import { type HandoffOptions } from "@/lib/projectBoqStore";
@@ -317,8 +316,10 @@ export function TenderPipeline({ variant }: { variant: PipelineVariant }) {
   const setStageBulk = useTenderStore((s) => s.setStageBulk);
   const lastUndo = useTenderStore((s) => s.lastUndo);
   const removeTender = useTenderStore((s) => s.removeTender);
-  // Deleting a tender wipes its whole history, so only Super Admin is offered it.
-  const superAdmin = isSuperAdminRole(useAuthStore((s) => s.user?.role?.name));
+  // Deleting a tender wipes its whole history, so it follows Roles & Access → Tenders → Delete
+  // (KAN-82: the role had Delete ticked but the menu only ever showed for Super Admin).
+  const can = useCan();
+  const canDelete = can("TENDER_TENDERS:DELETE");
   const [deletePrompt, setDeletePrompt] = useState<Tender | null>(null);
   const undo = useTenderStore((s) => s.undo);
   const clearUndo = useTenderStore((s) => s.clearUndo);
@@ -899,7 +900,7 @@ export function TenderPipeline({ variant }: { variant: PipelineVariant }) {
                           onView={() => setSelectedId(t.id)}
                           onEdit={() => setEditing(t)}
                           onAnalyse={() => router.push(`/tender/analysis/${t.id}`)}
-                          onDelete={superAdmin ? () => setDeletePrompt(t) : undefined}
+                          onDelete={canDelete ? () => setDeletePrompt(t) : undefined}
                         />
                       </td>
                     </tr>
@@ -1248,7 +1249,7 @@ function RowActions({
   onView: () => void;
   onEdit: () => void;
   onAnalyse: () => void;
-  /** Only passed for Super Admin. */
+  /** Only passed when the role holds TENDER_TENDERS:DELETE. */
   onDelete?: () => void;
 }) {
   const transitions = transitionsFor(t.stage);

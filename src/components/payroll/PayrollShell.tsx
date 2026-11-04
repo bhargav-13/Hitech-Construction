@@ -112,6 +112,13 @@ export function PayrollShell({
     }
     return init;
   });
+  // The first render can run before the session hydrates (self nav, no groups), so the group for
+  // the current page — Self Service on /payroll/me/queries — never opened and its entries
+  // (Query / Problem, Inbox) looked missing. Open it once the real nav is known.
+  useEffect(() => {
+    const g = nav.find((n) => n.children?.some((c) => c.href && pathname.startsWith(c.href)));
+    if (g) setOpen((o) => (o[g.label] ? o : { ...o, [g.label]: true }));
+  }, [nav, pathname]);
 
   // Self-service users must not reach admin pages — send them to their own dashboard. Only act
   // once the session has hydrated, so an admin isn't redirected during the pre-hydration tick.

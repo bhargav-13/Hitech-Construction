@@ -53,11 +53,17 @@ const MODULES: { code: string; rule?: string }[] = [
     code: "ASSET",
     rule: "Asset Register covers what the firm owns (add, edit, types, repair / damaged counts). Assign / Return / Transfer covers handing assets out — so a store keeper can assign without changing the register.",
   },
+  // KAN-88: both were shown to everyone; now switched on/off per role like any other module.
+  { code: "EQUIPMENT" },
   { code: "AUDIT" },
   { code: "APPROVAL" },
   {
     code: "LIBRARY",
     rule: "Each library inside still follows its own module: the Tender Library needs Tender access, staff in the Party Library need User Management, and edits need that module's Create / Edit.",
+  },
+  {
+    code: "TEMPLATES",
+    rule: "View opens the Templates screen. Changing a design also needs Edit on the module that prints it (Vyapar, Procurement or Payroll). Printing always uses the saved designs, whoever prints.",
   },
   { code: "USER_MANAGEMENT" },
   { code: "SETTINGS" },

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useState } from "react";
 import { AppShell } from "@/components/AppShell";
 import { Spinner } from "@/components/Spinner";
 import { Select } from "@/components/Select";
@@ -11,7 +11,8 @@ import { useProjects } from "@/lib/useProjects";
 import { useProjectScope } from "@/lib/projectScope";
 import { todayIST, formatDateTime24IST } from "@/lib/datetime";
 import * as audit from "@/lib/auditApi";
-import type { AuditActionApi, AuditLog } from "@/lib/auditApi";
+import type { AuditActionApi, AuditChange, AuditLog } from "@/lib/auditApi";
+import { parseAuditDetails } from "@/lib/auditApi";
 import { downloadPdf } from "@/lib/vyaparExport";
 import {
   Activity,
@@ -59,6 +60,7 @@ export default function AuditPage() {
 
   const [page, setPage] = useState(0);
   const [rows, setRows] = useState<AuditLog[]>([]);
+  const [openId, setOpenId] = useState<number | null>(null);
   const [total, setTotal] = useState(0);
   const [totalPages, setTotalPages] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -186,13 +188,14 @@ export default function AuditPage() {
     return all;
   }
 
-  const auditHead = ["Time", "Actor", "Role", "Action", "Entity", "Result", "IP"];
+  const auditHead = ["Time", "Actor", "Role", "Action", "Entity", "What changed", "Result", "IP"];
   const auditRow = (r: AuditLog) => [
     formatWhen(r.createdAt),
     r.actorName ?? r.actorEmail ?? "System",
     r.actorRole ?? "",
     r.action,
     entityLabel(r),
+    r.summary ?? "",
     resultLabel(r.statusCode),
     formatIp(r.ipAddress),
   ];
@@ -408,6 +411,7 @@ export default function AuditPage() {
                     <th className="px-4 py-2 font-medium">Actor</th>
                     <th className="px-4 py-2 font-medium">Action</th>
                     <th className="px-4 py-2 font-medium">Entity</th>
+                    <th className="px-4 py-2 font-medium">What changed</th>
                     <th className="px-4 py-2 font-medium">Result</th>
                     <th className="px-4 py-2 font-medium">IP address</th>
                   </tr>
@@ -415,11 +419,13 @@ export default function AuditPage() {
                 <tbody>
                   {rows.map((r) => {
                     const Icon = ACTION_META[r.action]?.icon ?? Activity;
+                    const changes = parseAuditDetails(r.details);
+                    const isOpen = openId === r.id;
                     return (
+                      <Fragment key={r.id}>
                       <tr
-                        key={r.id}
-                        title={r.summary ?? undefined}
-                        className="border-b border-gray-50 transition-colors duration-150 last:border-b-0 even:bg-gray-50/40 hover:bg-cyan-50/40"
+                        onClick={changes.length ? () => setOpenId(isOpen ? null : r.id) : undefined}
+                        className={`border-b border-gray-50 transition-colors duration-150 last:border-b-0 even:bg-gray-50/40 hover:bg-cyan-50/40 ${changes.length ? "cursor-pointer" : ""}`}
                       >
                         <td className="whitespace-nowrap px-4 py-2.5 text-gray-500">{formatWhen(r.createdAt)}</td>
                         <td className="px-4 py-2.5">
@@ -441,6 +447,14 @@ export default function AuditPage() {
                           </span>
                         </td>
                         <td className="px-4 py-2.5 text-gray-600">{entityLabel(r)}</td>
+                        <td className="max-w-[380px] px-4 py-2.5 text-xs text-gray-600">
+                          <div className="flex items-start gap-1.5">
+                            {changes.length > 0 && (
+                              <ChevronRight size={13} className={`mt-0.5 shrink-0 text-gray-400 transition-transform ${isOpen ? "rotate-90" : ""}`} />
+                            )}
+                            <span className="line-clamp-2" title={r.summary ?? undefined}>{r.summary ?? "—"}</span>
+                          </div>
+                        </td>
                         <td className="px-4 py-2.5">
                           {r.statusCode == null ? (
                             <span className="text-xs text-gray-400">—</span>
@@ -456,6 +470,14 @@ export default function AuditPage() {
                         </td>
                         <td className="whitespace-nowrap px-4 py-2.5 text-xs text-gray-500">{formatIp(r.ipAddress)}</td>
                       </tr>
+                      {isOpen && (
+                        <tr className="border-b border-gray-100 bg-slate-50/70">
+                          <td colSpan={7} className="px-4 py-3">
+                            <AuditChanges changes={changes} />
+                          </td>
+                        </tr>
+                      )}
+                      </Fragment>
                     );
                   })}
                 </tbody>
@@ -539,4 +561,52 @@ function resultLabel(statusCode: number | null): string {
 // Audit events are timestamped in IST (prod runs in UTC), so the log always reads in local time.
 function formatWhen(iso: string): string {
   return formatDateTime24IST(iso);
+}
+
+/** KAN-85: the records one call changed, each with its fields before → after. */
+function AuditChanges({ changes }: { changes: AuditChange[] }) {
+  return (
+    <div className="space-y-2.5">
+      {changes.map((c, i) => (
+        <div key={i} className="rounded-lg border border-gray-200 bg-white">
+          <div className="flex flex-wrap items-center gap-2 border-b border-gray-100 px-3 py-2 text-xs">
+            <span
+              className={`rounded px-1.5 py-0.5 font-semibold ${
+                c.op === "CREATE" ? "bg-emerald-50 text-emerald-700" : c.op === "DELETE" ? "bg-rose-50 text-rose-700" : "bg-blue-50 text-blue-700"
+              }`}
+            >
+              {c.op === "CREATE" ? "Created" : c.op === "DELETE" ? "Deleted" : "Updated"}
+            </span>
+            <span className="font-semibold text-gray-800">
+              {c.entity}
+              {c.id && ` #${c.id}`}
+            </span>
+            {c.label && <span className="truncate text-gray-500">“{c.label}”</span>}
+          </div>
+          {c.fields.length > 0 ? (
+            <table className="w-full text-xs">
+              <thead className="text-left text-[10px] tracking-wide text-gray-400 uppercase">
+                <tr>
+                  <th className="w-1/4 px-3 py-1.5 font-medium">Field</th>
+                  {c.op === "UPDATE" && <th className="px-3 py-1.5 font-medium">Before</th>}
+                  <th className="px-3 py-1.5 font-medium">{c.op === "UPDATE" ? "After" : "Value"}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {c.fields.map((f, j) => (
+                  <tr key={j} className="border-t border-gray-50 align-top">
+                    <td className="px-3 py-1.5 font-medium text-gray-600 capitalize">{f.field}</td>
+                    {c.op === "UPDATE" && <td className="px-3 py-1.5 break-all text-rose-700/90 line-through decoration-rose-300">{f.from ?? "—"}</td>}
+                    <td className="px-3 py-1.5 break-all text-emerald-800">{f.to ?? "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : (
+            <p className="px-3 py-2 text-xs text-gray-400">{c.op === "DELETE" ? "The record was removed." : "No field details."}</p>
+          )}
+        </div>
+      ))}
+    </div>
+  );
 }

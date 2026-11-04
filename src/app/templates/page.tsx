@@ -34,8 +34,10 @@ export default function TemplatesPage() {
   const user = useAuthStore((s) => s.user);
   const perms = useMemo(() => user?.permissions ?? [], [user]);
   const superAdmin = (user?.role?.name ?? "").toLowerCase() === "super admin";
-  const canView = (m: TemplateModule) => superAdmin || perms.includes(`${m}:VIEW`);
-  const canEdit = (m: TemplateModule) => superAdmin || perms.includes(`${m}:EDIT`);
+  // KAN-88: the Templates switch in Roles & Access gates the screen (View) and saving (Edit); within
+  // it, each module's documents still need that module.
+  const canView = (m: TemplateModule) => superAdmin || (perms.includes("TEMPLATES:VIEW") && perms.includes(`${m}:VIEW`));
+  const canEdit = (m: TemplateModule) => superAdmin || (perms.includes("TEMPLATES:EDIT") && perms.includes(`${m}:EDIT`));
 
   const kinds = TEMPLATE_KINDS.filter((k) => canView(k.module));
   const modules = [...new Set(kinds.map((k) => k.module))];
@@ -56,7 +58,7 @@ export default function TemplatesPage() {
 
         {kinds.length === 0 ? (
           <div className="rounded-xl border border-dashed border-gray-300 bg-white px-4 py-12 text-center text-sm text-gray-500">
-            You don&apos;t have access to any module that prints documents.
+            {perms.includes("TEMPLATES:VIEW") || superAdmin ? "You don't have access to any module that prints documents." : "Templates is switched off for your role. Ask an admin to turn it on under Setting → Roles & Access."}
           </div>
         ) : (
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-[230px_minmax(0,1fr)]">

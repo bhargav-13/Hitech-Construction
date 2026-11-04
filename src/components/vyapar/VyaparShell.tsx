@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { AppShell } from "@/components/AppShell";
@@ -91,6 +91,16 @@ export function VyaparShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const [addOpen, setAddOpen] = useState(false);
+  // The panel hangs from the Add More button's right edge. When the top bar wraps and the button
+  // lands near the left, that pushed the panel off-screen — open it rightwards instead.
+  const addBtnRef = useRef<HTMLButtonElement>(null);
+  const [addAlignLeft, setAddAlignLeft] = useState(false);
+  const toggleAdd = () =>
+    setAddOpen((o) => {
+      const r = addBtnRef.current?.getBoundingClientRect();
+      if (!o && r) setAddAlignLeft(r.right < Math.min(760, window.innerWidth - 32) + 16);
+      return !o;
+    });
   // Screens and quick-create entries the role's Roles & Access features don't cover are left out.
   const can = useCan();
   const nav = filterNav(VYAPAR_NAV, can);
@@ -122,7 +132,7 @@ export function VyaparShell({ children }: { children: React.ReactNode }) {
       if (hit === MENU_SHORTCUT) {
         if (!creatable.length) return;
         e.preventDefault();
-        setAddOpen((o) => !o);
+        toggleAdd();
         return;
       }
       const doc = creatable.find((d) => d.type === hit);
@@ -239,7 +249,8 @@ export function VyaparShell({ children }: { children: React.ReactNode }) {
             {creatable.length > 0 && (
             <div className="relative">
               <button
-                onClick={() => setAddOpen((o) => !o)}
+                ref={addBtnRef}
+                onClick={toggleAdd}
                 title={shortcuts[MENU_SHORTCUT] ? `Add More (${shortcuts[MENU_SHORTCUT]})` : "Add More"}
                 className={`flex items-center gap-1 rounded-lg px-3 py-1.5 text-sm font-semibold transition-all duration-150 active:scale-95 ${
                   addOpen ? "bg-brand-accent text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"
@@ -250,7 +261,7 @@ export function VyaparShell({ children }: { children: React.ReactNode }) {
               {addOpen && (
                 <>
                   <div className="fixed inset-0 z-30" onClick={() => setAddOpen(false)} />
-                  <div className="animate-menu-pop absolute right-0 top-10 z-40 w-[760px] max-w-[calc(100vw-2rem)] origin-top-right rounded-xl border border-gray-100 bg-white p-4 shadow-2xl ring-1 ring-black/[0.04]">
+                  <div className={`animate-menu-pop absolute top-10 z-40 w-[760px] max-w-[calc(100vw-2rem)] ${addAlignLeft ? "left-0 origin-top-left" : "right-0 origin-top-right"} rounded-xl border border-gray-100 bg-white p-4 shadow-2xl ring-1 ring-black/[0.04]`}>
                     <p className="mb-3 flex items-center gap-1.5 text-xs text-gray-400">
                       <Pin size={12} /> Pin an entry to keep it as a button on the top bar.
                       <Link href="/vyapar/settings?tab=Shortcuts" onClick={() => setAddOpen(false)} className="ml-auto inline-flex items-center gap-1 text-brand-accent hover:underline">

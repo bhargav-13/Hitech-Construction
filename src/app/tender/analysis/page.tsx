@@ -1,5 +1,6 @@
 "use client";
 
+import { useCan } from "@/lib/permissions";
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { ClipboardList, Plus, Search, Unlink } from "lucide-react";
@@ -41,6 +42,8 @@ export default function TenderAnalysisListPage() {
   const [search, setSearch] = useState("");
   const [picking, setPicking] = useState(false);
   const [attaching, setAttaching] = useState<TenderAnalysis | null>(null);
+  // KAN-87: without Costs & Margins the list shows only what the tender is worth.
+  const showCosts = useCan()("TENDER_ANALYSIS_COSTS");
 
   const rows = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -159,10 +162,14 @@ export default function TenderAnalysisListPage() {
                 <tr>
                   <th className="px-4 py-2.5 text-left font-medium">Tender</th>
                   <th className="px-4 py-2.5 text-right font-medium">Tender value</th>
-                  <th className="px-4 py-2.5 text-right font-medium">Our cost</th>
-                  <th className="px-4 py-2.5 text-right font-medium">Bid</th>
-                  <th className="px-4 py-2.5 text-right font-medium">Profit</th>
-                  <th className="px-4 py-2.5 text-left font-medium">Health</th>
+                  {showCosts && (
+                    <>
+                      <th className="px-4 py-2.5 text-right font-medium">Our cost</th>
+                      <th className="px-4 py-2.5 text-right font-medium">Bid</th>
+                      <th className="px-4 py-2.5 text-right font-medium">Profit</th>
+                      <th className="px-4 py-2.5 text-left font-medium">Health</th>
+                    </>
+                  )}
                   <th className="px-4 py-2.5 text-left font-medium">Updated</th>
                 </tr>
               </thead>
@@ -190,6 +197,8 @@ export default function TenderAnalysisListPage() {
                       </Link>
                     </td>
                     <td className="px-4 py-2.5 text-right tabular-nums text-gray-600">{inr(totals.tenderValue)}</td>
+                    {showCosts && (
+                      <>
                     <td className="px-4 py-2.5 text-right tabular-nums text-gray-400">{inr(totals.cost)}</td>
                     <td className="px-4 py-2.5 text-right tabular-nums text-gray-600">−{totals.bidPct.toFixed(2)}%</td>
                     <td className="px-4 py-2.5 text-right font-medium tabular-nums text-gray-700">
@@ -210,6 +219,8 @@ export default function TenderAnalysisListPage() {
                         </button>
                       )}
                     </td>
+                      </>
+                    )}
                     <td className="px-4 py-2.5 text-xs text-gray-400">{tdate(a.updatedAt.slice(0, 10))}</td>
                   </tr>
                 ))}

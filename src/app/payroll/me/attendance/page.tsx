@@ -133,7 +133,12 @@ export default function MyAttendancePage() {
                   >
                     <span className="text-[11px] font-semibold opacity-80">{day}</span>
                     <span className="text-[10px] font-bold">{m.short}</span>
-                    {r?.inTime && <span className="text-[8px] opacity-70">{r.inTime}</span>}
+                    {/* KAN-10: hours worked, not the punch-in time. Still punched in → "since 09:15". */}
+                    {r && (hoursOf(r) != null ? (
+                      <span className="text-[9px] font-semibold opacity-80">{fmtHours(hoursOf(r)!)}</span>
+                    ) : r.inTime ? (
+                      <span className="text-[8px] opacity-70">{d === todayIST() ? `since ${r.inTime}` : "no punch out"}</span>
+                    ) : null)}
                     {punchShots(r).length > 0 && <Camera size={9} className="mt-0.5 opacity-60" />}
                   </button>
                 );
@@ -163,4 +168,22 @@ export default function MyAttendancePage() {
       </div>
     </PayrollShell>
   );
+}
+
+/** Hours on the day: the server's worked hours, else out − in; null while still punched in. */
+function hoursOf(r: { workedHours?: number | null; inTime?: string | null; outTime?: string | null }): number | null {
+  if (r.workedHours != null && r.workedHours > 0) return r.workedHours;
+  if (!r.inTime || !r.outTime) return null;
+  const [ih, im] = r.inTime.split(":").map(Number);
+  const [oh, om] = r.outTime.split(":").map(Number);
+  const mins = oh * 60 + om - (ih * 60 + im);
+  return mins > 0 ? mins / 60 : null;
+}
+
+/** 8.5 → "8h 30m", 2 → "2h", 0.75 → "45m". */
+function fmtHours(h: number): string {
+  const total = Math.round(h * 60);
+  const hh = Math.floor(total / 60);
+  const mm = total % 60;
+  return hh && mm ? `${hh}h ${mm}m` : hh ? `${hh}h` : `${mm}m`;
 }

@@ -159,6 +159,8 @@ export const ISSUE_TARGET_META: Record<IssueTarget, { label: string; hint: strin
 };
 
 export interface StockMovement {
+  /** KAN-81: the purchase order a receipt came in against (counts as received on it). */
+  poId?: number | null;
   id: string;
   /** Running document number — GRN-2026-0007, ISS-2026-0041. */
   number: string;
@@ -234,6 +236,8 @@ export interface RequestLine {
   /** Purchase requests: how much is on purchase orders. */
   orderedQuantity?: number;
   poRefs?: string | null;
+  /** KAN-81: what has arrived (receipts against the request or its POs). */
+  receivedQuantity?: number;
   remark?: string | null;
   statusNote?: string | null;
   statusChangedOn?: string | null;

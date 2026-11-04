@@ -496,18 +496,21 @@ function RequestDialog({
 const LINE_STATUS_CHIP: Record<string, { label: string; chip: string }> = {
   APPROVED: { label: "To order", chip: "bg-blue-50 text-blue-700 ring-blue-600/20" },
   ORDERED: { label: "Ordered", chip: "bg-emerald-50 text-emerald-700 ring-emerald-600/20" },
+  PART_ORDERED: { label: "Part ordered", chip: "bg-amber-50 text-amber-700 ring-amber-600/20" },
   REJECTED: { label: "Rejected", chip: "bg-rose-50 text-rose-700 ring-rose-600/20" },
 };
 
 function PurchaseLines({ request, itemName }: { request: MaterialRequest; itemName: (id: number) => string }) {
   return (
     <div className="overflow-x-auto">
-      <table className="w-full min-w-[720px] border-collapse text-sm">
+      <table className="w-full min-w-[900px] border-collapse text-sm">
         <thead>
           <tr className="border-b border-gray-100 bg-gray-50/60 text-left text-[11px] font-medium tracking-wide text-gray-500 uppercase">
             <th className="px-4 py-2">Item</th>
             <th className="w-24 px-3 py-2 text-right">Asked</th>
             <th className="w-24 px-3 py-2 text-right">Ordered</th>
+            <th className="w-24 px-3 py-2 text-right">Received</th>
+            <th className="w-24 px-3 py-2 text-right">Remaining</th>
             <th className="w-24 px-3 py-2">Status</th>
             <th className="w-56 px-3 py-2">Purchase order</th>
           </tr>
@@ -524,6 +527,11 @@ function PurchaseLines({ request, itemName }: { request: MaterialRequest; itemNa
                 </td>
                 <td className="px-3 py-2 text-right text-gray-700 tabular-nums">{fmtQty(l.quantity)}</td>
                 <td className="px-3 py-2 text-right text-gray-500 tabular-nums">{fmtQty(l.orderedQuantity ?? 0)}</td>
+                {/* KAN-81: what actually arrived against this request / its POs, and what is still due. */}
+                <td className="px-3 py-2 text-right text-emerald-700 tabular-nums">{fmtQty(l.receivedQuantity ?? 0)}</td>
+                <td className={`px-3 py-2 text-right tabular-nums ${l.quantity - (l.receivedQuantity ?? 0) > 0 ? "font-medium text-amber-700" : "text-gray-400"}`}>
+                  {fmtQty(Math.max(0, l.quantity - (l.receivedQuantity ?? 0)))}
+                </td>
                 <td className="px-3 py-2">
                   {st ? (
                     <span className={`rounded-md px-2 py-0.5 text-[11px] font-medium ring-1 ring-inset ${st.chip}`}>

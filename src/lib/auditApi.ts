@@ -20,7 +20,28 @@ export interface AuditLog {
   statusCode: number | null;
   ipAddress: string | null;
   userAgent: string | null;
+  /** KAN-85: JSON of what changed (see AuditChange). Null on older rows and on reads/sign-ins. */
+  details?: string | null;
   createdAt: string;
+}
+
+/** One record a call changed, field by field. */
+export interface AuditChange {
+  entity: string;
+  id: string | null;
+  label: string | null;
+  op: "CREATE" | "UPDATE" | "DELETE";
+  fields: { field: string; from: string | null; to: string | null }[];
+}
+
+export function parseAuditDetails(details: string | null | undefined): AuditChange[] {
+  if (!details) return [];
+  try {
+    const v = JSON.parse(details);
+    return Array.isArray(v) ? (v as AuditChange[]) : [];
+  } catch {
+    return [];
+  }
 }
 
 export interface AuditLogPage {
