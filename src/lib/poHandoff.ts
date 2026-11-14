@@ -43,6 +43,8 @@ export interface PoDraft {
   /** The vendor's whole-quote discount, in rupees. */
   discountAmount: number;
   lines: PoDraftLine[];
+  /** Material request lines this PO fills — marked ordered against it once it is saved. */
+  mrLines?: { requestId: number; requestNo: string; lineId: number; itemId: number; quantity: number }[];
 }
 
 /** Vyapar's own unit codes. Anything we cannot map lands on NONE rather than an invalid option. */

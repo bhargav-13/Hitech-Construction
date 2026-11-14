@@ -37,6 +37,10 @@ export const getPurchaseBills = (projectId?: number) =>
 export const getPurchaseReturns = (projectId?: number) =>
   apiRequest<Invoice[]>(`${BASE}/returns${qs({ projectId })}`);
 
+/** Raise a purchase order from Procurement (it goes through the PO approval chain like any other). */
+export const createPurchaseOrder = (body: InvoiceInput) =>
+  apiRequest<Invoice>(`${BASE}/orders`, { method: "POST", body });
+
 export const getPurchaseDocument = (id: number) => apiRequest<Invoice>(`${BASE}/documents/${id}`);
 
 /** Edit a purchase order or bill from Procurement (PROCUREMENT_PURCHASES:EDIT — no Vyapar access needed). */

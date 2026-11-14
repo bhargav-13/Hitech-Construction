@@ -230,7 +230,8 @@ export type ApiRequestStatus =
   | "REJECTED"
   // purchase requests: fulfilled by purchase orders rather than by issuing from the store
   | "PART_ORDERED"
-  | "ORDERED";
+  | "ORDERED"
+  | "CLOSED";
 
 /** ISSUE asks the store for what it holds (and reserves it once approved); PURCHASE asks for it to be bought. */
 export type ApiRequestType = "ISSUE" | "PURCHASE";
@@ -255,6 +256,8 @@ export interface ApiRequestLine {
   statusChangedOn: string | null;
   /** KAN-81: what has arrived for this line — receipts against the request or the POs it is on. */
   receivedQuantity?: number;
+  /** What the Central store holds of it (null when the request was made to Central itself). */
+  centralOnHand?: number | null;
 }
 
 export interface ApiMaterialRequest {
@@ -348,6 +351,101 @@ export const getPoOptions = (requestId: number, lineId: number) =>
 
 export const orderRequestLine = (requestId: number, lineId: number, body: { poId: number; quantity: number }) =>
   apiRequest<void>(`${BASE}/requests/${requestId}/lines/${lineId}/order`, { method: "POST", body });
+
+// ---- Project → Material (Onsite parity) ----
+
+/** The project's site store; `create` makes it the first time the project needs one. */
+export const getSiteStore = (projectId: number, create = false) =>
+  apiRequest<ApiWarehouse | null>(`${BASE}/projects/${projectId}/site-store${create ? "?create=true" : ""}`);
+
+export const getProjectRequests = (projectId: number) =>
+  apiRequest<ApiMaterialRequest[]>(`${BASE}/projects/${projectId}/requests`);
+
+export type SiteEntryType = "RECEIVED" | "USED" | "WASTAGE" | "SUBCON_ISSUE";
+
+export interface SiteEntryLine {
+  itemId: number;
+  quantity: number;
+  rate?: number | null;
+  /** A receipt against this purchase order. */
+  poId?: number | null;
+  requestId?: number | null;
+  note?: string | null;
+}
+
+/** One entry, several materials, one number (GRN-…, ISS-…). */
+export const recordSiteEntry = (body: {
+  warehouseId: number;
+  type: SiteEntryType;
+  movedOn?: string | null;
+  partyId?: number | null;
+  sourceDocNo?: string | null;
+  vehicleNo?: string | null;
+  note?: string | null;
+  wastageType?: string | null;
+  lines: SiteEntryLine[];
+}) => apiRequest<ApiMovement[]>(`${BASE}/entries`, { method: "POST", body });
+
+/** Send material on; it lands when the receiving store / site accepts it. */
+export const dispatchTransfer = (body: {
+  fromWarehouseId: number;
+  /** One of: a store, a project (its site store), or the Central store. */
+  toWarehouseId?: number | null;
+  toProjectId?: number | null;
+  toCentral?: boolean;
+  movedOn?: string | null;
+  vehicleNo?: string | null;
+  note?: string | null;
+  requestId?: number | null;
+  lines: SiteEntryLine[];
+}) => apiRequest<ApiMovement[]>(`${BASE}/transfers/dispatch`, { method: "POST", body });
+
+export interface ApiPendingTransfer {
+  number: string;
+  fromWarehouseId: number;
+  fromWarehouseName: string;
+  toWarehouseId: number;
+  toWarehouseName: string;
+  toProjectId: number | null;
+  movedOn: string;
+  byUserName: string | null;
+  note: string | null;
+  requestId: number | null;
+  lines: { itemId: number; itemName: string; unit: string | null; quantity: number }[];
+}
+
+export const getPendingTransfers = (opts: { projectId?: number | null; warehouseId?: number | null } = {}) => {
+  const q = new URLSearchParams();
+  if (opts.projectId) q.set("projectId", String(opts.projectId));
+  if (opts.warehouseId) q.set("warehouseId", String(opts.warehouseId));
+  const qs = q.toString();
+  return apiRequest<ApiPendingTransfer[]>(`${BASE}/transfers/pending${qs ? `?${qs}` : ""}`);
+};
+
+export const receiveTransfer = (number: string, body: { movedOn?: string | null; note?: string | null } = {}) =>
+  apiRequest<ApiMovement[]>(`${BASE}/transfers/${encodeURIComponent(number)}/receive`, { method: "POST", body });
+
+/** Raised from a project: what Central can spare becomes a store request, the rest a purchase request. */
+export const raiseMaterialRequest = (body: {
+  projectId: number;
+  neededBy?: string | null;
+  note?: string | null;
+  lines: { itemId: number; quantity: number }[];
+}) => apiRequest<ApiMaterialRequest[]>(`${BASE}/requests/raise`, { method: "POST", body });
+
+/** Every purchase request, for procurement. */
+export const getPurchaseRequests = () => apiRequest<ApiMaterialRequest[]>(`${BASE}/requests/purchase`);
+
+export const setRequestLineStatus = (
+  requestId: number,
+  lineId: number,
+  status: "APPROVED" | "REJECTED" | "CLOSED" | "PENDING",
+  note?: string | null,
+) =>
+  apiRequest<ApiMaterialRequest>(`${BASE}/requests/${requestId}/lines/${lineId}/status`, {
+    method: "POST",
+    body: { status, note: note ?? null },
+  });
 
 // ---------------------------------------------------------------- checkouts
 

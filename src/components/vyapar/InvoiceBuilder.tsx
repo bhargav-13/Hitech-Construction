@@ -42,6 +42,7 @@ import { DEFAULT_PAYMENT_CATEGORY, PAYMENT_CATEGORIES } from "@/lib/vyaparConfig
 import { useItemMasters, type ManagedUnit } from "@/lib/useItemMasters";
 import { DEFAULT_UNITS } from "@/lib/useItemSettings";
 import type { PoDraft } from "@/lib/poHandoff";
+import * as wh from "@/lib/warehouseApi";
 import { useVyaparProjectId } from "@/lib/projectScope";
 import {
   ModuleAttachments,
@@ -185,7 +186,10 @@ export function InvoiceBuilder({
   onShareDoc,
   onApprovalChanged,
   saveExisting,
+  createNew,
 }: {
+  /** Creates a new document through another module's endpoint (Procurement raises POs itself). */
+  createNew?: (body: vyapar.InvoiceInput) => Promise<Invoice>;
   /**
    * Saves an edit through another module's endpoint — Procurement edits POs and bills through its
    * own window so buyers don't need Vyapar access. Defaults to Vyapar's own update.
@@ -1017,7 +1021,7 @@ export function InvoiceBuilder({
 
       const saved = existing
         ? await (saveExisting ?? vyapar.updateInvoice)(existing.id, body)
-        : await vyapar.createInvoice(body);
+        : await (createNew ?? vyapar.createInvoice)(body);
 
       if (spreading) {
         const spentElsewhere = paymentLinks.reduce((s, l) => s + l.amount, 0);
@@ -1036,6 +1040,26 @@ export function InvoiceBuilder({
             ...paymentLinks,
           ],
         });
+      }
+
+      // Material requests carried into this PO: their lines now count as ordered on it, capped at
+      // what the PO actually carries of each material (the buyer may have trimmed a quantity).
+      if (!existing && docType === "PURCHASE_ORDER" && prefill?.mrLines?.length) {
+        const onPo = new Map<number, number>();
+        for (const l of clean) if (l.itemId != null) onPo.set(l.itemId, (onPo.get(l.itemId) ?? 0) + (Number(l.quantity) || 0));
+        const failed: string[] = [];
+        for (const m of prefill.mrLines) {
+          const left = onPo.get(m.itemId) ?? 0;
+          const q = Math.min(left, m.quantity);
+          if (q <= 0) continue;
+          onPo.set(m.itemId, left - q);
+          try {
+            await wh.orderRequestLine(m.requestId, m.lineId, { poId: saved.id, quantity: q });
+          } catch {
+            failed.push(m.requestNo);
+          }
+        }
+        if (failed.length) alert(`The PO is saved, but ${[...new Set(failed)].join(", ")} couldn't be marked as ordered — link it from Material requests.`);
       }
 
       // Split payment: each extra "Payment type" line is its own receipt against this document.
@@ -1181,7 +1205,7 @@ export function InvoiceBuilder({
       onClose={onClose}
       onSave={lock?.edit ? undefined : () => save(false)}
       // Only offered when creating — "Save & New" on an edit would be a confusing no-op.
-      onSaveAndNew={existing || lock?.edit ? undefined : () => save(true)}
+      onSaveAndNew={existing || lock?.edit || prefill?.mrLines?.length ? undefined : () => save(true)}
       saveLabel={saving ? "Saving…" : "Save"}
       dirty={dirty}
       width={showPreview ? "max-w-[98vw]" : "max-w-6xl"}
@@ -1212,7 +1236,7 @@ export function InvoiceBuilder({
             <SaveMenu
               onPrint={() => saveThen("print")}
               onShare={() => saveThen("share")}
-              onSaveAndNew={existing || lock?.edit ? undefined : () => save(true)}
+              onSaveAndNew={existing || lock?.edit || prefill?.mrLines?.length ? undefined : () => save(true)}
               busy={saving}
               printLabel={docType === "PURCHASE_ORDER" ? "Download" : "Print"}
             />

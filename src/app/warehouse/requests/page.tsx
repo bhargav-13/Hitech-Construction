@@ -11,6 +11,7 @@ import { filledNote, matchByNameOrGstin, type ScannedItemList } from "@/lib/docS
 import { TypeaheadPicker } from "@/components/vyapar/TypeaheadPicker";
 import { RowMenu, RowMenuDivider, RowMenuItem } from "@/components/RowMenu";
 import { useWarehouseStore, stockOf, emptyRequest, warehouseUid, reportRefusal } from "@/lib/warehouseStore";
+import * as whApi from "@/lib/warehouseApi";
 import { useWarehouseScope, useWarehouseRights } from "@/lib/warehouseScope";
 import { REQUEST_STATUS_META, type MaterialRequest, type RequestStatus } from "@/lib/warehouseTypes";
 import { useProjects } from "@/lib/useProjects";
@@ -51,6 +52,35 @@ export default function WarehouseRequestsPage() {
   const [tab, setTab] = useState<RequestStatus | "ALL">("ALL");
   const [editing, setEditing] = useState<MaterialRequest | null>(null);
   const [issuing, setIssuing] = useState<{ requestId: string; itemId: number } | null>(null);
+  const load = useWarehouseStore((s) => s.load);
+  const [sending, setSending] = useState<string | null>(null);
+
+  /**
+   * Fill a site's request by sending the material to its site store: one transfer for everything
+   * outstanding that the store holds, tied to the request. It lands when the site accepts it
+   * (Project → Material → Pending to Receive), so the site's stock is right from that moment on.
+   */
+  async function sendToSite(r: MaterialRequest) {
+    const lines = r.lines
+      .map((l) => ({ itemId: l.itemId, quantity: Math.min(l.quantity - l.issuedQuantity, stockOf(movements, r.warehouseId, l.itemId)) }))
+      .filter((l) => l.quantity > 0);
+    if (!lines.length) return alert("Nothing outstanding on this request is in stock here.");
+    if (!confirm(`Send ${lines.length} material(s) on ${r.number} to ${projectName(r.projectId)}? They leave this store now and reach the site when it receives them.`)) return;
+    setSending(r.id);
+    try {
+      await whApi.dispatchTransfer({
+        fromWarehouseId: Number(r.warehouseId),
+        toProjectId: Number(r.projectId),
+        requestId: Number(r.id),
+        lines,
+      });
+      await load();
+    } catch (e) {
+      reportRefusal(e);
+    } finally {
+      setSending(null);
+    }
+  }
 
   const visible = useMemo(() => {
     const needle = q.trim().toLowerCase();
@@ -213,6 +243,18 @@ export default function WarehouseRequestsPage() {
                   </div>
                 </div>
 
+                {r.requestType !== "PURCHASE" && r.projectId && (r.status === "APPROVED" || r.status === "PARTIAL") && rights.canMove && (
+                  <div className="flex items-center justify-between gap-2 border-b border-gray-100 bg-sky-50/50 px-4 py-2 text-xs text-sky-800">
+                    <span>Send what is outstanding to {projectName(r.projectId)} — it lands when the site receives it.</span>
+                    <button
+                      onClick={() => void sendToSite(r)}
+                      disabled={sending === r.id}
+                      className="rounded-md bg-sky-600 px-2.5 py-1 font-semibold text-white hover:bg-sky-700 disabled:opacity-50"
+                    >
+                      {sending === r.id ? "Sending…" : "Send to site"}
+                    </button>
+                  </div>
+                )}
                 {r.requestType === "PURCHASE" ? (
                   <PurchaseLines request={r} itemName={itemName} />
                 ) : (

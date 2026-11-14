@@ -209,7 +209,8 @@ export type RequestStatus =
   | "ISSUED"
   | "REJECTED"
   | "PART_ORDERED"
-  | "ORDERED";
+  | "ORDERED"
+  | "CLOSED";
 
 /** ISSUE asks the store for what it holds; PURCHASE asks for something to be bought (never reserves stock). */
 export type RequestType = "ISSUE" | "PURCHASE";
@@ -223,6 +224,7 @@ export const REQUEST_STATUS_META: Record<RequestStatus, { label: string; chip: s
   REJECTED: { label: "Rejected", chip: "bg-rose-50 text-rose-700 ring-rose-600/20" },
   PART_ORDERED: { label: "Part ordered", chip: "bg-violet-50 text-violet-700 ring-violet-600/20" },
   ORDERED: { label: "Ordered", chip: "bg-emerald-50 text-emerald-700 ring-emerald-600/20" },
+  CLOSED: { label: "Closed", chip: "bg-slate-100 text-slate-600 ring-slate-500/20" },
 };
 
 export interface RequestLine {

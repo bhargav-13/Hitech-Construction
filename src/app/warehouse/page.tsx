@@ -6,6 +6,9 @@ import { WarehouseShell, WarehouseHeader, WarehouseEmpty } from "@/components/wa
 import { useWarehouseStore, checkoutsOf, stockByItem, signedQty } from "@/lib/warehouseStore";
 import { useWarehouseScope } from "@/lib/warehouseScope";
 import { MOVEMENT_META } from "@/lib/warehouseTypes";
+import { PendingReceiveDrawer, countPendingToReceive } from "@/components/material/PendingReceiveDrawer";
+import { BadgeButton } from "@/components/procurement/PoTrackingPanels";
+import { PackageOpen } from "lucide-react";
 import { inr, qty as fmtQty } from "@/lib/format";
 import { bookDate } from "@/lib/format";
 import * as vyapar from "@/lib/vyaparApi";
@@ -77,6 +80,7 @@ export default function WarehouseDashboardPage() {
       <WarehouseHeader
         title={warehouse ? warehouse.name : "All stores"}
         subtitle="What is on hand, what is running out, and what is still owed back."
+        right={<WarehousePendingButton />}
       />
 
       {nothingYet ? (
@@ -236,5 +240,21 @@ function Panel({
         {isEmpty ? <p className="py-8 text-center text-sm text-gray-400">{empty}</p> : children}
       </div>
     </section>
+  );
+}
+
+/** Pending to Receive on the Warehouse page too: deliveries owed against POs and transfers on their way in. */
+function WarehousePendingButton() {
+  const [open, setOpen] = useState(false);
+  const [count, setCount] = useState(0);
+  const load = useWarehouseStore((s) => s.load);
+  useEffect(() => {
+    countPendingToReceive(null).then(setCount).catch(() => setCount(0));
+  }, [open]);
+  return (
+    <>
+      <BadgeButton icon={<PackageOpen size={15} />} label="Pending to receive" count={count} onClick={() => setOpen(true)} />
+      {open && <PendingReceiveDrawer onClose={() => setOpen(false)} onChanged={() => void load()} />}
+    </>
   );
 }
