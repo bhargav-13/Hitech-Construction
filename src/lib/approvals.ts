@@ -42,6 +42,22 @@ export const useApprovalInboxCount = create<InboxCountState>((set) => ({
   },
 }));
 
+/** Vyapar documents waiting on me — the badge on Vyapar → Approvals. */
+export const useVyaparApprovalCount = create<InboxCountState>((set) => ({
+  count: 0,
+  loadedAt: 0,
+  refresh: async () => {
+    if (!getAccessToken()) return;
+    try {
+      const rows = await getApprovalInbox("mine", "vyapar");
+      set({ count: rows.length, loadedAt: Date.now() });
+    } catch {
+      // No Vyapar Approvals access, or an older backend — no badge.
+      set({ count: 0, loadedAt: Date.now() });
+    }
+  },
+}));
+
 /**
  * Ladder state for the rows on a list screen, keyed by record id. `reload` re-fetches after a
  * decision. Records that never went through a chain are simply absent from the map.

@@ -54,10 +54,12 @@ import { STATES_OF_SUPPLY } from "@/lib/vyaparApi";
 import type { DocType, Invoice, Item, Party } from "@/lib/vyaparApi";
 import {
   ChevronDown,
+  Download,
   FileText,
   Eye,
   GripVertical,
   Link2,
+  Lock,
   Plus,
   Printer,
   Share2,
@@ -179,6 +181,8 @@ export function InvoiceBuilder({
   prefill,
   approvalType,
   approval,
+  lock,
+  onShareDoc,
   onApprovalChanged,
   saveExisting,
 }: {
@@ -214,6 +218,13 @@ export function InvoiceBuilder({
   /** Approval chain this document type runs on, and where this document stands on it. */
   approvalType?: string | null;
   approval?: ApprovalState;
+  /**
+   * Purchase orders: why the form can't be saved (waiting for approval) and why it can't be
+   * downloaded or shared yet (not approved). Null/undefined = allowed.
+   */
+  lock?: { edit?: string | null; output?: string | null };
+  /** Share opens the WhatsApp / Email dialog for the saved document instead of downloading it. */
+  onShareDoc?: (invoice: Invoice) => void;
   onApprovalChanged?: () => void;
 }) {
   const projectId = useVyaparProjectId(projectOverride);
@@ -905,6 +916,10 @@ export function InvoiceBuilder({
 
   /** Returns the saved document so the Print / Share actions can act on it, or null if it failed. */
   async function save(again = false): Promise<Invoice | null> {
+    if (lock?.edit) {
+      setError(lock.edit);
+      return null;
+    }
     const clean = lines.filter((l) => l.itemName.trim());
     if (clean.length === 0) {
       setError("Add at least one item.");
@@ -1090,9 +1105,15 @@ export function InvoiceBuilder({
    * order Vyapar uses. The drawer stays open afterwards so the user can keep editing.
    */
   async function saveThen(action: "print" | "share") {
-    const saved = await save(false);
+    if (lock?.output) {
+      setError(lock.output);
+      return;
+    }
+    // An order that can't be changed is acted on as it stands — there is nothing to save.
+    const saved = lock?.edit && existing ? existing : await save(false);
     if (!saved) return;
     if (action === "print") await downloadInvoicePdf(saved, selectedParty, items);
+    else if (onShareDoc) onShareDoc(saved);
     else shareInvoice(saved, parties);
   }
 
@@ -1158,9 +1179,9 @@ export function InvoiceBuilder({
     <Drawer
       title={existing ? existing.invoiceNo : docHeading}
       onClose={onClose}
-      onSave={() => save(false)}
+      onSave={lock?.edit ? undefined : () => save(false)}
       // Only offered when creating — "Save & New" on an edit would be a confusing no-op.
-      onSaveAndNew={existing ? undefined : () => save(true)}
+      onSaveAndNew={existing || lock?.edit ? undefined : () => save(true)}
       saveLabel={saving ? "Saving…" : "Save"}
       dirty={dirty}
       width={showPreview ? "max-w-[98vw]" : "max-w-6xl"}
@@ -1187,12 +1208,15 @@ export function InvoiceBuilder({
               <span className="rounded bg-white/25 px-1.5 text-xs">{paymentLinks.length}</span>
             )}
           </button>
-          <SaveMenu
-            onPrint={() => saveThen("print")}
-            onShare={() => saveThen("share")}
-            onSaveAndNew={existing ? undefined : () => save(true)}
-            busy={saving}
-          />
+          {!lock?.output && (
+            <SaveMenu
+              onPrint={() => saveThen("print")}
+              onShare={() => saveThen("share")}
+              onSaveAndNew={existing || lock?.edit ? undefined : () => save(true)}
+              busy={saving}
+              printLabel={docType === "PURCHASE_ORDER" ? "Download" : "Print"}
+            />
+          )}
         </>
       }
     >
@@ -1215,9 +1239,17 @@ export function InvoiceBuilder({
             entityId={existing.id}
             state={approval}
             onChanged={() => onApprovalChanged?.()}
+            allowRecall={docType === "PURCHASE_ORDER"}
             rejectHint="Rejecting cancels this document — it keeps its number, stops counting in balances and stock, and can be reopened once fixed."
           />
         )}
+        {(lock?.edit || lock?.output) && (
+          <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+            <Lock size={15} className="mt-0.5 shrink-0" />
+            <span>{lock.edit ?? lock.output}</span>
+          </div>
+        )}
+        <fieldset disabled={!!lock?.edit} className="m-0 min-w-0 space-y-5 border-0 p-0">
         {draft.offered && (
           <DraftBanner what={docHeading.toLowerCase()} savedAt={draft.offered.savedAt} onRestore={restoreDraft} onDiscard={draft.clear} />
         )}
@@ -1951,6 +1983,7 @@ export function InvoiceBuilder({
             {paymentLinks.length > 1 ? "s" : ""}.
           </p>
         )}
+        </fieldset>
       </div>
       </div>
 
@@ -2036,12 +2069,16 @@ function SaveMenu({
   onShare,
   onSaveAndNew,
   busy,
+  printLabel = "Print",
 }: {
   onPrint: () => void;
   onShare: () => void;
   onSaveAndNew?: () => void;
   busy: boolean;
+  /** "Download" on purchase orders — the action saves the PDF rather than printing it. */
+  printLabel?: string;
 }) {
+  const PrintIcon = printLabel === "Download" ? Download : Printer;
   const [open, setOpen] = useState(false);
   return (
     <div className="relative flex items-center">
@@ -2051,7 +2088,7 @@ function SaveMenu({
         onClick={onPrint}
         className="flex items-center gap-1.5 rounded-l-lg border border-r-0 border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition-colors duration-150 hover:border-brand-accent hover:text-brand-accent disabled:opacity-60"
       >
-        <Printer size={14} /> Print
+        <PrintIcon size={14} /> {printLabel}
       </button>
       <button
         type="button"
@@ -2076,8 +2113,8 @@ function SaveMenu({
               }}
             />
             <MenuItem
-              icon={Printer}
-              label="Print"
+              icon={PrintIcon}
+              label={printLabel}
               onClick={() => {
                 setOpen(false);
                 onPrint();

@@ -166,6 +166,9 @@ export const VYAPAR_NAV: NavNode[] = [
       { label: "Loan Accounts", href: "/vyapar/loans", feature: "VYAPAR_CASH_BANK" },
     ],
   },
+  // Everything in Vyapar waiting on someone's approval — invoices, bills, orders, expenses,
+  // payments and payment requests. Badge = what's waiting on me.
+  { label: "Approvals", href: "/vyapar/approvals", feature: "VYAPAR_APPROVALS", icon: "approval" },
   { label: "Reports", href: "/vyapar/reports", feature: "VYAPAR_REPORTS", icon: "chart" },
   {
     label: "Utilities",

@@ -5,7 +5,7 @@ import { PayrollShell, PayrollEmpty } from "@/components/payroll/PayrollShell";
 import { Spinner } from "@/components/Spinner";
 import { LeaveStatusPill } from "@/components/payroll/LeaveStatusPill";
 import { ApprovalTrail, ApprovalProgressPill } from "@/components/approval/ApprovalTrail";
-import { allLeave, decideLeave, ApiError } from "@/lib/api";
+import { allLeave, decideLeave, ApiError, leavePaySplit } from "@/lib/api";
 import type { LeaveRequestApi, LeaveStatus } from "@/lib/api";
 import { Select } from "@/components/Select";
 import { CalendarDays, Check, ClipboardList, Search, UserRound, X } from "lucide-react";
@@ -222,6 +222,9 @@ export default function LeavePage() {
                               </span>
                               <span className="text-slate-300">·</span>
                               <span>{r.days}d</span>
+                              {leavePaySplit(r) && (
+                                <span className="rounded bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-700">{leavePaySplit(r)}</span>
+                              )}
                             </div>
                             <div className="mt-1">
                               <ApprovalProgressPill approval={r.approval} />
@@ -257,6 +260,7 @@ export default function LeavePage() {
                     <dl className="mt-3 space-y-1.5 text-xs">
                       <Row label="Dates" value={`${selected.fromDate} → ${selected.toDate}`} />
                       <Row label="Days" value={String(selected.days)} />
+                      <Row label="Pay" value={leavePaySplit(selected) ?? "Paid"} />
                       <Row label="Applied" value={selected.createdAt ? formatWhen(selected.createdAt) : "—"} />
                     </dl>
                     {selected.reason && (

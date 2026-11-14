@@ -332,3 +332,80 @@ function Check({ label, hint, checked, onChange }: { label: string; hint?: strin
     </label>
   );
 }
+
+/**
+ * Edit a transfer or adjustment from an account's ledger. A transfer's two legs (out of one
+ * account, into the other) change together on the server, so this only asks for what both share.
+ */
+export function EditCashBankEntryDialog({
+  txn,
+  onClose,
+  onDone,
+}: {
+  txn: vyapar.CashBankTxn;
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const isAdjust = /adjustment/i.test(txn.type);
+  const [amount, setAmount] = useState(txn.amount);
+  const [date, setDate] = useState(txn.date ?? todayIST());
+  const [description, setDescription] = useState(txn.note ?? txn.name ?? "");
+  const [mode, setMode] = useState<"ADD" | "REDUCE">(txn.direction === "out" ? "REDUCE" : "ADD");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  async function submit() {
+    if (!amount || Number(amount) <= 0) {
+      setError("Enter an amount greater than zero.");
+      return;
+    }
+    setSaving(true);
+    setError("");
+    try {
+      await vyapar.updateCashBankEntry(txn.id, {
+        amount: Number(amount),
+        date,
+        description: description.trim(),
+        mode: isAdjust ? mode : undefined,
+      });
+      onDone();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't save this entry.");
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Drawer title={`Edit ${txn.type}`} onClose={onClose} onSave={submit} saveLabel={saving ? "Saving…" : "Save"} width="max-w-lg">
+      <div className="space-y-4">
+        {error && <div className="rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-600">{error}</div>}
+        {!isAdjust && (
+          <p className="rounded-lg bg-cyan-50 px-3 py-2 text-xs text-cyan-800">
+            This is one side of a transfer — the other account&apos;s entry changes with it.
+          </p>
+        )}
+        {isAdjust && (
+          <div className="flex gap-4">
+            {(["ADD", "REDUCE"] as const).map((m) => (
+              <label key={m} className="flex cursor-pointer items-center gap-2 text-sm">
+                <input type="radio" checked={mode === m} onChange={() => setMode(m)} className="h-4 w-4 accent-cyan-600" />
+                <span className={mode === m ? "font-medium text-gray-800" : "text-gray-600"}>
+                  {m === "ADD" ? "Increase Balance" : "Reduce Balance"}
+                </span>
+              </label>
+            ))}
+          </div>
+        )}
+        <Field label="Amount" required>
+          <input type="number" value={amount} onChange={(e) => setAmount(Number(e.target.value))} className="input" autoFocus />
+        </Field>
+        <Field label="Date">
+          <DatePicker value={date} onChange={setDate} placeholder="Date" />
+        </Field>
+        <Field label="Description">
+          <input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Enter Description" className="input" />
+        </Field>
+      </div>
+    </Drawer>
+  );
+}

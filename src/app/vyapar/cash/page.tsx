@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { VyaparShell } from "@/components/vyapar/VyaparShell";
 import { TxnTable } from "@/app/vyapar/bank/page";
-import { CashBankEntryDialog } from "@/components/vyapar/CashBankDialogs";
+import { CashBankEntryDialog, EditCashBankEntryDialog } from "@/components/vyapar/CashBankDialogs";
+import { useCan } from "@/lib/permissions";
 import { Spinner } from "@/components/Spinner";
 import { inr } from "@/lib/format";
 import { downloadPdf } from "@/lib/vyaparExport";
@@ -22,6 +23,8 @@ export default function CashInHandPage() {
   const [search, setSearch] = useState("");
   const [adjust, setAdjust] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [editingTxn, setEditingTxn] = useState<CashBankTxn | null>(null);
+  const can = useCan();
 
   const load = useCallback(async () => {
     if (!isBackgroundRefresh()) setLoading(true);
@@ -41,6 +44,20 @@ export default function CashInHandPage() {
   useEffect(() => {
     load();
   }, [load]);
+
+  async function removeTxn(t: CashBankTxn) {
+    const transfer = /transfer|withdrawal|deposit/i.test(t.type);
+    if (!confirm(`Delete this ${t.type} of ${inr(t.amount)}?${transfer ? " Both sides of the transfer are removed." : ""}
+
+This can't be undone.`)) return;
+    setError("");
+    try {
+      await vyapar.deleteCashBankEntry(t.id);
+      void load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't delete this entry.");
+    }
+  }
 
   const balance = useMemo(
     () => txns.reduce((s, t) => s + (t.direction === "in" ? t.amount : -t.amount), 0),
@@ -95,6 +112,8 @@ export default function CashInHandPage() {
             loading={false}
             search={search}
             onSearch={setSearch}
+            onEdit={can("VYAPAR_CASH_BANK:EDIT") ? (t) => setEditingTxn(t) : undefined}
+            onDelete={can("VYAPAR_CASH_BANK:DELETE") ? (t) => void removeTxn(t) : undefined}
             onExport={() => setExporting(true)}
             onPdf={() =>
               downloadPdf("Cash In Hand", head, rows.map((r) => [r.type, r.name ?? "", r.date ?? "", inr(r.amount)]), {
@@ -123,6 +142,13 @@ export default function CashInHandPage() {
           currentBalance={balance}
           onClose={() => setAdjust(false)}
           onDone={() => { setAdjust(false); load(); }}
+        />
+      )}
+      {editingTxn && (
+        <EditCashBankEntryDialog
+          txn={editingTxn}
+          onClose={() => setEditingTxn(null)}
+          onDone={() => { setEditingTxn(null); void load(); }}
         />
       )}
     </VyaparShell>

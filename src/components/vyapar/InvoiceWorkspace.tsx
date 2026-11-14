@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { decideApproval, resubmitApproval } from "@/lib/api";
+import { decideApproval, getApprovalChainActive, resubmitApproval } from "@/lib/api";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { VyaparEmpty } from "@/components/vyapar/VyaparShell";
 import { Drawer, DrawerField } from "@/components/Drawer";
@@ -26,7 +26,9 @@ import * as vyapar from "@/lib/vyaparApi";
 import { fullInvoiceNo } from "@/lib/vyaparApi";
 import type { DocType, Invoice, InvoiceLine, Item, Party } from "@/lib/vyaparApi";
 import { Download, FileText, Plus, Search, Upload } from "lucide-react";
-import { ApprovalBadge } from "@/components/approval/ApprovalBadge";
+import { ApprovalBadge, wasRecalled } from "@/components/approval/ApprovalBadge";
+import { ShareDocDialog, type ShareChannel } from "@/components/vyapar/ShareDocDialog";
+import type { TxnRowLocks } from "@/components/vyapar/TxnRowActions";
 import { DOC_APPROVAL_TYPE, useApprovalStates } from "@/lib/approvals";
 import { isBackgroundRefresh, useAutoRefresh } from "@/lib/autoRefresh";
 import { todayIST } from "@/lib/datetime";
@@ -103,6 +105,43 @@ export function InvoiceWorkspace({
     },
     [approvals],
   );
+  /** Whether purchase orders go through approval at all — "Not sent" only blocks output if they do. */
+  const [poChainActive, setPoChainActive] = useState(false);
+  useEffect(() => {
+    if (!isPoList) return;
+    let off = false;
+    getApprovalChainActive("PURCHASE_ORDER")
+      .then((r) => !off && setPoChainActive(!!r?.active))
+      .catch(() => {});
+    return () => {
+      off = true;
+    };
+  }, [isPoList]);
+
+  /**
+   * What a purchase order may do until it is approved. Waiting for approval: it can't be changed
+   * (Recall it first) and can't be downloaded or shared. Rejected, recalled or not yet sent (while a
+   * chain is published): it can be fixed, but not issued. Approved — or no chain at all: anything.
+   */
+  const poLocks = useCallback(
+    (i: Invoice): TxnRowLocks | undefined => {
+      if (!isPoList) return undefined;
+      const st = approvals[i.id];
+      if (st?.status === "PENDING") {
+        return {
+          edit: "Waiting for approval — this order can't be edited. Recall it to make changes.",
+          output: "Download and share open once the order is approved.",
+        };
+      }
+      if (st?.status === "APPROVED") return {};
+      if (st?.status === "REJECTED") return { output: "Rejected — fix the order and send it for approval again before issuing it." };
+      if (st && wasRecalled(st)) return { output: "Recalled — send it for approval again once it's changed." };
+      return poChainActive ? { output: "Send this order for approval first — it can be downloaded once approved." } : {};
+    },
+    [isPoList, approvals, poChainActive],
+  );
+  const [sharing, setSharing] = useState<{ inv: Invoice; channel: ShareChannel } | null>(null);
+
   const poStatus = (i: Invoice) =>
     i.cancelled ? "Cancelled" : /Onsite PO status:\s*Closed/i.test(i.description ?? "") ? "Closed" : "Open";
   /**
@@ -702,12 +741,17 @@ export function InvoiceWorkspace({
                       cancelled={i.cancelled}
                       hasBalance={!NON_PAYMENT && i.balance > 0}
                       label={fullInvoiceNo(i)}
+                      outputMode={isPoList ? "download" : "print"}
+                      locks={poLocks(i)}
                       handlers={{
                         onEdit: () => setEditing(i),
                         onDelete: () => remove(i),
                         onPreview: () => setEditing(i),
-                        onPrint: () => printOne(i),
+                        // Purchase orders download the formatted PDF; other lists print as before.
+                        onPrint: () => (isPoList ? void downloadInvoicePdf(i, partyOf(i), items) : printOne(i)),
                         onShare: () => downloadInvoicePdf(i, partyOf(i), items),
+                        onShareWhatsApp: () => setSharing({ inv: i, channel: "whatsapp" }),
+                        onShareEmail: () => setSharing({ inv: i, channel: "email" }),
                         onHistory: () => setHistory(i),
                         onDuplicate: () => duplicate(i),
                         onCancel: () => cancel(i),
@@ -725,6 +769,17 @@ export function InvoiceWorkspace({
         </div>
       )}
 
+      {sharing && (
+        <ShareDocDialog
+          invoice={sharing.inv}
+          party={partyOf(sharing.inv)}
+          items={items}
+          channel={sharing.channel}
+          noun={noun}
+          onClose={() => setSharing(null)}
+        />
+      )}
+
       {(creating || editing) && (
         <InvoiceBuilder
           docType={docType}
@@ -737,6 +792,8 @@ export function InvoiceWorkspace({
           prefill={prefill ?? undefined}
           approvalType={approvalType}
           approval={editing ? approvals[editing.id] : undefined}
+          lock={editing ? poLocks(editing) : undefined}
+          onShareDoc={(inv) => setSharing({ inv, channel: "whatsapp" })}
           onApprovalChanged={() => {
             void reloadApprovals();
             load();

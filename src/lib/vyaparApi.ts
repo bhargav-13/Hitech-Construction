@@ -579,6 +579,11 @@ export interface CashBankTxn {
   /** in = money arriving, out = money leaving. */
   direction: "in" | "out";
   note: string | null;
+  /**
+   * ENTRY = a transfer / adjustment made on Cash & Bank (edit and delete it here); PAYMENT = a
+   * Payment-In / Out; DOC = an invoice or bill settled through the account. Older servers omit it.
+   */
+  source?: "ENTRY" | "PAYMENT" | "DOC";
 }
 
 export interface Cheque {
@@ -609,12 +614,9 @@ export interface LoanAccount {
 
 const CB = `${BASE}`;
 /**
- * Bank accounts, with each balance scoped to the selected project when one is set.
- *
- * The account *list* never shrinks — an account is a payment method shared across every site — but
- * the money attributed to it does, so a project shows only what moved through that account on that
- * project. Unscoped, the figure also includes the account's opening balance and any manual
- * deposits, neither of which belongs to a single site.
+ * Bank accounts. Called without a project, every balance is the account's real, company-wide
+ * figure (opening + every movement) — what Cash & Bank shows to everyone. Passing a project narrows
+ * the money to what moved on that project, for reports that want it.
  */
 export const getBankAccounts = (projectId?: number) =>
   apiRequest<BankAccount[]>(`${CB}/bank-accounts${qs({ projectId })}`);
@@ -638,6 +640,16 @@ export const postCashBankEntry = (body: {
   /** For adjustments: increase or decrease the balance. */
   mode?: "ADD" | "REDUCE";
 }) => apiRequest<CashBankTxn>(`${CB}/cash-bank/entries`, { method: "POST", body });
+
+/** Change a transfer or adjustment; a transfer's two legs move together. */
+export const updateCashBankEntry = (
+  id: number,
+  body: { amount?: number; date?: string; description?: string; mode?: "ADD" | "REDUCE" },
+) => apiRequest<CashBankTxn>(`${CB}/cash-bank/entries/${id}`, { method: "PUT", body });
+
+/** Delete a transfer (both legs) or an adjustment. */
+export const deleteCashBankEntry = (id: number) =>
+  apiRequest<void>(`${CB}/cash-bank/entries/${id}`, { method: "DELETE" });
 
 export const getCashTxns = () => apiRequest<CashBankTxn[]>(`${CB}/cash-in-hand`);
 export const getCheques = () => apiRequest<Cheque[]>(`${CB}/cheques`);

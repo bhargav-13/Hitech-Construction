@@ -8,7 +8,10 @@ import type { Invoice, Party } from "@/lib/vyaparApi";
 import {
   Ban,
   Copy,
+  Download,
   Eye,
+  Mail,
+  MessageCircle,
   FileText,
   History,
   Link2,
@@ -45,6 +48,18 @@ export interface TxnActionHandlers {
   onConvertToReturn?: () => void;
   onReceivePayment?: () => void;
   onPreviewAsChallan?: () => void;
+  /** When both are given, Share opens a menu: WhatsApp or Email (purchase orders). */
+  onShareWhatsApp?: () => void;
+  onShareEmail?: () => void;
+}
+
+/**
+ * Why an action is held back on this row (purchase orders waiting for approval). A reason string
+ * disables the action and becomes its tooltip; null/undefined leaves it available.
+ */
+export interface TxnRowLocks {
+  edit?: string | null;
+  output?: string | null;
 }
 
 /**
@@ -80,6 +95,8 @@ export function TxnRowActions({
   hasBalance = false,
   label,
   handlers,
+  outputMode = "print",
+  locks,
 }: {
   docType?: string | null;
   kind?: TxnKind;
@@ -87,33 +104,73 @@ export function TxnRowActions({
   hasBalance?: boolean;
   label: string;
   handlers: TxnActionHandlers;
+  /** "download" swaps the inline Print button for Download (purchase orders). */
+  outputMode?: "print" | "download";
+  locks?: TxnRowLocks;
 }) {
   const can = actionsFor(docType, kind);
+  const outLock = locks?.output ?? null;
+  const editLock = locks?.edit ?? null;
+  const shareMenu = !!(handlers.onShareWhatsApp && handlers.onShareEmail);
+  const iconBtn = "rounded-md p-1.5 transition-colors duration-150 disabled:cursor-not-allowed disabled:opacity-35";
 
   return (
     <div className="flex items-center justify-end gap-0.5">
-      <button
-        onClick={handlers.onPrint}
-        title="Print"
-        aria-label={`Print ${label}`}
-        className="rounded-md p-1.5 text-gray-400 transition-colors duration-150 hover:bg-gray-100 hover:text-gray-700"
-      >
-        <Printer size={15} />
-      </button>
-      <button
-        onClick={handlers.onShare}
-        title="Share"
-        aria-label={`Share ${label}`}
-        className="rounded-md p-1.5 text-gray-400 transition-colors duration-150 hover:bg-cyan-50 hover:text-brand-accent"
-      >
-        <Share2 size={15} />
-      </button>
+      {outputMode === "download" ? (
+        <button
+          onClick={handlers.onPrint}
+          disabled={!!outLock}
+          title={outLock ?? "Download PDF"}
+          aria-label={`Download ${label}`}
+          className={`${iconBtn} text-gray-400 enabled:hover:bg-gray-100 enabled:hover:text-gray-700`}
+        >
+          <Download size={15} />
+        </button>
+      ) : (
+        <button
+          onClick={handlers.onPrint}
+          disabled={!!outLock}
+          title={outLock ?? "Print"}
+          aria-label={`Print ${label}`}
+          className={`${iconBtn} text-gray-400 enabled:hover:bg-gray-100 enabled:hover:text-gray-700`}
+        >
+          <Printer size={15} />
+        </button>
+      )}
+      {shareMenu ? (
+        <RowMenu
+          align="right"
+          width={176}
+          buttonLabel={`Share ${label}`}
+          title={outLock ?? "Share"}
+          disabled={!!outLock}
+          trigger={<Share2 size={15} />}
+          triggerClassName={`${iconBtn} text-gray-400 enabled:hover:bg-cyan-50 enabled:hover:text-brand-accent`}
+        >
+          {(close) => (
+            <>
+              <RowMenuItem icon={MessageCircle} iconClassName="text-emerald-600" label="WhatsApp" onClick={() => { close(); handlers.onShareWhatsApp?.(); }} />
+              <RowMenuItem icon={Mail} iconClassName="text-sky-600" label="Email" onClick={() => { close(); handlers.onShareEmail?.(); }} />
+            </>
+          )}
+        </RowMenu>
+      ) : (
+        <button
+          onClick={handlers.onShare}
+          disabled={!!outLock}
+          title={outLock ?? "Share"}
+          aria-label={`Share ${label}`}
+          className={`${iconBtn} text-gray-400 enabled:hover:bg-cyan-50 enabled:hover:text-brand-accent`}
+        >
+          <Share2 size={15} />
+        </button>
+      )}
       <RowMenu align="right" buttonLabel={`Actions for ${label}`}>
         {(close) => (
           <>
             <RowMenuItem
-              icon={can.link ? Link2 : FileText}
-              label={can.link ? "Link Payment" : "View/Edit"}
+              icon={can.link ? Link2 : editLock ? Eye : FileText}
+              label={can.link ? "Link Payment" : editLock ? "View" : "View/Edit"}
               onClick={() => { close(); (can.link ? handlers.onLink ?? handlers.onEdit : handlers.onEdit)(); }}
             />
             {can.cancel &&
@@ -127,11 +184,15 @@ export function TxnRowActions({
               <RowMenuItem icon={Copy} label="Duplicate" onClick={() => { close(); handlers.onDuplicate?.(); }} />
             )}
             <RowMenuDivider />
-            <RowMenuItem icon={FileText} iconClassName="text-rose-600" label="Open PDF" onClick={() => { close(); handlers.onShare(); }} />
+            {!outLock && (
+              <RowMenuItem icon={FileText} iconClassName="text-rose-600" label="Open PDF" onClick={() => { close(); handlers.onShare(); }} />
+            )}
             {can.preview && handlers.onPreview && (
               <RowMenuItem icon={Eye} label="Preview" onClick={() => { close(); handlers.onPreview?.(); }} />
             )}
-            {can.print && <RowMenuItem icon={Printer} label="Print" onClick={() => { close(); handlers.onPrint(); }} />}
+            {can.print && outputMode === "print" && !outLock && (
+              <RowMenuItem icon={Printer} label="Print" onClick={() => { close(); handlers.onPrint(); }} />
+            )}
             {can.previewAsChallan && (
               <RowMenuItem
                 icon={Truck}

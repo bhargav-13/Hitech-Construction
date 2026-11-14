@@ -2,13 +2,14 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { VyaparShell, VyaparEmpty } from "@/components/vyapar/VyaparShell";
-import { BankAccountDialog, CashBankEntryDialog } from "@/components/vyapar/CashBankDialogs";
+import { BankAccountDialog, CashBankEntryDialog, EditCashBankEntryDialog } from "@/components/vyapar/CashBankDialogs";
 import { RowMenu, RowMenuDivider, RowMenuItem } from "@/components/RowMenu";
 import { SortTh } from "@/components/vyapar/SortTh";
 import { Spinner } from "@/components/Spinner";
 import { useTableSort } from "@/lib/useTableSort";
 import { txnHref } from "@/lib/vyaparLinks";
-import { useVyaparProjectId } from "@/lib/projectScope";
+import { useRouter } from "next/navigation";
+import { useCan } from "@/lib/permissions";
 import { LinkedRow } from "@/components/vyapar/LinkedRow";
 import { inr } from "@/lib/format";
 import { exportRowsToCsv, printRows, downloadPdf } from "@/lib/vyaparExport";
@@ -51,10 +52,11 @@ const ENTRY_LABELS: { kind: EntryKind; label: string }[] = [
 
 /** Bank Accounts — Vyapar's master–detail with the Deposit/Withdraw menu. */
 export default function BankAccountsPage() {
-  // Balances and ledgers follow the header's project scope: on a project you see only the money
-  // that moved through each account on that project. Unscoped adds the opening balance and any
-  // manual deposits, which belong to the account rather than to any one site.
-  const projectId = useVyaparProjectId();
+  // Bank balances are the account's real, company-wide figure for everyone — they don't follow the
+  // header's project. A bank account is one pot of money however many sites pay from it, and two
+  // people looking at the same account must see the same balance.
+  const can = useCan();
+  const [editingTxn, setEditingTxn] = useState<CashBankTxn | null>(null);
   const [accounts, setAccounts] = useState<BankAccount[]>([]);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [txns, setTxns] = useState<CashBankTxn[]>([]);
@@ -74,7 +76,7 @@ export default function BankAccountsPage() {
     if (!isBackgroundRefresh()) setLoading(true);
     setError("");
     try {
-      const list = await vyapar.getBankAccounts(projectId);
+      const list = await vyapar.getBankAccounts();
       setAccounts(list);
       setSelectedId((cur) => (list.some((a) => a.id === cur) ? cur : list[0]?.id ?? null));
     } catch {
@@ -83,26 +85,51 @@ export default function BankAccountsPage() {
     } finally {
       setLoading(false);
     }
-  }, [projectId]);
+  }, []);
   useAutoRefresh(load);
 
   useEffect(() => {
     load();
   }, [load]);
 
+  const [txnVersion, setTxnVersion] = useState(0);
   useEffect(() => {
     if (selectedId == null) return;
     let cancelled = false;
     setTxnLoading(true);
     vyapar
-      .getAccountTxns(selectedId, projectId)
+      .getAccountTxns(selectedId)
       .then((r) => !cancelled && setTxns(r))
       .catch(() => !cancelled && setTxns([]))
       .finally(() => !cancelled && setTxnLoading(false));
     return () => {
       cancelled = true;
     };
-  }, [selectedId, projectId]);
+  }, [selectedId, txnVersion]);
+
+  /** After a ledger change: the balances on the left and this account's statement. */
+  const refreshAll = useCallback(() => {
+    void load();
+    setTxnVersion((v) => v + 1);
+  }, [load]);
+
+  async function removeTxn(t: CashBankTxn) {
+    const what =
+      t.source === "PAYMENT"
+        ? `Delete this ${t.type}${t.name ? ` (${t.name})` : ""} of ${inr(t.amount)}? The payment itself is deleted and the party's balance changes.`
+        : /transfer|withdrawal|deposit/i.test(t.type)
+          ? `Delete this ${t.type} of ${inr(t.amount)}? Both sides of the transfer are removed.`
+          : `Delete this ${t.type} of ${inr(t.amount)}?`;
+    if (!confirm(`${what}\n\nThis can't be undone.`)) return;
+    setError("");
+    try {
+      if (t.source === "PAYMENT") await vyapar.deletePayment(t.id);
+      else await vyapar.deleteCashBankEntry(t.id);
+      refreshAll();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't delete this entry.");
+    }
+  }
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -328,6 +355,8 @@ export default function BankAccountsPage() {
                 <TxnTable
                   rows={rows}
                   loading={txnLoading}
+                  onEdit={can("VYAPAR_CASH_BANK:EDIT") ? (t) => setEditingTxn(t) : undefined}
+                  onDelete={can("VYAPAR_CASH_BANK:DELETE") ? (t) => void removeTxn(t) : undefined}
                   search={txnSearch}
                   onSearch={setTxnSearch}
                   onExport={() => exportRowsToCsv(`${selected.name}-statement`, head, data)}
@@ -355,7 +384,14 @@ export default function BankAccountsPage() {
           currentAccountId={selectedId}
           currentBalance={selected?.balance}
           onClose={() => setEntry(null)}
-          onDone={() => { setEntry(null); load(); if (selectedId) vyapar.getAccountTxns(selectedId).then(setTxns).catch(() => {}); }}
+          onDone={() => { setEntry(null); refreshAll(); }}
+        />
+      )}
+      {editingTxn && (
+        <EditCashBankEntryDialog
+          txn={editingTxn}
+          onClose={() => setEditingTxn(null)}
+          onDone={() => { setEditingTxn(null); refreshAll(); }}
         />
       )}
       {exporting && (
@@ -387,6 +423,8 @@ export function TxnTable({
   onSearch,
   onExport,
   onPdf,
+  onEdit,
+  onDelete,
 }: {
   rows: CashBankTxn[];
   loading: boolean;
@@ -394,7 +432,16 @@ export function TxnTable({
   onSearch: (v: string) => void;
   onExport: () => void;
   onPdf: () => void;
+  /**
+   * Edit a row. Transfers and adjustments made here open the edit form; a payment, bill or invoice
+   * opens its own screen, where it is edited. Omit to hide the Actions column.
+   */
+  onEdit?: (t: CashBankTxn) => void;
+  /** Delete a transfer / adjustment or a payment. Bills and invoices are deleted on their own screen. */
+  onDelete?: (t: CashBankTxn) => void;
 }) {
+  const router = useRouter();
+  const showActions = !!(onEdit || onDelete);
   const { sorted, sortKey, sortDir, toggle } = useTableSort<CashBankTxn>(
     rows,
     {
@@ -431,13 +478,14 @@ export function TxnTable({
         <div className="px-4 py-12 text-center text-sm text-gray-400">No transactions yet.</div>
       ) : (
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[600px] border-collapse text-sm">
+          <table className="w-full min-w-[480px] border-collapse text-sm">
             <thead>
               <tr className="border-b border-gray-100 bg-gray-50 text-left text-gray-500">
                 <SortTh label="Type" sortKey="type" activeKey={sortKey} dir={sortDir} onSort={toggle} />
                 <SortTh label="Name" sortKey="name" activeKey={sortKey} dir={sortDir} onSort={toggle} />
                 <SortTh label="Date" sortKey="date" activeKey={sortKey} dir={sortDir} onSort={toggle} />
                 <SortTh label="Amount" sortKey="amount" activeKey={sortKey} dir={sortDir} onSort={toggle} align="right" />
+                {showActions && <th className="w-20 px-3 py-2 text-right font-medium">Actions</th>}
               </tr>
             </thead>
             <tbody>
@@ -459,6 +507,38 @@ export function TxnTable({
                   <td className={`px-4 py-2.5 text-right font-medium ${t.direction === "in" ? "text-emerald-600" : "text-rose-600"}`}>
                     {inr(t.amount)}
                   </td>
+                  {showActions && (
+                    <td className="px-3 py-1.5 text-right whitespace-nowrap">
+                      {onEdit && (
+                        <button
+                          type="button"
+                          title={isEntry(t) ? "Edit" : `Open the ${t.type} to edit it`}
+                          aria-label={`Edit ${t.type}`}
+                          onClick={() => {
+                            if (isEntry(t)) onEdit(t);
+                            else {
+                              const href = txnHref(t.type, t.id);
+                              if (href) router.push(href);
+                            }
+                          }}
+                          className="rounded-md p-1.5 text-gray-400 transition-colors duration-150 hover:bg-cyan-50 hover:text-brand-accent"
+                        >
+                          <Pencil size={14} />
+                        </button>
+                      )}
+                      {onDelete && t.source !== "DOC" && (
+                        <button
+                          type="button"
+                          title="Delete"
+                          aria-label={`Delete ${t.type}`}
+                          onClick={() => onDelete(t)}
+                          className="rounded-md p-1.5 text-gray-400 transition-colors duration-150 hover:bg-rose-50 hover:text-rose-600"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      )}
+                    </td>
+                  )}
                 </LinkedRow>
               ))}
             </tbody>
@@ -467,6 +547,11 @@ export function TxnTable({
       )}
     </div>
   );
+}
+
+/** A transfer or adjustment made on Cash & Bank, rather than a payment or document. */
+function isEntry(t: CashBankTxn) {
+  return t.source ? t.source === "ENTRY" : !txnHref(t.type, t.id);
 }
 
 function Meta({ label, value, mono }: { label: string; value: string; mono?: boolean }) {

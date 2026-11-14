@@ -1135,6 +1135,22 @@ export interface LeaveRequestApi {
   halfDay?: boolean;
   /** 1 = first half, 2 = second half. */
   halfSession?: number | null;
+  /**
+   * Days beyond the paid quota, booked as unpaid leave ("Paid Leave: 2 / month" → the 3rd day on is
+   * unpaid). Final once approved; an estimate while pending.
+   */
+  unpaidDays?: number;
+  /** False for an unpaid leave type — the whole request is unpaid. */
+  paidType?: boolean;
+}
+
+/** "2 paid · 1 unpaid", "Unpaid", or null when the whole request is paid. */
+export function leavePaySplit(r: Pick<LeaveRequestApi, "days" | "unpaidDays" | "paidType">): string | null {
+  if (r.paidType === false) return "Unpaid";
+  const unpaid = Number(r.unpaidDays ?? 0);
+  if (!unpaid) return null;
+  const paid = Math.max(0, Number(r.days) - unpaid);
+  return paid > 0 ? `${paid} paid · ${unpaid} unpaid` : "Unpaid (quota used)";
 }
 
 // ---- Multi-level approval framework (user-management-service, com.hitech.erp.approval) ----
@@ -1296,8 +1312,14 @@ export interface ApprovalInboxItem {
   state: ApprovalState;
 }
 
-export function getApprovalInbox(scope: "mine" | "raised" | "all" = "mine") {
-  return request<ApprovalInboxItem[]>(`/api/v1/approvals/inbox?scope=${scope}`);
+/** `module: "vyapar"` narrows to Vyapar's own documents (Vyapar → Approvals). */
+export function getApprovalInbox(scope: "mine" | "raised" | "all" = "mine", module?: "vyapar") {
+  return request<ApprovalInboxItem[]>(`/api/v1/approvals/inbox?scope=${scope}${module ? `&module=${module}` : ""}`);
+}
+
+/** Whether a record type has a published approval chain anywhere (company default or a site rule). */
+export function getApprovalChainActive(entityType: string) {
+  return request<{ active: boolean }>(`/api/v1/approvals/chain-active?type=${entityType}`);
 }
 
 /** Ladder state for a list's rows, keyed by record id. Records with no request are absent. */

@@ -7,7 +7,7 @@ import { Spinner } from "@/components/Spinner";
 import { Select } from "@/components/Select";
 import { DatePicker } from "@/components/DatePicker";
 import { useMyLeave } from "@/lib/usePayrollLive";
-import { ApiError, previewLeaveApproval } from "@/lib/api";
+import { ApiError, leavePaySplit, previewLeaveApproval } from "@/lib/api";
 import type { ApprovalPreview, LeaveBalanceApi, LeaveRequestApi } from "@/lib/api";
 import { todayIST } from "@/lib/datetime";
 import { LeaveStatusPill } from "@/components/payroll/LeaveStatusPill";
@@ -120,7 +120,10 @@ export default function MyLeavePage() {
                     <td className="px-4 py-2.5 text-gray-600">
                       {r.halfDay ? <>{r.fromDate} · {r.halfSession === 2 ? "2nd" : "1st"} half</> : <>{r.fromDate} → {r.toDate}</>}
                     </td>
-                    <td className="px-4 py-2.5 text-right font-medium">{r.days}</td>
+                    <td className="px-4 py-2.5 text-right font-medium">
+                      {r.days}
+                      {leavePaySplit(r) && <div className="text-[10px] font-normal text-amber-700">{leavePaySplit(r)}</div>}
+                    </td>
                     <td className="px-4 py-2.5"><LeaveStatusPill status={r.status} /></td>
                     <td className="px-4 py-2.5 text-xs text-gray-500">
                       {r.approverName ? `${r.approverName}${r.decisionNote ? ` — ${r.decisionNote}` : ""}` : "—"}
@@ -178,6 +181,9 @@ function ApplyLeaveDrawer({
   const [session, setSession] = useState(1);
   const bal = balance.find((b) => b.leaveTypeName === type);
   const halfAllowed = bal?.halfDayAllowed ?? true;
+  // Rough count for the warning (the server skips weekly offs / holidays when sandwich is off).
+  const requested = halfDay && halfAllowed ? 0.5 : from && to && to >= from ? daysBetween(from, to) : 0;
+  const overBy = bal ? Math.max(0, requested - Number(bal.remaining)) : 0;
   const [reason, setReason] = useState("");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
@@ -222,6 +228,21 @@ function ApplyLeaveDrawer({
         {bal && (
           <div className="text-xs text-gray-500">
             Balance: <span className="font-semibold text-gray-700">{bal.remaining}</span> day(s)
+            {!bal.paid && <> · this leave is unpaid</>}
+          </div>
+        )}
+        {bal?.paid && overBy > 0 && (
+          <div className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
+            {bal.remaining > 0 ? (
+              <>
+                The first {bal.remaining} day(s) are paid; the remaining {overBy} day(s) go beyond your {type} balance and will be
+                counted as <b>unpaid leave</b>.
+              </>
+            ) : (
+              <>
+                Your {type} balance is used up for this cycle, so this leave will be counted as <b>unpaid leave</b>.
+              </>
+            )}
           </div>
         )}
         {halfAllowed && (
@@ -276,4 +297,10 @@ function ApplyLeaveDrawer({
       </div>
     </Drawer>
   );
+}
+
+/** Calendar days from `a` to `b` inclusive (YYYY-MM-DD). */
+function daysBetween(a: string, b: string): number {
+  const ms = Date.parse(`${b}T00:00:00Z`) - Date.parse(`${a}T00:00:00Z`);
+  return Number.isFinite(ms) ? Math.round(ms / 86_400_000) + 1 : 0;
 }

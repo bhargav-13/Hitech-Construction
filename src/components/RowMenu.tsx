@@ -16,11 +16,20 @@ export function RowMenu({
   align = "right",
   buttonLabel = "Actions",
   width = 208,
+  trigger,
+  triggerClassName,
+  title,
+  disabled = false,
 }: {
   children: (close: () => void) => React.ReactNode;
   align?: "left" | "right";
   buttonLabel?: string;
   width?: number;
+  /** What the button shows instead of the ⋮ — e.g. a share icon for a Share ▾ menu. */
+  trigger?: React.ReactNode;
+  triggerClassName?: string;
+  title?: string;
+  disabled?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   // Start off-screen so the menu can be measured before it's shown in its final spot.
@@ -86,10 +95,15 @@ export function RowMenu({
         ref={btnRef}
         type="button"
         aria-label={buttonLabel}
+        title={title}
+        disabled={disabled}
         onClick={toggle}
-        className="rounded-md p-1 text-gray-400 transition-all duration-150 hover:bg-gray-100 hover:text-gray-600 active:scale-90"
+        className={
+          triggerClassName ??
+          "rounded-md p-1 text-gray-400 transition-all duration-150 hover:bg-gray-100 hover:text-gray-600 active:scale-90"
+        }
       >
-        <MoreVertical size={16} />
+        {trigger ?? <MoreVertical size={16} />}
       </button>
       {open &&
         mounted &&

@@ -11,7 +11,9 @@ import { useUiStore } from "@/lib/uiStore";
 import { useVyaparSettings } from "@/lib/useVyaparSettings";
 import { CalculatorPanel } from "@/components/vyapar/CalculatorPanel";
 import { MENU_SHORTCUT, comboOf, useVyaparShortcuts } from "@/lib/vyaparShortcuts";
+import { useVyaparApprovalCount } from "@/lib/approvals";
 import {
+  BadgeCheck,
   BarChart3,
   Boxes,
   Building2,
@@ -79,6 +81,7 @@ const ICONS: Record<string, React.ComponentType<{ size?: number; className?: str
   chart: BarChart3,
   tool: Wrench,
   settings: Settings,
+  approval: BadgeCheck,
 };
 
 /**
@@ -355,6 +358,16 @@ function NavItem({
 }) {
   const Icon = ICONS[node.icon ?? ""] ?? FileText;
   const active = isActive(node.href);
+  const approvalCount = useVyaparApprovalCount((s) => s.count);
+  const refreshApprovals = useVyaparApprovalCount((s) => s.refresh);
+  const isApprovals = node.icon === "approval";
+  useEffect(() => {
+    if (!isApprovals) return;
+    void refreshApprovals();
+    const t = window.setInterval(() => void refreshApprovals(), 60_000);
+    return () => window.clearInterval(t);
+  }, [isApprovals, refreshApprovals]);
+  const badge = isApprovals && approvalCount > 0 ? approvalCount : 0;
   const childActive = node.children?.some((c) => isActive(c.href));
 
   // Collapsed: icon-only, with the label as a tooltip. A parent section links to its first child
@@ -370,7 +383,10 @@ function NavItem({
           active || childActive ? "bg-cyan-50 text-brand-accent" : "text-gray-500 hover:bg-gray-50"
         }`}
       >
-        <Icon size={17} />
+        <span className="relative">
+          <Icon size={17} />
+          {badge > 0 && <span className="absolute -top-1 -right-1.5 h-2 w-2 rounded-full bg-rose-500" />}
+        </span>
       </Link>
     );
   }
@@ -385,6 +401,9 @@ function NavItem({
       >
         <Icon size={16} />
         {node.label}
+        {badge > 0 && (
+          <span className="ml-auto rounded-full bg-rose-500 px-1.5 text-[10px] leading-4 font-semibold text-white">{badge > 99 ? "99+" : badge}</span>
+        )}
       </Link>
     );
   }
