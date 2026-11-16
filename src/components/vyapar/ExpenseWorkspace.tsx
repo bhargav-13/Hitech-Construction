@@ -28,7 +28,8 @@ import { TransactionDetailDrawer } from "@/components/vyapar/TransactionDetailDr
 import { ApprovalBadge, ApprovalPanel } from "@/components/approval/ApprovalBadge";
 import { DOC_APPROVAL_TYPE, useApprovalStates } from "@/lib/approvals";
 import { useTableSort } from "@/lib/useTableSort";
-import { TAX_RATES } from "@/lib/useItemSettings";
+import { ALL_TAX_RATES, taxRateOptions } from "@/lib/useItemSettings";
+import { extraGstRates } from "@/lib/gstRates";
 import { inr } from "@/lib/format";
 import { usePaymentTypeOptions, useBankAccountResolver } from "@/lib/bankScope";
 import { useVyaparProjectId } from "@/lib/projectScope";
@@ -717,7 +718,7 @@ function ExpenseForm({
       if (st && !stateOfSupply) setStateOfSupply(st);
     }
     const slab = (t: number | null) =>
-      t == null ? 0 : TAX_RATES.reduce((best, x) => (Math.abs(x - t) < Math.abs(best - t) ? x : best), 0);
+      t == null ? 0 : ALL_TAX_RATES.reduce((best, x) => (Math.abs(x - t) < Math.abs(best - t) ? x : best), 0);
     const read = r.lines
       .filter((l) => l.name || (l.amount ?? 0) > 0 || (l.rate ?? 0) > 0)
       .map((l) => {
@@ -984,7 +985,7 @@ function ExpenseForm({
                     </td>
                     {gst && (
                       <td className="px-2 py-1.5">
-                        <Select value={String(l.taxPercent)} onChange={(v) => setLine(idx, { taxPercent: Number(v) })} size="sm" options={TAX_RATES.map((t) => ({ value: String(t), label: t === 0 ? "None" : `${t}%` }))} />
+                        <Select value={String(l.taxPercent)} onChange={(v) => setLine(idx, { taxPercent: Number(v) })} size="sm" options={taxRateOptions(l.taxPercent, extraGstRates())} />
                       </td>
                     )}
                     <td className="px-2 py-1.5 text-right font-medium text-gray-800">{inr(amount)}</td>

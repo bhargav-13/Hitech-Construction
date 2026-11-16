@@ -1,10 +1,11 @@
 "use client";
 
+import { extraGstRates } from "@/lib/gstRates";
 import { useMemo, useState } from "react";
 import { Drawer } from "@/components/Drawer";
 import { Select } from "@/components/Select";
 import { DatePicker } from "@/components/DatePicker";
-import { useItemSettings, DEFAULT_UNITS, TAX_RATES } from "@/lib/useItemSettings";
+import { useItemSettings, DEFAULT_UNITS, taxRateOptions } from "@/lib/useItemSettings";
 import { useItemMasters, type ManagedUnit } from "@/lib/useItemMasters";
 import { ItemMasterDialog } from "@/components/vyapar/ItemMasterDialog";
 import * as vyapar from "@/lib/vyaparApi";
@@ -53,6 +54,7 @@ export function ItemDialog({
   categories = [],
   units = DEFAULT_UNITS,
   initialName,
+  defaultService,
   onClose,
   onSaved,
 }: {
@@ -62,6 +64,8 @@ export function ItemDialog({
   units?: ManagedUnit[];
   /** Seeds the name when opened from an invoice line's "⊕ Add Item" with text already typed. */
   initialName?: string;
+  /** New item opens as a Service (opened from the Services tab). */
+  defaultService?: boolean;
   onClose: () => void;
   onSaved: (saved: Item, again: boolean) => void;
 }) {
@@ -69,7 +73,7 @@ export function ItemDialog({
   const scopedProjectId = useVyaparProjectId();
   const [tab, setTab] = useState<Tab>("Pricing");
 
-  const [isService, setIsService] = useState(existing?.isService ?? false);
+  const [isService, setIsService] = useState(existing?.isService ?? defaultService ?? false);
   const [name, setName] = useState(existing?.name ?? initialName ?? "");
   const [imageDataUrl, setImageDataUrl] = useState<string | null>(existing?.imageDataUrl ?? null);
   const [hsn, setHsn] = useState(existing?.hsn ?? "");
@@ -139,6 +143,9 @@ export function ItemDialog({
       // "" clears a stored photo; the server leaves it alone on null.
       imageDataUrl: imageDataUrl ?? "",
       openingQty: showStock ? Number(openingQty) || 0 : 0,
+      // KAN-119: the server keeps stock in stockQty and never read openingQty, so every new item
+      // started at 0. Set it on create only — editing an item must not overwrite its live stock.
+      ...(existing ? {} : { stockQty: showStock ? Number(openingQty) || 0 : 0 }),
       openingPrice: showStock ? Number(openingPrice) || 0 : 0,
       openingDate: showStock ? openingDate : null,
       lowStockAlert: showStock ? Number(lowStockAlert) || 0 : 0,
@@ -391,7 +398,7 @@ export function ItemDialog({
                   <Select
                     value={String(taxPercent)}
                     onChange={(v) => setTaxPercent(Number(v))}
-                    options={TAX_RATES.map((t) => ({ value: String(t), label: t === 0 ? "None" : `GST @ ${t}%` }))}
+                    options={taxRateOptions(taxPercent, extraGstRates())}
                   />
                 </Field>
                 {salePrice > 0 && taxPercent > 0 && (

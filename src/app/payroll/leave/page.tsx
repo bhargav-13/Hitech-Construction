@@ -8,6 +8,8 @@ import { ApprovalTrail, ApprovalProgressPill } from "@/components/approval/Appro
 import { allLeave, decideLeave, ApiError, leavePaySplit } from "@/lib/api";
 import type { LeaveRequestApi, LeaveStatus } from "@/lib/api";
 import { Select } from "@/components/Select";
+import { bookDate } from "@/lib/format";
+import { dateKeyIST, formatTimeIST } from "@/lib/datetime";
 import { CalendarDays, Check, ClipboardList, Search, UserRound, X } from "lucide-react";
 import { isBackgroundRefresh, useAutoRefresh } from "@/lib/autoRefresh";
 
@@ -218,7 +220,7 @@ export default function LeavePage() {
                               <span className="text-slate-300">·</span>
                               <span className="inline-flex items-center gap-1">
                                 <CalendarDays size={11} className="text-slate-400" />
-                                {r.fromDate} → {r.toDate}
+                                {bookDate(r.fromDate)} → {bookDate(r.toDate)}
                               </span>
                               <span className="text-slate-300">·</span>
                               <span>{r.days}d</span>
@@ -258,7 +260,7 @@ export default function LeavePage() {
                       <LeaveStatusPill status={selected.status} />
                     </div>
                     <dl className="mt-3 space-y-1.5 text-xs">
-                      <Row label="Dates" value={`${selected.fromDate} → ${selected.toDate}`} />
+                      <Row label="Dates" value={`${bookDate(selected.fromDate)} → ${bookDate(selected.toDate)}`} />
                       <Row label="Days" value={String(selected.days)} />
                       <Row label="Pay" value={leavePaySplit(selected) ?? "Paid"} />
                       <Row label="Applied" value={selected.createdAt ? formatWhen(selected.createdAt) : "—"} />
@@ -331,7 +333,7 @@ function Row({ label, value }: { label: string; value: string }) {
 }
 
 function formatWhen(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
+  // DD/MM/YYYY, HH:MM in IST (KAN-101).
+  const key = dateKeyIST(iso);
+  return /^\d{4}-\d{2}-\d{2}$/.test(key) ? `${bookDate(key)}, ${formatTimeIST(iso)}` : iso;
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { PayrollShell, PayrollEmpty, StatCard } from "@/components/payroll/PayrollShell";
 import { Spinner } from "@/components/Spinner";
 import { useAuthStore } from "@/lib/authStore";
@@ -9,6 +9,10 @@ import { ATTENDANCE_META } from "@/lib/payrollConfig";
 import { Camera, ChevronLeft, ChevronRight, CircleCheck, CircleX, Clock, Plane, UserRound } from "lucide-react";
 import { DayPunchDetails, punchShots } from "@/components/payroll/PunchPhotos";
 import { formatDateIST, todayIST } from "@/lib/datetime";
+import { getPayrollProfile } from "@/lib/api";
+import type { HolidayResponse } from "@/lib/api";
+import { useHolidayPolicies } from "@/lib/usePayrollSetup";
+import { bookDate } from "@/lib/format";
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const DOW = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -38,6 +42,27 @@ export default function MyAttendancePage() {
   const to = `${year}-${pad(month + 1)}-${pad(last)}`;
 
   const { rows, loading, error } = useMemberAttendance(user?.id ?? null, from, to);
+
+  // KAN-120: the member's own holidays — their assigned holiday policy, as HR sees it on their
+  // attendance. No payroll profile simply means no holidays to show.
+  const [holidayPolicyId, setHolidayPolicyId] = useState<number | null>(null);
+  const { holidayPolicies } = useHolidayPolicies();
+  useEffect(() => {
+    if (!user?.id) return;
+    getPayrollProfile(user.id)
+      .then((p) => setHolidayPolicyId(p.holidayPolicyId))
+      .catch(() => setHolidayPolicyId(null));
+  }, [user?.id]);
+  const holidayByDate = useMemo(() => {
+    const m = new Map<string, HolidayResponse>();
+    const assigned = holidayPolicies.find((p) => p.id === holidayPolicyId);
+    // A policy covers one year: in another year, use its successor by name.
+    const policy = !assigned ? null : assigned.year === year ? assigned : holidayPolicies.find((p) => p.year === year && p.name === assigned.name) ?? null;
+    const prefix = `${year}-${pad(month + 1)}-`;
+    for (const h of policy?.holidays ?? []) if (h.date.startsWith(prefix)) m.set(h.date, h);
+    return m;
+  }, [holidayPolicies, holidayPolicyId, year, month]);
+  const monthHolidays = [...holidayByDate.values()].sort((a, b) => a.date.localeCompare(b.date));
 
   const step = (dir: 1 | -1) => {
     let m = month + dir, y = year;
@@ -122,8 +147,10 @@ export default function MyAttendancePage() {
               {dates.map((d) => {
                 const day = Number(d.slice(8));
                 const r = byDate.get(d);
-                const code = r?.code ?? "NM";
-                const m = ATTENDANCE_META[code];
+                const holiday = holidayByDate.get(d);
+                // An unmarked day that is one of my holidays reads as a holiday, not "not marked".
+                const code = r?.code ?? (holiday ? "H" : "NM");
+                const m = ATTENDANCE_META[code as keyof typeof ATTENDANCE_META] ?? ATTENDANCE_META.NM;
                 return (
                   <button
                     key={d}
@@ -133,6 +160,7 @@ export default function MyAttendancePage() {
                   >
                     <span className="text-[11px] font-semibold opacity-80">{day}</span>
                     <span className="text-[10px] font-bold">{m.short}</span>
+                    {holiday && <span className="max-w-full truncate text-[8px] font-medium opacity-80" title={holiday.name}>{holiday.name}</span>}
                     {/* KAN-10: hours worked, not the punch-in time. Still punched in → "since 09:15". */}
                     {r && (hoursOf(r) != null ? (
                       <span className="text-[9px] font-semibold opacity-80">{fmtHours(hoursOf(r)!)}</span>
@@ -149,6 +177,20 @@ export default function MyAttendancePage() {
                 <span key={k} className={`rounded px-1.5 py-0.5 font-medium ${ATTENDANCE_META[k].className}`}>{ATTENDANCE_META[k].short} · {ATTENDANCE_META[k].label}</span>
               ))}
             </div>
+          </div>
+        )}
+
+        {monthHolidays.length > 0 && (
+          <div className="rounded-xl border border-gray-200 bg-white p-4">
+            <h3 className="mb-2 text-sm font-semibold text-gray-800">Holidays this month</h3>
+            <ul className="space-y-1 text-sm">
+              {monthHolidays.map((h) => (
+                <li key={h.date} className="flex items-center justify-between gap-3">
+                  <span className="text-gray-700">{h.name}</span>
+                  <span className="text-xs text-gray-500">{bookDate(h.date)}</span>
+                </li>
+              ))}
+            </ul>
           </div>
         )}
 

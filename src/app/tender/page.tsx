@@ -143,10 +143,10 @@ export default function TenderDashboard() {
               tone="emerald"
             />
             <RateBlock
-              label="Awarded + completed"
-              pct={rate.rateInclCompleted}
-              formula={`${rate.won + rate.completed} won ÷ ${rate.contested} contested`}
-              note="Counts finished jobs as wins too — arguably the truer number, but not what the sheet reports."
+              label="Completed"
+              pct={rate.contested ? rate.completed / rate.contested : 0}
+              formula={`${rate.completed} completed ÷ ${rate.contested} contested`}
+              note="Jobs that have been finished, out of the same contested tenders."
               tone="cyan"
             />
           </div>

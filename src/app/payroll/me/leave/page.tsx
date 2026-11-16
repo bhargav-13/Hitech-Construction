@@ -1,5 +1,6 @@
 "use client";
 
+import { bookDate } from "@/lib/format";
 import { useEffect, useState } from "react";
 import { PayrollShell } from "@/components/payroll/PayrollShell";
 import { Drawer, DrawerField } from "@/components/Drawer";
@@ -118,7 +119,7 @@ export default function MyLeavePage() {
                   <tr key={r.id} className="border-b border-gray-50 last:border-b-0">
                     <td className="px-4 py-2.5 font-medium text-gray-800">{r.leaveTypeName}</td>
                     <td className="px-4 py-2.5 text-gray-600">
-                      {r.halfDay ? <>{r.fromDate} · {r.halfSession === 2 ? "2nd" : "1st"} half</> : <>{r.fromDate} → {r.toDate}</>}
+                      {r.halfDay ? <>{bookDate(r.fromDate)} · {r.halfSession === 2 ? "2nd" : "1st"} half</> : <>{bookDate(r.fromDate)} → {bookDate(r.toDate)}</>}
                     </td>
                     <td className="px-4 py-2.5 text-right font-medium">
                       {r.days}

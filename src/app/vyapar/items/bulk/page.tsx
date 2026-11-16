@@ -1,10 +1,11 @@
 "use client";
 
+import { extraGstRates } from "@/lib/gstRates";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { VyaparShell } from "@/components/vyapar/VyaparShell";
 import { Spinner } from "@/components/Spinner";
 import { Select } from "@/components/Select";
-import { TAX_RATES, DEFAULT_UNITS } from "@/lib/useItemSettings";
+import { taxRateOptions, DEFAULT_UNITS } from "@/lib/useItemSettings";
 import { useVyaparProjectId } from "@/lib/projectScope";
 import * as vyapar from "@/lib/vyaparApi";
 import type { Item } from "@/lib/vyaparApi";
@@ -198,7 +199,7 @@ export default function BulkUpdateItemsPage() {
                               value={String(valueOf(i, "taxPercent"))}
                               onChange={(v) => edit(i.id, { taxPercent: Number(v) })}
                               size="sm"
-                              options={TAX_RATES.map((t) => ({ value: String(t), label: t === 0 ? "None" : `GST @ ${t}%` }))}
+                              options={taxRateOptions(Number(valueOf(i, "taxPercent")), extraGstRates())}
                             />
                           </td>
                         </>

@@ -8,7 +8,7 @@ import { Spinner } from "@/components/Spinner";
 import { useVyaparSettings } from "@/lib/useVyaparSettings";
 import { usePartySettings } from "@/lib/usePartySettings";
 import { useItemSettings } from "@/lib/useItemSettings";
-import { DOC_LABEL } from "@/lib/vyaparApi";
+import { DOC_LABEL, TERMS_TITLES, termsFormatsOf } from "@/lib/vyaparApi";
 import type { DocType, VyaparSettings } from "@/lib/vyaparApi";
 import { Boxes, ChevronRight, Printer, Users } from "lucide-react";
 import { ShortcutsTab } from "@/components/vyapar/ShortcutsTab";
@@ -233,6 +233,7 @@ function TransactionTab({ draft, set }: { draft: VyaparSettings; set: Setter }) 
 
       <div className="md:col-span-2">
         <PrefixSection draft={draft} set={set} />
+        <TermsFormatSection draft={draft} set={set} />
       </div>
     </div>
   );
@@ -287,6 +288,33 @@ function PrefixSection({ draft, set }: { draft: VyaparSettings; set: Setter }) {
           Separate several with commas — all of them are offered on the form, so a late bill can still
           go into last year&apos;s series. Leave blank for no prefix.
         </p>
+      </div>
+    </Section>
+  );
+}
+
+/**
+ * KAN-118: a predefined Terms & Conditions text for each title. On a document, picking a title in the
+ * Terms block fills in its text, which can still be edited for that one document.
+ */
+function TermsFormatSection({ draft, set }: { draft: VyaparSettings; set: Setter }) {
+  const byTitle = termsFormatsOf(draft);
+  const write = (title: string, value: string) => set("termsFormats", JSON.stringify({ ...byTitle, [title]: value }));
+  return (
+    <Section title="Terms & Conditions formats" hint="Picking a title on a document fills in this text. Leave blank to keep what is typed.">
+      <div className="space-y-3">
+        {TERMS_TITLES.map((t) => (
+          <label key={t} className="grid grid-cols-1 gap-1.5 sm:grid-cols-[160px_1fr] sm:items-start sm:gap-3">
+            <span className="pt-2 text-sm text-gray-600">{t}</span>
+            <textarea
+              value={byTitle[t] ?? ""}
+              onChange={(e) => write(t, e.target.value)}
+              rows={3}
+              placeholder={"1. Goods once sold will not be taken back.\n2. Subject to Rajkot jurisdiction."}
+              className="input resize-y text-sm"
+            />
+          </label>
+        ))}
       </div>
     </Section>
   );

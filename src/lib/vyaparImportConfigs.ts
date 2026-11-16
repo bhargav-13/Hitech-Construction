@@ -130,7 +130,12 @@ export const itemImportConfig: ImportConfig = {
     { key: "openingQty", label: "Qty", align: "right", render: (v) => v ?? "0" },
   ],
   commit: async (records, projectId) => {
-    const rows = (records as Partial<vyapar.Item>[]).map((r) => ({ ...r, projectId: projectId ?? null }));
+    // KAN-119: the server stores stock as stockQty; Opening Quantity was sent as openingQty and dropped.
+    const rows = (records as Partial<vyapar.Item>[]).map((r) => ({
+      ...r,
+      stockQty: r.stockQty ?? (r.openingQty != null ? Number(r.openingQty) || 0 : undefined),
+      projectId: projectId ?? null,
+    }));
     try {
       return (await vyapar.importItems(rows)).length;
     } catch {

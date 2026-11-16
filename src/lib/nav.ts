@@ -24,6 +24,8 @@ export const NAV_ITEMS: NavItem[] = [
   // Print designs for every PDF; shown to anyone who works in a module that prints documents.
   { label: "Templates", href: "/templates" },
   { label: "Setting", href: "/settings" },
+  // KAN-98: how every module works, with videos — open to everyone.
+  { label: "Help", href: "/help" },
   // --- Not implemented yet ---
   // { label: "Report", href: "/report" },
   // { label: "Team Schedule", href: "/team-schedule" },

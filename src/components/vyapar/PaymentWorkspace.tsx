@@ -7,6 +7,7 @@ import { Drawer, DrawerField } from "@/components/Drawer";
 import { Select } from "@/components/Select";
 import { Spinner } from "@/components/Spinner";
 import { DatePicker } from "@/components/DatePicker";
+import { ModuleAttachments, PendingAttachmentList, usePendingAttachments } from "@/components/files/ModuleAttachments";
 import { ScanButton } from "@/components/ScanButton";
 import { filledNote, isoDate, matchBankAccount, matchByNameOrGstin, type ScannedPayment } from "@/lib/docScan";
 import { SortTh } from "@/components/vyapar/SortTh";
@@ -65,6 +66,8 @@ export function PaymentWorkspace({
   const [importing, setImporting] = useState(false);
   // Re-linking a payment that's already saved — Vyapar reopens the same dialog from the row menu.
   const [relinking, setRelinking] = useState<Payment | null>(null);
+  // KAN-116: edit the payment itself (date, amount, type…) — separate from re-linking bills.
+  const [editingPayment, setEditingPayment] = useState<Payment | null>(null);
   // The receipt view. Clicking a row opens this; editing (the links) is one step further in.
   const [viewing, setViewing] = useState<Payment | null>(null);
   const paymentIds = useMemo(() => payments.map((p) => p.id), [payments]);
@@ -337,7 +340,7 @@ export function PaymentWorkspace({
                       kind="PAYMENT"
                       label={descOf(p) || `${title} ${p.id}`}
                       handlers={{
-                        onEdit: () => setRelinking(p),
+                        onEdit: () => setEditingPayment(p),
                         onLink: () => setRelinking(p),
                         onDelete: () => remove(p),
                         onPrint: () => printOne(p),
@@ -360,7 +363,7 @@ export function PaymentWorkspace({
           onApprovalChanged={() => void reloadApprovals()}
           projectName={projects.find((x) => x.id === String(viewing.projectId))?.name ?? null}
           onClose={() => setViewing(null)}
-          onEdit={viewing.partyId != null ? () => { setRelinking(viewing); setViewing(null); } : undefined}
+          onEdit={() => { setEditingPayment(viewing); setViewing(null); }}
           onDownload={() => printOne(viewing)}
           onDelete={async () => {
             setViewing(null);
@@ -377,6 +380,17 @@ export function PaymentWorkspace({
           initialMode={presetAccount}
           onClose={() => { setCreating(false); setPresetAccount(null); }}
           onSaved={() => { setCreating(false); load(); }}
+        />
+      )}
+
+      {editingPayment && (
+        <PaymentForm
+          direction={direction}
+          title={`Edit ${title}`}
+          parties={parties}
+          existing={editingPayment}
+          onClose={() => setEditingPayment(null)}
+          onSaved={() => { setEditingPayment(null); load(); }}
         />
       )}
 
@@ -433,6 +447,7 @@ function PaymentForm({
   title,
   parties,
   initialMode,
+  existing,
   onClose,
   onSaved,
 }: {
@@ -441,20 +456,24 @@ function PaymentForm({
   parties: Party[];
   /** Payment Type to open on — the bank account a "Bank to Party" shortcut came from. */
   initialMode?: string | null;
+  /** Given = edit this saved payment (KAN-116). Party and bill links stay as they are. */
+  existing?: Payment | null;
   onClose: () => void;
   onSaved: () => void;
 }) {
-  const [partyId, setPartyId] = useState("");
-  const [amount, setAmount] = useState(0);
-  const [mode, setMode] = useState(initialMode || "Cash");
+  const [partyId, setPartyId] = useState(existing?.partyId != null ? String(existing.partyId) : "");
+  const [amount, setAmount] = useState(existing?.amount ?? 0);
+  const [mode, setMode] = useState(existing?.mode || initialMode || "Cash");
   // Vyapar-21: a free-text Description replaces Reference No. on payments (saved as `notes`).
-  const [description, setDescription] = useState("");
-  const [paymentDate, setPaymentDate] = useState(todayIST());
+  const [description, setDescription] = useState(existing ? (existing.notes ?? existing.reference ?? "") : "");
+  const [paymentDate, setPaymentDate] = useState(existing?.paymentDate?.slice(0, 10) || todayIST());
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const projectId = useVyaparProjectId();
   const { projects } = useProjects();
-  const [selectedProjectId, setSelectedProjectId] = useState(projectId != null ? String(projectId) : "");
+  const [selectedProjectId, setSelectedProjectId] = useState(
+    existing ? (existing.projectId != null ? String(existing.projectId) : "") : projectId != null ? String(projectId) : ""
+  );
   const paymentTypeOptions = usePaymentTypeOptions();
   const bankAccountFor = useBankAccountResolver();
   const { accounts } = useBankAccounts();
@@ -466,8 +485,10 @@ function PaymentForm({
   const draft = useFormDraft(
     `vyapar.PAYMENT_${direction}`,
     { partyId, amount, mode, description, paymentDate, selectedProjectId },
-    Boolean(partyId) || amount > 0 || Boolean(description)
+    !existing && (Boolean(partyId) || amount > 0 || Boolean(description))
   );
+  // KAN-103: the receipt / screenshot behind the payment.
+  const pendingFiles = usePendingAttachments("VYAPAR_PAYMENT", { type: `PAYMENT_${direction}`, label: title });
   function restoreDraft() {
     const d = draft.offered?.data;
     if (!d) return;
@@ -495,8 +516,25 @@ function PaymentForm({
     }
     setSaving(true);
     setError("");
+    if (existing) {
+      try {
+        await vyapar.updatePayment(existing.id, {
+          paymentDate,
+          amount: Number(amount) || 0,
+          mode,
+          bankAccountId: bankAccountFor(mode),
+          notes: description.trim() || null,
+          projectId: selectedProjectId ? Number(selectedProjectId) : null,
+        });
+        onSaved();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Couldn't save this payment.");
+        setSaving(false);
+      }
+      return;
+    }
     try {
-      await vyapar.createPayment({
+      const created = await vyapar.createPayment({
         direction,
         partyId: Number(partyId),
         // Links replace the old single invoiceId. Whatever isn't linked stays as an advance, and
@@ -513,6 +551,11 @@ function PaymentForm({
         paymentDate,
         projectId: selectedProjectId ? Number(selectedProjectId) : null,
       });
+      try {
+        await pendingFiles.flush(created.id, selectedProjectId ? Number(selectedProjectId) : null);
+      } catch {
+        // The payment is saved; a failed upload can be retried from Edit.
+      }
       draft.clear();
       onSaved();
     } catch (err) {
@@ -601,6 +644,7 @@ function PaymentForm({
                 <Select
                   value={partyId}
                   onChange={setPartyId}
+                  disabled={!!existing}
                   placeholder="Search by name"
                   options={[
                     { value: "", label: "Select party" },
@@ -651,7 +695,7 @@ function PaymentForm({
 
         {/* Vyapar reveals LINK PAYMENT once a party is chosen — this is where a lump sum gets
             spread across the bills it settles. */}
-        {selectedParty && (
+        {selectedParty && !existing && (
           <div className="rounded-xl border border-gray-200 p-4">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
@@ -680,7 +724,22 @@ function PaymentForm({
           </div>
         )}
 
-        {selectedParty && amount > 0 && (
+        <div className="rounded-xl border border-gray-200 p-4">
+          {existing ? (
+            <ModuleAttachments
+              module="VYAPAR_PAYMENT"
+              type={`PAYMENT_${direction}`}
+              sourceId={existing.id}
+              projectId={existing.projectId ?? null}
+              label={`${isIn ? "Payment In" : "Payment Out"} ${isIn ? "PI" : "PO"}-${existing.id}`}
+              party={existing.partyName ?? undefined}
+            />
+          ) : (
+            <PendingAttachmentList pending={pendingFiles} />
+          )}
+        </div>
+
+        {selectedParty && amount > 0 && !existing && (
           <div className="rounded-xl border border-gray-200 bg-gray-50/60 p-4 text-sm">
             <div className="flex items-center justify-between">
               <span className="text-gray-500">{selectedParty.name}&apos;s balance after this {isIn ? "receipt" : "payment"}</span>
@@ -778,9 +837,20 @@ function PaymentDetail({
           />
         ) : undefined
       }
+      extra={
+        <ModuleAttachments
+          module="VYAPAR_PAYMENT"
+          type={`PAYMENT_${p.direction}`}
+          sourceId={p.id}
+          projectId={p.projectId ?? null}
+          label={`${isIn ? "Payment In" : "Payment Out"} ${isIn ? "PI" : "PO"}-${p.id}`}
+          party={p.partyName ?? undefined}
+          compact
+        />
+      }
       onClose={onClose}
       onEdit={onEdit}
-      editLabel="Edit links"
+      editLabel="Edit"
       onDownload={onDownload}
       onDelete={onDelete}
     />

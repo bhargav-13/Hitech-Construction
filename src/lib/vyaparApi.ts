@@ -421,6 +421,11 @@ export const createPayment = (
     links?: Pick<PaymentLink, "invoiceId" | "amount">[];
   }
 ) => apiRequest<Payment>(`${BASE}/payments`, { method: "POST", body });
+/** Edit a saved payment — date, amount, type, description, project (KAN-116). Links have their own call. */
+export const updatePayment = (
+  id: number,
+  body: { paymentDate: string; amount: number; mode: string; bankAccountId: number | null; notes: string | null; projectId: number | null },
+) => apiRequest<Payment>(`${BASE}/payments/${id}`, { method: "PUT", body });
 export const deletePayment = (id: number) =>
   apiRequest<void>(`${BASE}/payments/${id}`, { method: "DELETE" });
 
@@ -505,6 +510,21 @@ export interface VyaparSettings {
   deliveryChallanEnabled: boolean;
   /** Per-document-type prefixes as a JSON string, e.g. {"SALE":"GJ/RA/26-27/"}. */
   prefixes: string | null;
+  /** KAN-118: predefined Terms & Conditions text per title, JSON {"Sale Invoice":"…"}. */
+  termsFormats?: string | null;
+}
+
+/** The titles a document's Terms & Conditions block can carry — Vyapar's "Title" dropdown. */
+export const TERMS_TITLES = ["Terms and Conditions", "Sale Invoice", "Purchase Bill", "Note", "Declaration"];
+
+/** The predefined text for each title, from settings. */
+export function termsFormatsOf(s: Pick<VyaparSettings, "termsFormats"> | null | undefined): Record<string, string> {
+  try {
+    const v = s?.termsFormats ? JSON.parse(s.termsFormats) : {};
+    return v && typeof v === "object" ? (v as Record<string, string>) : {};
+  } catch {
+    return {};
+  }
 }
 
 /** Expense category master (Vyapar-28). An expense still records its category by name. */

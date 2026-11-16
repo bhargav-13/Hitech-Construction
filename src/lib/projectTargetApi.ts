@@ -281,6 +281,17 @@ export const logProgress = (
     body,
   });
 
+export const updateProgress = (
+  projectId: number,
+  targetId: number,
+  entryId: number,
+  body: { qty: number; date?: string | null; note?: string | null; location?: string | null },
+) =>
+  apiRequest<ApiProjectBoq>(`${base(projectId)}/targets/${targetId}/progress/${entryId}`, {
+    method: "PUT",
+    body,
+  });
+
 export const removeProgress = (projectId: number, targetId: number, entryId: number) =>
   apiRequest<ApiProjectBoq>(`${base(projectId)}/targets/${targetId}/progress/${entryId}`, {
     method: "DELETE",

@@ -67,8 +67,8 @@ interface MaterialRow {
  */
 export function ProjectMaterials({ projectId }: { projectId: number }) {
   const can = useCan();
-  const canMove = can("WAREHOUSE_STOCK:CREATE");
-  const canRequest = can("WAREHOUSE_REQUESTS:CREATE");
+  const canMove = can(["WAREHOUSE_STOCK:CREATE", "PROJECT_MATERIAL:CREATE"]);
+  const canRequest = can(["WAREHOUSE_REQUESTS:CREATE", "PROJECT_MATERIAL:CREATE"]);
   const canNewItem = can("VYAPAR_ITEM:CREATE");
   const { projects } = useProjects();
 

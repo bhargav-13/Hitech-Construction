@@ -7,6 +7,7 @@ import {
   HardHat,
   Link2,
   Package,
+  Pencil,
   Plus,
   Trash2,
   TriangleAlert,
@@ -21,6 +22,7 @@ import * as api from "@/lib/projectTargetApi";
 import type {
   ApiBoqItem,
   ApiTarget,
+  ApiTargetEntry as ProgressEntry,
   ResourceKind,
   TargetStatus,
 } from "@/lib/projectTargetApi";
@@ -56,6 +58,7 @@ export function TargetDrawer({
 }) {
   const [tab, setTab] = useState<"progress" | "resources" | "delay">("progress");
   const [logging, setLogging] = useState(false);
+  const [editingEntry, setEditingEntry] = useState<ProgressEntry | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -205,6 +208,7 @@ export function TargetDrawer({
             target={target}
             busy={busy}
             onAdd={() => setLogging(true)}
+            onEdit={(entry) => setEditingEntry(entry)}
             onRemove={(entryId) => run(() => api.removeProgress(projectId, target.id, entryId))}
           />
         )}
@@ -224,6 +228,18 @@ export function TargetDrawer({
             await api.logProgress(projectId, target.id, body);
             await onChanged();
             setLogging(false);
+          }}
+        />
+      )}
+      {editingEntry && (
+        <ProgressModal
+          target={target}
+          entry={editingEntry}
+          onClose={() => setEditingEntry(null)}
+          onSave={async (body) => {
+            await api.updateProgress(projectId, target.id, editingEntry.id, body);
+            await onChanged();
+            setEditingEntry(null);
           }}
         />
       )}
@@ -247,12 +263,14 @@ function ProgressTab({
   target,
   busy,
   onAdd,
+  onEdit,
   onRemove,
 }: {
   projectId: number;
   target: ApiTarget;
   busy: boolean;
   onAdd: () => void;
+  onEdit: (entry: ProgressEntry) => void;
   onRemove: (entryId: number) => void;
 }) {
   return (
@@ -287,10 +305,20 @@ function ProgressTab({
                 )}
                 <button
                   type="button"
+                  onClick={() => onEdit(e)}
+                  disabled={busy}
+                  aria-label="Edit this entry"
+                  title="Edit"
+                  className="ml-auto text-gray-300 transition-colors duration-150 hover:text-brand-accent disabled:opacity-40"
+                >
+                  <Pencil size={11} />
+                </button>
+                <button
+                  type="button"
                   onClick={() => onRemove(e.id)}
                   disabled={busy}
                   aria-label="Remove this entry"
-                  className="ml-auto text-gray-300 transition-colors duration-150 hover:text-rose-600 disabled:opacity-40"
+                  className="text-gray-300 transition-colors duration-150 hover:text-rose-600 disabled:opacity-40"
                 >
                   <Trash2 size={11} />
                 </button>
@@ -309,29 +337,33 @@ function ProgressTab({
 
 function ProgressModal({
   target,
+  entry,
   onClose,
   onSave,
 }: {
   target: ApiTarget;
+  /** Given = editing this entry instead of reporting a new one. */
+  entry?: ProgressEntry;
   onClose: () => void;
   onSave: (body: { qty: number; date: string; note: string | null; location: string | null }) => Promise<void>;
 }) {
-  const [qty, setQty] = useState("");
-  const [date, setDate] = useState(todayIST());
-  const [location, setLocation] = useState("");
-  const [note, setNote] = useState("");
+  const [qty, setQty] = useState(entry ? String(entry.qty) : "");
+  const [date, setDate] = useState(entry?.date?.slice(0, 10) || todayIST());
+  const [location, setLocation] = useState(entry?.location ?? "");
+  const [note, setNote] = useState(entry?.note ?? "");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
 
   const n = Number(qty);
   const valid = Number.isFinite(n) && n > 0;
-  const remaining = Math.max(0, target.targetQty - target.doneQty);
+  // Editing frees up what this entry had already claimed.
+  const remaining = Math.max(0, target.targetQty - target.doneQty + (entry?.qty ?? 0));
 
   return (
     <Modal onClose={onClose}>
       <div className="w-[400px] max-w-full space-y-4 p-5">
         <div className="flex items-center justify-between">
-          <h2 className="text-base font-semibold text-gray-800">Update progress</h2>
+          <h2 className="text-base font-semibold text-gray-800">{entry ? "Edit progress" : "Update progress"}</h2>
           <input
             type="date"
             value={date}

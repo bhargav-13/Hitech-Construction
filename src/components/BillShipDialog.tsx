@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { getInvoices } from "@/lib/vyaparApi";
 import { Trash2 } from "lucide-react";
 import { Drawer, DrawerField } from "@/components/Drawer";
 import { Select } from "@/components/Select";
@@ -46,6 +47,55 @@ export function BillShipDialog({
   const set = (patch: Partial<BillShip>) => setV((p) => ({ ...p, ...patch }));
 
   /**
+   * KAN-108: every Bill To / Ship To already used on a purchase order, so a buyer picks an address
+   * instead of typing or copying it each time. Read from the saved orders themselves — nothing
+   * extra to keep in step, and it is the same list on every device.
+   */
+  const [book, setBook] = useState<SavedAddress[]>([]);
+  useEffect(() => {
+    let off = false;
+    getInvoices("PURCHASE_ORDER")
+      .then((rows) => {
+        if (off) return;
+        const seen = new Map<string, SavedAddress>();
+        for (const r of rows) {
+          for (const a of [
+            { name: r.billToName, address: r.billToAddress, gstin: r.billToGstin },
+            { name: r.shipToName, address: r.shipToAddress, gstin: r.shipToGstin },
+          ]) {
+            const name = (a.name ?? "").trim();
+            const address = (a.address ?? "").trim();
+            if (!name && !address) continue;
+            const key = `${name.toLowerCase()}|${address.toLowerCase()}`;
+            if (!seen.has(key)) seen.set(key, { name, address, gstin: (a.gstin ?? "").trim() });
+          }
+        }
+        setBook([...seen.values()].sort((x, y) => x.name.localeCompare(y.name)));
+      })
+      .catch(() => {});
+    return () => {
+      off = true;
+    };
+  }, []);
+  const bookOptions = useMemo(
+    () => [
+      { value: "", label: "Type it below instead" },
+      ...book.map((a, i) => ({ value: String(i), label: a.address ? `${a.name || "—"} · ${a.address.slice(0, 60)}` : a.name })),
+    ],
+    [book],
+  );
+  const pickBill = (i: string) => {
+    const a = book[Number(i)];
+    if (a) set({ billToName: a.name, billToAddress: a.address, billToGstin: a.gstin });
+  };
+  const pickShip = (i: string) => {
+    const a = book[Number(i)];
+    if (a) set({ shipToName: a.name, shipToAddress: a.address, shipToGstin: a.gstin });
+  };
+  const indexOf = (name: string, address: string) =>
+    String(book.findIndex((a) => a.name === name.trim() && a.address === address.trim()));
+
+  /**
    * Ship To, filled from a project.
    *
    * It used to be a single "Use project" button that copied the name of whichever project the
@@ -83,6 +133,16 @@ export function BillShipDialog({
             )}
           </div>
           <div className="space-y-3">
+            {book.length > 0 && (
+              <DrawerField label="Saved address" hint="Any address already used on a purchase order.">
+                <Select
+                  value={indexOf(v.billToName, v.billToAddress) === "-1" ? "" : indexOf(v.billToName, v.billToAddress)}
+                  onChange={pickBill}
+                  placeholder="Pick an address"
+                  options={bookOptions}
+                />
+              </DrawerField>
+            )}
             <DrawerField label="Name">
               <input
                 value={v.billToName}
@@ -161,6 +221,16 @@ export function BillShipDialog({
                   />
                 </DrawerField>
               )}
+              {book.length > 0 && (
+                <DrawerField label="Saved address" hint="Any address already used on a purchase order.">
+                  <Select
+                    value={indexOf(v.shipToName, v.shipToAddress) === "-1" ? "" : indexOf(v.shipToName, v.shipToAddress)}
+                    onChange={pickShip}
+                    placeholder="Pick an address"
+                    options={bookOptions}
+                  />
+                </DrawerField>
+              )}
               <DrawerField label="Name">
                 <input
                   value={v.shipToName}
@@ -192,4 +262,10 @@ export function BillShipDialog({
       </div>
     </Drawer>
   );
+}
+
+interface SavedAddress {
+  name: string;
+  address: string;
+  gstin: string;
 }

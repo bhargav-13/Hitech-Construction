@@ -45,6 +45,19 @@ export interface WorkOrderItem {
   amount: number;
   progressPercent: number;
   sortOrder: number;
+  /** KAN-99: quantity billed on his running bills so far; un-billed = quantity − this. */
+  billedQty?: number;
+}
+
+/** One line of a running bill (KAN-99). */
+export interface SubconBillLine {
+  id?: number;
+  workOrderItemId: number | null;
+  itemName: string;
+  unit: string | null;
+  quantity: number;
+  rate: number;
+  amount?: number;
 }
 
 export interface SubconBill {
@@ -61,6 +74,16 @@ export interface SubconBill {
   note: string | null;
   /** The Vyapar purchase bill this became, once booked. */
   vyaparInvoiceId: number | null;
+  // ---- KAN-99: item-wise bills ----
+  lines?: SubconBillLine[];
+  subtotal?: number;
+  taxPercent?: number;
+  taxAmount?: number;
+  discount?: number;
+  charges?: number;
+  /** A named deduction (TDS, labour cess …) beside retention. */
+  deduction?: number;
+  deductionNote?: string | null;
 }
 
 export type MaterialMovement = "ISSUE" | "RETURN" | "CONSUMED";
@@ -179,6 +202,13 @@ export interface SubconBillInput {
   materialRecovery?: number;
   note?: string | null;
   vyaparInvoiceId?: number | null;
+  // ---- KAN-99: with lines, the server works the amount out from them ----
+  lines?: SubconBillLine[];
+  taxPercent?: number;
+  discount?: number;
+  charges?: number;
+  deduction?: number;
+  deductionNote?: string | null;
 }
 
 export interface SubconMaterialInput {

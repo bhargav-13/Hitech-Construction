@@ -18,6 +18,7 @@ import {
 } from "@/lib/tenderTypes";
 import { FOLLOWUP_TONE_CLASS, followUpLabel, followUpTone, tdate, tmoney } from "@/lib/tenderHelpers";
 import { stateOf, transitionsFor } from "@/lib/tenderStateMachine";
+import { todayIST } from "@/lib/datetime";
 import { TenderDetailDrawer } from "@/components/tender/TenderDetailDrawer";
 import { TenderForm } from "@/components/tender/TenderForm";
 import { LossReasonModal } from "@/components/tender/LossReasonModal";
@@ -36,16 +37,51 @@ import { handoffTenderToProject } from "@/lib/tenderProjectHandoff";
  * table screens stay one click away ("List") for bulk moves, column choices and exports.
  */
 
-const COLUMNS: TenderStage[] = ["SORTING", "RESEARCH", "APPLIED", "WON", "LOST"];
+/**
+ * Board columns. Completed and Cancelled / Re-tendered get their own columns so they don't pile
+ * into Won and Lost (client, KAN-96). They are statuses on top of a stage: Completed is a WON
+ * tender with status COMPLETED, Cancelled / Re-tendered is a LOST one with status CANCELLED or
+ * RETENDERED.
+ */
+type BoardCol = TenderStage | "COMPLETED" | "CANCELLED";
+const COLUMNS: BoardCol[] = ["SORTING", "RESEARCH", "APPLIED", "WON", "COMPLETED", "LOST", "CANCELLED"];
+
+const COL_META: Record<BoardCol, { label: string; dot: string; description?: string }> = {
+  ...STAGE_META,
+  COMPLETED: { label: "Completed", dot: "bg-teal-600", description: "Won and the work is finished." },
+  CANCELLED: { label: "Cancelled / Re-Tendered", dot: "bg-gray-500", description: "Cancelled by the department, or put out again as a new tender." },
+};
+
+function colOf(t: Tender): BoardCol {
+  if (t.status === "COMPLETED") return "COMPLETED";
+  if (t.status === "CANCELLED" || t.status === "RETENDERED") return "CANCELLED";
+  return t.stage;
+}
 
 /** Where each column's "List" link goes — the full table screens, still there for bulk work. */
-const LIST_HREF: Record<TenderStage, string> = {
+const LIST_HREF: Record<BoardCol, string> = {
   SORTING: "/tender/sorting",
   RESEARCH: "/tender/research",
   APPLIED: "/tender/applied",
   WON: "/tender/applied?outcome=WON",
+  COMPLETED: "/tender/applied?outcome=WON",
   LOST: "/tender/applied?outcome=LOST",
+  CANCELLED: "/tender/applied?outcome=LOST",
 };
+
+/** Columns a card may be dropped into, with the status the drop stamps. */
+function boardMoves(t: Tender): { col: BoardCol; status?: TenderStatus }[] {
+  const from = colOf(t);
+  if (from === "COMPLETED") return [{ col: "WON", status: "WON" }];
+  const moves: { col: BoardCol; status?: TenderStatus }[] = transitionsFor(t.stage).map((x) => ({ col: x.to, status: x.status }));
+  if (from === "CANCELLED") return [...moves, { col: "LOST", status: "LOST" }];
+  if (from === "WON") moves.push({ col: "COMPLETED", status: "COMPLETED" });
+  if (from === "LOST" || moves.some((m) => m.col === "LOST")) moves.push({ col: "CANCELLED", status: "CANCELLED" });
+  return moves;
+}
+
+/** Bidding cards whose due date has passed stay off the board unless the due-date filter asks (KAN-90). */
+type DueFilter = "UPCOMING" | "OVERDUE" | "ALL";
 
 /** A column shows this many cards before "Show all" — the Sorting pile alone runs past 120. */
 const PAGE = 40;
@@ -60,9 +96,10 @@ export function TenderBoard() {
   const [search, setSearch] = useState("");
   const [source, setSource] = useState<"ALL" | TenderSource>("ALL");
   const [dept, setDept] = useState("ALL");
-  const [expanded, setExpanded] = useState<Set<TenderStage>>(new Set());
+  const [due, setDue] = useState<DueFilter>("UPCOMING");
+  const [expanded, setExpanded] = useState<Set<BoardCol>>(new Set());
   const [dragId, setDragId] = useState<string | null>(null);
-  const [overCol, setOverCol] = useState<TenderStage | null>(null);
+  const [overCol, setOverCol] = useState<BoardCol | null>(null);
   const [toast, setToast] = useState<string | null>(null);
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -85,9 +122,17 @@ export function TenderBoard() {
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
+    const today = todayIST();
     return tenders.filter((t) => {
       if (source !== "ALL" && t.source !== source) return false;
       if (dept !== "ALL" && t.department !== dept) return false;
+      // The due-date filter only bites while bidding — an applied or decided tender is past its
+      // deadline by nature.
+      if ((t.stage === "SORTING" || t.stage === "RESEARCH") && due !== "ALL") {
+        const overdue = !!t.deadline && t.deadline.slice(0, 10) < today;
+        if (due === "UPCOMING" && overdue) return false;
+        if (due === "OVERDUE" && !overdue) return false;
+      }
       if (!q) return true;
       return (
         (t.nameOfWork ?? "").toLowerCase().includes(q) ||
@@ -95,19 +140,17 @@ export function TenderBoard() {
         (t.tenderId ?? "").toLowerCase().includes(q)
       );
     });
-  }, [tenders, search, source, dept]);
+  }, [tenders, search, source, dept, due]);
 
   /** Cards per column: nearest deadline first while bidding, newest decision first once decided. */
   const byStage = useMemo(() => {
-    const map: Record<TenderStage, Tender[]> = { SORTING: [], RESEARCH: [], APPLIED: [], WON: [], LOST: [] };
-    for (const t of filtered) map[t.stage]?.push(t);
+    const map: Record<BoardCol, Tender[]> = { SORTING: [], RESEARCH: [], APPLIED: [], WON: [], COMPLETED: [], LOST: [], CANCELLED: [] };
+    for (const t of filtered) map[colOf(t)]?.push(t);
     const byDeadline = (a: Tender, b: Tender) => (a.deadline || "9999").localeCompare(b.deadline || "9999");
     const byRecent = (a: Tender, b: Tender) => (b.deadline || "").localeCompare(a.deadline || "");
     map.SORTING.sort(byDeadline);
     map.RESEARCH.sort(byDeadline);
-    map.APPLIED.sort(byRecent);
-    map.WON.sort(byRecent);
-    map.LOST.sort(byRecent);
+    for (const c of ["APPLIED", "WON", "COMPLETED", "LOST", "CANCELLED"] as const) map[c].sort(byRecent);
     return map;
   }, [filtered]);
 
@@ -122,23 +165,35 @@ export function TenderBoard() {
 
   const dragged = dragId ? (tenders.find((t) => t.id === dragId) ?? null) : null;
   /** Columns the dragged card may land in — highlighted while dragging, the rest dimmed. */
-  const allowed = useMemo(() => new Set(dragged ? transitionsFor(dragged.stage).map((x) => x.to) : []), [dragged]);
+  const allowed = useMemo(() => new Set<BoardCol>(dragged ? boardMoves(dragged).map((m) => m.col) : []), [dragged]);
 
   /** A drop is the same move as the matching button, so it carries that button's status and label. */
-  async function drop(to: TenderStage) {
+  async function drop(col: BoardCol) {
     const t = dragged;
     setDragId(null);
     setOverCol(null);
-    if (!t || t.stage === to) return;
+    if (!t || colOf(t) === col) return;
     if (t.pendingStage) {
       flash(`This tender's move to ${STAGE_META[t.pendingStage].label} is waiting for approval.`);
       return;
     }
+    // Completed / Cancelled columns are status changes, not a stage-machine step.
+    const extra = boardMoves(t).find((m) => m.col === col && m.status);
+    if (extra?.status && (col === "COMPLETED" || col === "CANCELLED" || colOf(t) === "COMPLETED" || colOf(t) === "CANCELLED")) {
+      if (col === "CANCELLED" && t.stage !== "LOST") {
+        setLossPrompt({ tender: t, to: "LOST", status: extra.status, label: "Cancelled / Re-Tendered" });
+        return;
+      }
+      const message = await setStatus(t.id, extra.status);
+      flash(message ?? `Moved to ${COL_META[col].label}.`);
+      return;
+    }
+    const to = col as TenderStage;
     const move = transitionsFor(t.stage).find((x) => x.to === to);
     if (!move) {
       const next = transitionsFor(t.stage).map((x) => STAGE_META[x.to].label);
       flash(
-        `${STAGE_META[t.stage].label} can't go straight to ${STAGE_META[to].label}` +
+        `${COL_META[colOf(t)].label} can't go straight to ${COL_META[col].label}` +
           (next.length ? ` — next step is ${next.join(" or ")}.` : "."),
       );
       return;
@@ -201,6 +256,17 @@ export function TenderBoard() {
           className="w-56"
           options={[{ value: "ALL", label: "All departments" }, ...departments.map((d) => ({ value: d, label: d }))]}
         />
+        <Select
+          value={due}
+          onChange={(v) => setDue(v as DueFilter)}
+          size="sm"
+          className="w-48"
+          options={[
+            { value: "UPCOMING", label: "Due date: upcoming" },
+            { value: "OVERDUE", label: "Due date: passed" },
+            { value: "ALL", label: "Due date: all" },
+          ]}
+        />
       </div>
 
       <div className="flex gap-2.5 overflow-x-auto pb-2">
@@ -225,7 +291,7 @@ export function TenderBoard() {
                 e.preventDefault();
                 void drop(stage);
               }}
-              className={`flex min-w-[200px] flex-1 basis-0 flex-col rounded-xl border transition-colors ${
+              className={`flex min-w-[190px] flex-1 basis-0 flex-col rounded-xl border transition-colors ${
                 overCol === stage && canDrop
                   ? "border-brand-accent bg-cyan-50/50"
                   : canDrop
@@ -233,9 +299,12 @@ export function TenderBoard() {
                     : "border-gray-200 bg-gray-50"
               } ${dimmed ? "opacity-50" : ""}`}
             >
-              <header className="flex items-center gap-2 border-b border-gray-200/70 px-3 py-2.5" title={stateOf(stage)?.description}>
-                <span className={`h-2 w-2 rounded-full ${STAGE_META[stage].dot}`} />
-                <h2 className="text-sm font-semibold text-gray-700">{STAGE_META[stage].label}</h2>
+              <header
+                className="flex items-center gap-2 border-b border-gray-200/70 px-3 py-2.5"
+                title={COL_META[stage].description ?? (stage === "COMPLETED" || stage === "CANCELLED" ? undefined : stateOf(stage)?.description)}
+              >
+                <span className={`h-2 w-2 shrink-0 rounded-full ${COL_META[stage].dot}`} />
+                <h2 className="truncate text-sm font-semibold text-gray-700">{COL_META[stage].label}</h2>
                 <span className="rounded-full bg-white px-2 py-0.5 text-[11px] font-medium text-gray-500 ring-1 ring-gray-200">{cards.length}</span>
                 <Link
                   href={LIST_HREF[stage]}

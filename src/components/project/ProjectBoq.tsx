@@ -8,6 +8,7 @@ import {
   Flag,
   FolderPlus,
   Library,
+  Upload,
   Pencil,
   Plus,
   Trash2,
@@ -31,6 +32,33 @@ import {
   type ProjectSalesInvoice,
 } from "@/lib/projectBillingStore";
 import { todayIST } from "@/lib/datetime";
+import { ProjectBoqImport } from "@/components/project/ProjectBoqImport";
+
+/** KAN-113: the files a BOQ can be imported from — Excel / CSV, or a PDF / photo read with OCR. */
+const BOQ_FILE_TYPES = ".xlsx,.xls,.csv,.pdf,image/*";
+
+function ImportBoqButton({ onFile, primary }: { onFile: (f: File) => void; primary?: boolean }) {
+  return (
+    <label
+      className={`flex cursor-pointer items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition-all duration-150 active:scale-95 ${
+        primary ? "bg-brand-accent text-white hover:opacity-90" : "border border-gray-300 bg-white text-gray-700 hover:border-brand-accent hover:text-brand-accent"
+      }`}
+      title="Excel, CSV, PDF or a photo of the BOQ"
+    >
+      <Upload size={13} /> Import BOQ (Excel / PDF / OCR)
+      <input
+        type="file"
+        accept={BOQ_FILE_TYPES}
+        hidden
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          e.target.value = "";
+          if (f) onFile(f);
+        }}
+      />
+    </label>
+  );
+}
 
 /**
  * The project's Bill of Quantities — the commercial document the job is billed against.
@@ -51,6 +79,7 @@ import { todayIST } from "@/lib/datetime";
  */
 export function ProjectBoq({ projectId }: { projectId: number }) {
   const [boq, setBoq] = useState<ApiProjectBoq | null>(null);
+  const [importFile, setImportFile] = useState<File | null>(null);
   const [families, setFamilies] = useState<ApiBoqFamily[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -109,9 +138,25 @@ export function ProjectBoq({ projectId }: { projectId: number }) {
         </div>
         <div className="text-base font-semibold text-gray-700">No BOQ on this project</div>
         <p className="mt-1 max-w-md text-sm text-gray-400">
-          A BOQ arrives when a won tender is handed over, carrying its families and rates across. Until
-          then there is nothing to bill against.
+          A BOQ arrives when a won tender is handed over, carrying its families and rates across — or
+          import one from the client&apos;s Excel, PDF or a photo of it.
         </p>
+        <div className="mt-4">
+          <ImportBoqButton primary onFile={setImportFile} />
+        </div>
+        {importFile && (
+          <ProjectBoqImport
+            projectId={projectId}
+            file={importFile}
+            families={[]}
+            hasBoq={false}
+            onClose={() => setImportFile(null)}
+            onDone={() => {
+              setImportFile(null);
+              window.location.reload();
+            }}
+          />
+        )}
       </div>
     );
   }
@@ -131,6 +176,7 @@ function BoqSheet({
   reload: () => Promise<void>;
 }) {
   const [sub, setSub] = useState<SubTab>("items");
+  const [importFile, setImportFile] = useState<File | null>(null);
   // Titles start collapsed: a BOQ with a dozen headings opens as a readable table of contents, not
   // a wall of every line at once. One click opens the title you actually want.
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set(families.map((f) => f.key)));
@@ -218,14 +264,29 @@ function BoqSheet({
           {boq.title ?? "BOQ"} · {boq.boqNo ?? "—"}
           {boq.clientName && ` · ${boq.clientName}`}
         </span>
+        <span className="ml-auto" />
+        <ImportBoqButton onFile={setImportFile} />
         <button
           type="button"
           onClick={() => setNewFamily(true)}
-          className="ml-auto flex items-center gap-1.5 rounded-lg bg-brand-accent px-3 py-1.5 text-xs font-semibold text-white transition-all duration-150 hover:opacity-90 active:scale-95"
+          className="flex items-center gap-1.5 rounded-lg bg-brand-accent px-3 py-1.5 text-xs font-semibold text-white transition-all duration-150 hover:opacity-90 active:scale-95"
         >
           <FolderPlus size={13} /> New title
         </button>
       </div>
+      {importFile && (
+        <ProjectBoqImport
+          projectId={projectId}
+          file={importFile}
+          families={families}
+          hasBoq
+          onClose={() => setImportFile(null)}
+          onDone={() => {
+            setImportFile(null);
+            void reload();
+          }}
+        />
+      )}
 
       {boq.notes && (
         <p className="rounded-lg bg-gray-50 px-3 py-2 text-xs whitespace-pre-line text-gray-600">{boq.notes}</p>

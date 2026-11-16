@@ -84,5 +84,17 @@ export const DEFAULT_UNITS: { name: string; short: string }[] = [
   { name: "Cubic Metre", short: "CUM" },
 ];
 
-/** GST slabs offered on the item form. */
-export const TAX_RATES = [0, 0.25, 3, 5, 12, 18, 28];
+/** Every GST slab — used to snap a scanned rate to a real one. */
+export const ALL_TAX_RATES = [0, 0.25, 3, 5, 12, 18, 28, 40];
+
+/** GST slabs offered on the item form — the client only uses 12% and 18% (KAN-114). */
+export const TAX_RATES = [0, 12, 18];
+
+/**
+ * Tax-rate picker options: the default slabs, any rate the user added from a document's Tax picker,
+ * and the current value so an item already at 5% still shows it.
+ */
+export function taxRateOptions(current?: number | null, extra: number[] = []): { value: string; label: string }[] {
+  const rates = [...new Set([...TAX_RATES, ...extra, ...(current != null ? [Number(current)] : [])])].sort((a, b) => a - b);
+  return rates.map((t) => ({ value: String(t), label: t === 0 ? "None" : `GST @ ${t}%` }));
+}

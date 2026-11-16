@@ -161,7 +161,6 @@ export const VYAPAR_NAV: NavNode[] = [
     icon: "bank",
     children: [
       { label: "Bank Accounts", href: "/vyapar/bank", feature: "VYAPAR_CASH_BANK" },
-      { label: "Cash In Hand", href: "/vyapar/cash", feature: "VYAPAR_CASH_BANK" },
       { label: "Cheques", href: "/vyapar/cheques", feature: "VYAPAR_CASH_BANK" },
       { label: "Loan Accounts", href: "/vyapar/loans", feature: "VYAPAR_CASH_BANK" },
     ],

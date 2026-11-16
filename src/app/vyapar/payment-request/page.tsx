@@ -3,9 +3,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Check, ExternalLink, HandCoins, Plus, Search, Wallet, X } from "lucide-react";
+import { Check, ExternalLink, HandCoins, Paperclip, Plus, Search, Wallet, X } from "lucide-react";
 import { VyaparShell, VyaparEmpty } from "@/components/vyapar/VyaparShell";
 import { Drawer, DrawerField } from "@/components/Drawer";
+import { ModuleAttachments, PendingAttachmentList, usePendingAttachments } from "@/components/files/ModuleAttachments";
 import { Select } from "@/components/Select";
 import { DatePicker } from "@/components/DatePicker";
 import { Spinner } from "@/components/Spinner";
@@ -116,6 +117,7 @@ function PaymentRequests() {
   const [paying, setPaying] = useState<PaymentRequestApi | null>(null);
   const [deciding, setDeciding] = useState<{ row: PaymentRequestApi; approve: boolean } | null>(null);
   const [highlight, setHighlight] = useState<number | null>(null);
+  const [filesFor, setFilesFor] = useState<PaymentRequestApi | null>(null);
   const params = useSearchParams();
   const router = useRouter();
   const pathname = usePathname();
@@ -285,6 +287,13 @@ function PaymentRequests() {
                   </td>
                   <td className="px-3 py-2.5">
                     <div className="flex flex-wrap items-center gap-1.5">
+                      <button
+                        onClick={() => setFilesFor(r)}
+                        title="Attachments"
+                        className="flex items-center gap-1 rounded-md border border-gray-200 px-2 py-1 text-xs font-medium text-gray-600 hover:border-brand-accent hover:text-brand-accent"
+                      >
+                        <Paperclip size={12} /> Files
+                      </button>
                       {canDecide(r) && (
                         <>
                           <button onClick={() => setDeciding({ row: r, approve: true })} className="flex items-center gap-1 rounded-md bg-emerald-600 px-2 py-1 text-xs font-medium text-white hover:bg-emerald-700"><Check size={12} /> Approve</button>
@@ -319,6 +328,17 @@ function PaymentRequests() {
           onClose={() => setCreating(null)}
           onSaved={() => { setCreating(null); setTab("REQUESTS"); void load(); }}
         />
+      )}
+      {filesFor && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setFilesFor(null)}>
+          <div className="w-full max-w-lg space-y-3 rounded-2xl bg-white p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between">
+              <h3 className="text-base font-semibold text-gray-800">{filesFor.requestNo} · attachments</h3>
+              <button onClick={() => setFilesFor(null)} className="rounded-md p-1 text-gray-400 hover:bg-gray-100"><X size={16} /></button>
+            </div>
+            <RequestFiles row={filesFor} canEdit={filesFor.requestedBy === myId || can("VYAPAR_PAYMENT_REQUEST:CREATE")} />
+          </div>
+        </div>
       )}
       {paying && <PayDialog row={paying} onClose={() => setPaying(null)} onPaid={() => { setPaying(null); void load(); }} />}
       {deciding && (
@@ -468,6 +488,8 @@ function NewRequest({
   const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  // KAN-89 / KAN-94: the bill or quotation the request is for.
+  const pendingFiles = usePendingAttachments("VYAPAR_PAYMENT_REQUEST", { type: "PAYMENT_REQUEST", label: "Payment request" });
   useEffect(() => {
     vyapar.getParties().then((p) => setParties([...p].sort((a, b) => a.name.localeCompare(b.name)))).catch(() => setParties([]));
   }, []);
@@ -497,7 +519,7 @@ function NewRequest({
     setSaving(true);
     setError("");
     try {
-      await apiRequest(BASE, {
+      const created = await apiRequest<PaymentRequestApi>(BASE, {
         method: "POST",
         body: {
           projectId: projectId ? Number(projectId) : null,
@@ -509,6 +531,13 @@ function NewRequest({
           invoiceIds: picked,
         },
       });
+      if (created?.id) {
+        try {
+          await pendingFiles.flush(created.id, projectId ? Number(projectId) : null);
+        } catch {
+          // The request is saved; files can be added again from its Files button.
+        }
+      }
       onSaved();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Couldn't save the request.");
@@ -579,6 +608,9 @@ function NewRequest({
         <DrawerField label="Note">
           <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={3} className="input resize-none" placeholder="What it's for — bill no., work done, week…" />
         </DrawerField>
+        <div className="rounded-xl border border-gray-200 p-3">
+          <PendingAttachmentList pending={pendingFiles} />
+        </div>
       </div>
     </Drawer>
   );
@@ -613,6 +645,9 @@ function DecideDialog({ row, approve, onClose, onDone }: { row: PaymentRequestAp
           <div><div className="text-gray-400">Due to party</div><div className="font-semibold text-rose-600">{row.dueAmount != null ? inr(Number(row.dueAmount)) : "—"}</div></div>
           <div><div className="text-gray-400">Proposed by {row.requestedByName?.split(" ")[0] ?? "requester"}</div><div className="font-semibold text-gray-800">{inr(Number(row.proposedAmount ?? row.amount))}</div></div>
           <div><div className="text-gray-400">Now</div><div className="font-semibold text-gray-800">{inr(Number(row.amount))}</div></div>
+        </div>
+        <div className="rounded-lg border border-gray-200 p-2.5">
+          <RequestFiles row={row} canEdit={false} />
         </div>
         {approve && (
           <label className="block">
@@ -691,5 +726,21 @@ function PayDialog({ row, onClose, onPaid }: { row: PaymentRequestApi; onClose: 
         </div>
       </div>
     </div>
+  );
+}
+
+/** A request's attachments — upload, list and preview (KAN-89 / KAN-94). */
+function RequestFiles({ row, canEdit }: { row: PaymentRequestApi; canEdit: boolean }) {
+  return (
+    <ModuleAttachments
+      module="VYAPAR_PAYMENT_REQUEST"
+      type="PAYMENT_REQUEST"
+      sourceId={row.id}
+      projectId={row.projectId ?? null}
+      label={`Payment request ${row.requestNo}`}
+      party={row.partyName ?? undefined}
+      canEdit={canEdit}
+      compact
+    />
   );
 }

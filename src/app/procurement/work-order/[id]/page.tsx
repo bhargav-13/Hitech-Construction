@@ -36,7 +36,8 @@ export default function WorkOrderDetailPage({ params }: { params: Promise<{ id: 
   const { projects } = useProjects();
 
   const [tab, setTab] = useState<"items" | "bills" | "materials">("items");
-  const [billing, setBilling] = useState(false);
+  // false = closed, true = new bill, a bill = editing it (KAN-99).
+  const [billing, setBilling] = useState<boolean | wo.SubconBill>(false);
   const [issuing, setIssuing] = useState(false);
   const [busy, setBusy] = useState(false);
 
@@ -65,7 +66,8 @@ export default function WorkOrderDetailPage({ params }: { params: Promise<{ id: 
    */
   function bookInVyapar(bill: wo.SubconBill) {
     if (!workOrder) return;
-    const deductions = bill.retention + bill.materialRecovery;
+    const deductions = bill.retention + bill.materialRecovery + (bill.deduction ?? 0);
+    const itemWise = (bill.lines?.length ?? 0) > 0;
     stashPoDraft({
       rfqId: workOrder.id,
       rfqNo: workOrder.woNo,
@@ -80,12 +82,30 @@ export default function WorkOrderDetailPage({ params }: { params: Promise<{ id: 
         bill.billNo ? `Contractor bill ${bill.billNo}.` : null,
         bill.retention ? `Retention held ${inr(bill.retention)}.` : null,
         bill.materialRecovery ? `Material recovered ${inr(bill.materialRecovery)}.` : null,
+        bill.deduction ? `${bill.deductionNote || "Deduction"} ${inr(bill.deduction)}.` : null,
+        itemWise && bill.discount ? `Discount ${inr(bill.discount)}.` : null,
+        itemWise && bill.charges ? `Additional charges ${inr(bill.charges)}.` : null,
         bill.note,
       ]
         .filter(Boolean)
         .join("\n"),
-      discountAmount: deductions,
-      lines: [
+      discountAmount: deductions + (itemWise ? (bill.discount ?? 0) : 0),
+      lines: itemWise
+        ? [
+            ...bill.lines!.map((l) => ({
+              itemId: null,
+              itemName: l.itemName,
+              description: `${workOrder.woNo}${bill.billNo ? ` · bill ${bill.billNo}` : ""}`,
+              unit: vyaparUnit(l.unit),
+              quantity: l.quantity,
+              rate: l.rate,
+              taxCode: gstCodeForPercent(bill.taxPercent ?? 0),
+            })),
+            ...(bill.charges
+              ? [{ itemId: null, itemName: "Additional charges", description: workOrder.woNo, unit: vyaparUnit(null), quantity: 1, rate: bill.charges, taxCode: gstCodeForPercent(bill.taxPercent ?? 0) }]
+              : []),
+          ]
+        : [
         {
           itemId: null,
           itemName: `Work done — ${workOrder.title}`,
@@ -278,6 +298,7 @@ export default function WorkOrderDetailPage({ params }: { params: Promise<{ id: 
               w={w}
               busy={busy}
               onAdd={() => setBilling(true)}
+              onEdit={(b) => setBilling(b)}
               onDelete={(billId) => run(() => wo.deleteSubconBill(w.id, billId))}
               onBook={bookInVyapar}
             />
@@ -340,6 +361,7 @@ export default function WorkOrderDetailPage({ params }: { params: Promise<{ id: 
       {billing && (
         <BillDialog
           w={w}
+          existing={typeof billing === "object" ? billing : null}
           onClose={() => setBilling(false)}
           onSave={async (body) => {
             await run(() => wo.saveSubconBill(w.id, body));
@@ -403,6 +425,13 @@ function ItemsTab({
                 </td>
                 <td className="px-3 py-2.5 text-right whitespace-nowrap text-gray-700 tabular-nums">
                   {i.quantity.toLocaleString("en-IN", { maximumFractionDigits: 3 })} {i.unit}
+                  {/* KAN-99: billed on his running bills, and what is left to bill. */}
+                  {(i.billedQty ?? 0) > 0 && (
+                    <div className="text-[11px] font-normal text-gray-400">
+                      Billed {i.billedQty!.toLocaleString("en-IN", { maximumFractionDigits: 3 })} · Un-billed{" "}
+                      {(i.quantity - i.billedQty!).toLocaleString("en-IN", { maximumFractionDigits: 3 })}
+                    </div>
+                  )}
                 </td>
                 <td className="px-3 py-2.5 text-right text-gray-700 tabular-nums">{inr(i.rate)}</td>
                 <td className="px-3 py-2.5 text-right font-medium whitespace-nowrap text-gray-800 tabular-nums">
@@ -445,12 +474,14 @@ function BillsTab({
   w,
   busy,
   onAdd,
+  onEdit,
   onDelete,
   onBook,
 }: {
   w: wo.WorkOrder;
   busy: boolean;
   onAdd: () => void;
+  onEdit: (bill: wo.SubconBill) => void;
   onDelete: (billId: number) => void;
   onBook: (bill: wo.SubconBill) => void;
 }) {
@@ -481,6 +512,7 @@ function BillsTab({
                 <th className="px-3 py-2 text-right">Amount</th>
                 <th className="px-3 py-2 text-right">Retention</th>
                 <th className="px-3 py-2 text-right">Material recovery</th>
+                <th className="px-3 py-2 text-right">Deduction</th>
                 <th className="px-3 py-2 text-right">Net payable</th>
                 <th className="px-3 py-2">In Vyapar</th>
                 <th className="w-10 px-2 py-2" />
@@ -489,7 +521,14 @@ function BillsTab({
             <tbody className="divide-y divide-gray-100">
               {w.bills.map((b) => (
                 <tr key={b.id}>
-                  <td className="px-3 py-2.5 text-gray-800">{b.billNo || "—"}</td>
+                  <td className="px-3 py-2.5 text-gray-800">
+                    {b.billNo || "—"}
+                    {(b.lines?.length ?? 0) > 0 && (
+                      <span className="block text-[11px] text-gray-400" title={b.lines!.map((l) => `${l.itemName}: ${l.quantity} ${l.unit ?? ""}`).join("\n")}>
+                        {b.lines!.length} item{b.lines!.length > 1 ? "s" : ""}
+                      </span>
+                    )}
+                  </td>
                   <td className="px-3 py-2.5 text-gray-600">{b.billDate}</td>
                   <td className="px-3 py-2.5 text-right text-gray-800 tabular-nums">{inr(b.amount)}</td>
                   <td className="px-3 py-2.5 text-right text-amber-700 tabular-nums">
@@ -497,6 +536,9 @@ function BillsTab({
                   </td>
                   <td className="px-3 py-2.5 text-right text-amber-700 tabular-nums">
                     {b.materialRecovery ? `− ${inr(b.materialRecovery)}` : "—"}
+                  </td>
+                  <td className="px-3 py-2.5 text-right text-amber-700 tabular-nums" title={b.deductionNote ?? undefined}>
+                    {b.deduction ? `− ${inr(b.deduction)}` : "—"}
                   </td>
                   <td className="px-3 py-2.5 text-right font-medium text-emerald-800 tabular-nums">
                     {inr(b.netPayable)}
@@ -519,7 +561,15 @@ function BillsTab({
                       </button>
                     )}
                   </td>
-                  <td className="px-2 py-2.5">
+                  <td className="flex items-center gap-0.5 px-2 py-2.5">
+                    <button
+                      onClick={() => onEdit(b)}
+                      disabled={busy}
+                      aria-label="Edit bill"
+                      className="rounded p-1 text-gray-300 transition-colors duration-150 hover:bg-cyan-50 hover:text-brand-accent"
+                    >
+                      <Pencil size={14} />
+                    </button>
                     <button
                       onClick={() => onDelete(b.id)}
                       disabled={busy}
@@ -652,27 +702,121 @@ function MaterialsTab({
 
 function BillDialog({
   w,
+  existing,
   onClose,
   onSave,
 }: {
   w: wo.WorkOrder;
+  /** Editing this bill; null = a new one. */
+  existing?: wo.SubconBill | null;
   onClose: () => void;
   onSave: (body: wo.SubconBillInput) => void;
 }) {
-  const [billNo, setBillNo] = useState("");
-  const [billDate, setBillDate] = useState(todayIST());
-  const [amount, setAmount] = useState("");
-  const [retention, setRetention] = useState("");
-  const [recovery, setRecovery] = useState("");
-  const [note, setNote] = useState("");
+  const s = (v: number | null | undefined) => (v ? String(v) : "");
+  const [billNo, setBillNo] = useState(existing?.billNo ?? "");
+  const [billDate, setBillDate] = useState(existing?.billDate || todayIST());
+  // KAN-99: item-wise by default (as Onsite), a lump sum only for an old bill that was entered that way.
+  const [lumpSum, setLumpSum] = useState(!!existing && (existing.lines?.length ?? 0) === 0);
+  const [step, setStep] = useState<"pick" | "bill">(existing ? "bill" : w.items.length ? "pick" : "bill");
+  const [lines, setLines] = useState<{ workOrderItemId: number | null; itemName: string; unit: string | null; quantity: string; rate: string }[]>(
+    (existing?.lines ?? []).map((l) => ({ workOrderItemId: l.workOrderItemId, itemName: l.itemName, unit: l.unit, quantity: String(l.quantity), rate: String(l.rate) })),
+  );
+  const [amount, setAmount] = useState(s(existing?.amount));
+  const [taxPercent, setTaxPercent] = useState(existing ? s(existing.taxPercent) : s(w.taxPercent));
+  const [discount, setDiscount] = useState(s(existing?.discount));
+  const [charges, setCharges] = useState(s(existing?.charges));
+  const [deduction, setDeduction] = useState(s(existing?.deduction));
+  const [deductionNote, setDeductionNote] = useState(existing?.deductionNote ?? "");
+  const [retention, setRetention] = useState(s(existing?.retention));
+  const [recovery, setRecovery] = useState(s(existing?.materialRecovery));
+  const [note, setNote] = useState(existing?.note ?? "");
+  const [search, setSearch] = useState("");
 
   const n = (v: string) => (v.trim() === "" ? 0 : Number(v) || 0);
-  const net = n(amount) - n(retention) - n(recovery);
-  // What is left on the order before this bill — the figure that says whether it is reasonable.
-  const wouldExceed = w.billedValue + n(amount) > w.orderValue && w.orderValue > 0;
+  /** Billed on each order line by other bills — this bill's own lines don't count against itself. */
+  const billedElsewhere = (itemId: number) => {
+    const total = w.items.find((i) => i.id === itemId)?.billedQty ?? 0;
+    const mine = (existing?.lines ?? []).filter((l) => l.workOrderItemId === itemId).reduce((t, l) => t + l.quantity, 0);
+    return total - mine;
+  };
+  const picked = new Set(lines.map((l) => l.workOrderItemId).filter((x): x is number => x != null));
+  function toggle(item: wo.WorkOrderItem) {
+    if (picked.has(item.id)) {
+      setLines((ls) => ls.filter((l) => l.workOrderItemId !== item.id));
+    } else {
+      const left = Math.max(0, item.quantity - billedElsewhere(item.id));
+      setLines((ls) => [...ls, { workOrderItemId: item.id, itemName: item.itemName, unit: item.unit, quantity: left ? String(left) : "", rate: String(item.rate) }]);
+    }
+  }
+
+  const subtotal = lumpSum ? 0 : lines.reduce((t, l) => t + n(l.quantity) * n(l.rate), 0);
+  const afterTerms = subtotal - n(discount) + n(charges);
+  const tax = lumpSum ? 0 : Math.round(afterTerms * n(taxPercent)) / 100;
+  const total = lumpSum ? n(amount) : Math.round((afterTerms + tax) * 100) / 100;
+  const net = total - n(retention) - n(recovery) - n(deduction);
+  const billedBefore = w.billedValue - (existing?.amount ?? 0);
+  const wouldExceed = billedBefore + total > w.orderValue && w.orderValue > 0;
+  const canSave = lumpSum ? n(amount) > 0 : lines.some((l) => n(l.quantity) > 0);
+
+  const shownItems = w.items.filter((i) => !search.trim() || i.itemName.toLowerCase().includes(search.trim().toLowerCase()));
+
+  if (step === "pick") {
+    return (
+      <Dialog title={`Work order items · ${w.woNo}`} onClose={onClose}>
+        <div className="mb-3 flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 focus-within:border-cyan-500">
+          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search" className="w-full bg-transparent text-sm outline-none" autoFocus />
+        </div>
+        <div className="divide-y divide-gray-100 rounded-lg border border-gray-200">
+          {shownItems.map((i) => {
+            const billed = i.billedQty ?? 0;
+            const unbilled = i.quantity - billed;
+            return (
+              <label key={i.id} className="flex cursor-pointer items-start gap-3 px-3 py-2.5 hover:bg-gray-50">
+                <input type="checkbox" checked={picked.has(i.id)} onChange={() => toggle(i)} className="mt-1 h-4 w-4 accent-cyan-600" />
+                <span className="min-w-0 flex-1">
+                  <span className="block text-sm font-medium text-gray-800">{i.itemName}</span>
+                  <span className="block text-[11px] text-gray-500">
+                    Billed: {billed} {i.unit ?? ""} · Un-billed:{" "}
+                    <span className={unbilled < 0 ? "font-medium text-rose-600" : ""}>
+                      {Math.round(unbilled * 1000) / 1000} {i.unit ?? ""}
+                    </span>
+                  </span>
+                </span>
+                <span className="text-right text-sm text-gray-700">
+                  {inr(i.rate)} / {i.unit || "unit"}
+                </span>
+              </label>
+            );
+          })}
+          {shownItems.length === 0 && <p className="px-3 py-6 text-center text-sm text-gray-400">No items match.</p>}
+        </div>
+        <div className="mt-4 flex items-center justify-between gap-2">
+          <button
+            onClick={() => {
+              setLumpSum(true);
+              setStep("bill");
+            }}
+            className="text-xs text-gray-500 hover:text-gray-700"
+          >
+            Enter a lump-sum bill instead
+          </button>
+          <button
+            onClick={() => {
+              setLumpSum(false);
+              setStep("bill");
+            }}
+            disabled={lines.length === 0}
+            className="rounded-lg bg-brand-accent px-4 py-2 text-sm font-medium text-white transition-opacity duration-150 hover:opacity-90 disabled:opacity-40"
+          >
+            Next ({lines.length})
+          </button>
+        </div>
+      </Dialog>
+    );
+  }
 
   return (
-    <Dialog title="Record subcon bill" onClose={onClose}>
+    <Dialog title={existing ? "Edit subcon bill" : "Sub-contractor bill"} onClose={onClose}>
       <div className="grid gap-3 sm:grid-cols-2">
         <Field label="Contractor bill no.">
           <input value={billNo} onChange={(e) => setBillNo(e.target.value)} className="input" />
@@ -680,32 +824,130 @@ function BillDialog({
         <Field label="Bill date">
           <DatePicker value={billDate} onChange={setBillDate} />
         </Field>
-        <Field label="Bill amount" required>
-          <input value={amount} onChange={(e) => setAmount(e.target.value)} inputMode="decimal" className="input" autoFocus />
+      </div>
+
+      {lumpSum ? (
+        <div className="mt-3 grid gap-3 sm:grid-cols-2">
+          <Field label="Bill amount" required>
+            <input value={amount} onChange={(e) => setAmount(e.target.value)} inputMode="decimal" className="input" autoFocus />
+          </Field>
+          {w.items.length > 0 && (
+            <button onClick={() => { setLumpSum(false); setStep("pick"); }} className="self-end pb-2 text-left text-xs font-medium text-brand-accent hover:underline">
+              Bill item-wise instead
+            </button>
+          )}
+        </div>
+      ) : (
+        <div className="mt-4">
+          <div className="mb-2 flex items-center justify-between">
+            <span className="text-[11px] font-semibold tracking-wide text-gray-400 uppercase">Work order items</span>
+            <button onClick={() => setStep("pick")} className="text-xs font-medium text-brand-accent hover:underline">
+              + Select items
+            </button>
+          </div>
+          <div className="space-y-2">
+            {lines.map((l, idx) => {
+              const item = l.workOrderItemId != null ? w.items.find((i) => i.id === l.workOrderItemId) : null;
+              const left = item ? item.quantity - billedElsewhere(item.id) : null;
+              return (
+                <div key={`${l.workOrderItemId}-${idx}`} className="rounded-lg border border-gray-200 p-3">
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <div className="text-sm font-medium text-gray-800">{l.itemName}</div>
+                      {item && (
+                        <div className="text-[11px] text-gray-500">
+                          Billed: {billedElsewhere(item.id)} {item.unit ?? ""} · Un-billed: {Math.round((left ?? 0) * 1000) / 1000} {item.unit ?? ""}
+                        </div>
+                      )}
+                    </div>
+                    <button onClick={() => setLines((ls) => ls.filter((_, i) => i !== idx))} aria-label="Remove item" className="rounded p-1 text-gray-300 hover:text-rose-500">
+                      <X size={14} />
+                    </button>
+                  </div>
+                  <div className="mt-2 grid grid-cols-3 gap-2">
+                    <Field label={`Quantity${l.unit ? ` (${l.unit})` : ""}`}>
+                      <input
+                        value={l.quantity}
+                        onChange={(e) => setLines((ls) => ls.map((x, i) => (i === idx ? { ...x, quantity: e.target.value } : x)))}
+                        inputMode="decimal"
+                        className="input"
+                      />
+                    </Field>
+                    <Field label="Unit rate (₹)">
+                      <input
+                        value={l.rate}
+                        onChange={(e) => setLines((ls) => ls.map((x, i) => (i === idx ? { ...x, rate: e.target.value } : x)))}
+                        inputMode="decimal"
+                        className="input"
+                      />
+                    </Field>
+                    <Field label="Amount">
+                      <div className="input bg-gray-50 tabular-nums">{inr(n(l.quantity) * n(l.rate))}</div>
+                    </Field>
+                  </div>
+                  {left != null && n(l.quantity) > left && (
+                    <p className="mt-1 text-[11px] text-amber-700">More than is left un-billed on the order.</p>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="mt-3 grid gap-3 sm:grid-cols-3">
+            <Field label="Tax %">
+              <input value={taxPercent} onChange={(e) => setTaxPercent(e.target.value)} inputMode="decimal" className="input" />
+            </Field>
+            <Field label="Discount (₹)">
+              <input value={discount} onChange={(e) => setDiscount(e.target.value)} inputMode="decimal" className="input" />
+            </Field>
+            <Field label="Additional charges (₹)">
+              <input value={charges} onChange={(e) => setCharges(e.target.value)} inputMode="decimal" className="input" />
+            </Field>
+          </div>
+        </div>
+      )}
+
+      <div className="mt-3 grid gap-3 sm:grid-cols-2">
+        <Field label="Deduction (₹)">
+          <input value={deduction} onChange={(e) => setDeduction(e.target.value)} inputMode="decimal" className="input" />
         </Field>
-        <Field label="Retention held">
+        <Field label="Deduction for">
+          <input value={deductionNote} onChange={(e) => setDeductionNote(e.target.value)} placeholder="TDS 2%, labour cess…" className="input" />
+        </Field>
+        <Field label="Retention held (₹)">
           <input value={retention} onChange={(e) => setRetention(e.target.value)} inputMode="decimal" className="input" />
         </Field>
-        <Field label="Material recovery">
+        <Field label="Material recovery (₹)">
           <input value={recovery} onChange={(e) => setRecovery(e.target.value)} inputMode="decimal" className="input" />
         </Field>
+      </div>
+      <div className="mt-3">
         <Field label="Note">
           <input value={note} onChange={(e) => setNote(e.target.value)} className="input" />
         </Field>
       </div>
 
-      <div className="mt-3 rounded-lg bg-gray-50 px-3 py-2 text-sm">
-        <div className="flex justify-between">
-          <span className="text-gray-600">Net payable</span>
-          <span className="font-semibold text-gray-900 tabular-nums">{inr(net)}</span>
-        </div>
-        <div className="mt-0.5 flex justify-between text-xs">
+      <dl className="mt-3 space-y-1 rounded-lg bg-gray-50 px-3 py-2 text-sm">
+        {!lumpSum && (
+          <>
+            <Row label="Item subtotal" value={inr(subtotal)} />
+            {n(discount) > 0 && <Row label="Discount" value={`− ${inr(n(discount))}`} />}
+            {n(charges) > 0 && <Row label="Additional charges" value={inr(n(charges))} />}
+            <Row label={`Tax ${n(taxPercent)}%`} value={inr(tax)} />
+          </>
+        )}
+        <Row label="Total amount" value={inr(total)} strong />
+        {n(deduction) > 0 && <Row label={deductionNote.trim() || "Deduction"} value={`− ${inr(n(deduction))}`} />}
+        {n(retention) > 0 && <Row label="Retention" value={`− ${inr(n(retention))}`} />}
+        {n(recovery) > 0 && <Row label="Material recovery" value={`− ${inr(n(recovery))}`} />}
+        <Row label="Net payable" value={inr(net)} strong />
+        <div className="flex justify-between text-xs">
           <span className="text-gray-500">Billed after this</span>
           <span className={`tabular-nums ${wouldExceed ? "font-medium text-rose-700" : "text-gray-500"}`}>
-            {inr(w.billedValue + n(amount))} of {inr(w.orderValue)}
+            {inr(billedBefore + total)} of {inr(w.orderValue)}
           </span>
         </div>
-      </div>
+      </dl>
       {wouldExceed && (
         <p className="mt-2 flex items-center gap-1.5 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
           <TriangleAlert size={12} className="shrink-0" /> This takes him past the order value. It will still save —
@@ -723,21 +965,44 @@ function BillDialog({
         <button
           onClick={() =>
             onSave({
+              id: existing?.id,
               billNo: billNo.trim() || null,
               billDate,
-              amount: n(amount),
+              amount: total,
               retention: n(retention),
               materialRecovery: n(recovery),
+              deduction: n(deduction),
+              deductionNote: deductionNote.trim() || null,
               note: note.trim() || null,
+              vyaparInvoiceId: existing?.vyaparInvoiceId ?? null,
+              ...(lumpSum
+                ? { lines: [] }
+                : {
+                    taxPercent: n(taxPercent),
+                    discount: n(discount),
+                    charges: n(charges),
+                    lines: lines
+                      .filter((l) => n(l.quantity) > 0)
+                      .map((l) => ({ workOrderItemId: l.workOrderItemId, itemName: l.itemName, unit: l.unit, quantity: n(l.quantity), rate: n(l.rate) })),
+                  }),
             })
           }
-          disabled={n(amount) <= 0}
+          disabled={!canSave}
           className="rounded-lg bg-brand-accent px-4 py-2 text-sm font-medium text-white transition-opacity duration-150 hover:opacity-90 disabled:opacity-40"
         >
           Save bill
         </button>
       </div>
     </Dialog>
+  );
+}
+
+function Row({ label, value, strong }: { label: string; value: string; strong?: boolean }) {
+  return (
+    <div className={`flex justify-between ${strong ? "font-semibold text-gray-900" : "text-gray-600"}`}>
+      <dt>{label}</dt>
+      <dd className="tabular-nums">{value}</dd>
+    </div>
   );
 }
 

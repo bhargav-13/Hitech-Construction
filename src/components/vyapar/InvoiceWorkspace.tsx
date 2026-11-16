@@ -176,7 +176,7 @@ export function InvoiceWorkspace({
     setError("");
     try {
       const st = await resubmitApproval(approvalType, inv.id);
-      if (!st) setError("Purchase orders have no published approval chain yet — set one up in Settings → Multi Level Approval.");
+      if (!st && !poChainActive) setError("Purchase orders have no published approval chain yet — set one up in Settings → Multi Level Approval.");
       await reloadApprovals();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Couldn't send this order for approval.");

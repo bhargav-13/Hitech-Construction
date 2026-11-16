@@ -13,7 +13,8 @@ import { BillShipDialog, type BillShip } from "@/components/BillShipDialog";
 // Aliased: `calc` below uses a local `qty` accumulator, and shadowing the formatter would be a trap.
 import { inr, qty as formatQty } from "@/lib/format";
 import { usePaymentTypeOptions, useBankAccountResolver } from "@/lib/bankScope";
-import { GST_RATE_OPTIONS, ITC_ELIGIBILITY, ITC_DEFAULT, gstCodeForPercent, gstPercent, gstRate } from "@/lib/gstRates";
+import { getTemplate } from "@/lib/docTemplates";
+import { gstRateOptions, promptGstRate, ITC_ELIGIBILITY, ITC_DEFAULT, gstCodeForPercent, gstPercent, gstRate } from "@/lib/gstRates";
 import { downloadInvoicePdf, getCachedFirmProfile } from "@/lib/vyaparExport";
 import {
   filledNote,
@@ -51,7 +52,7 @@ import {
 } from "@/components/files/ModuleAttachments";
 import { useProjects } from "@/lib/useProjects";
 import * as vyapar from "@/lib/vyaparApi";
-import { STATES_OF_SUPPLY } from "@/lib/vyaparApi";
+import { STATES_OF_SUPPLY, TERMS_TITLES, termsFormatsOf } from "@/lib/vyaparApi";
 import type { DocType, Invoice, Item, Party } from "@/lib/vyaparApi";
 import {
   ChevronDown,
@@ -113,8 +114,7 @@ function readFileAsDataUrl(file: File): Promise<string> {
 /** Attachments live inside the row the API sends, so keep them small enough to post. */
 const MAX_DOC_BYTES = 4 * 1024 * 1024;
 
-/** The heading printed above the terms block — Vyapar's "Title" dropdown. */
-const TERMS_TITLES = ["Terms and Conditions", "Sale Invoice", "Purchase Bill", "Note", "Declaration"];
+/** The heading printed above the terms block — Vyapar's "Title" dropdown (lib/vyaparApi). */
 
 /**
  * The prefixes configured for one document type in Settings → Transaction.
@@ -263,8 +263,9 @@ export function InvoiceBuilder({
   const isSaleSide = docType === "SALE" || docType === "ESTIMATE" || docType === "PROFORMA" || docType === "SALE_ORDER" || docType === "DELIVERY_CHALLAN";
   const showBillShip = isPurchaseOrder || isSaleSide;
   // Vyapar-23: the client doesn't put terms on purchase-side documents — they're the supplier's
-  // paper. Notes stay.
-  const showTerms = !isSupplierSide;
+  // paper. Notes stay. A purchase order is the exception (KAN-91 / KAN-95): it is *our* paper to the
+  // supplier, so it carries Terms & Conditions in place of Notes, and they print on the PDF.
+  const showTerms = !isSupplierSide || isPurchaseOrder;
   const noPayment = isQuote || isOrder || isChallan;
   // Vyapar drives purchase paid/unpaid from a "Paid" amount, not a cash/credit toggle.
   const noToggle = noPayment || isReturn || isPurchase;
@@ -392,10 +393,30 @@ export function InvoiceBuilder({
     shipSameAsBill: false,
   });
   const [addrOpen, setAddrOpen] = useState(false);
+  const initialTermsTitle = isPurchaseOrder ? "Terms and Conditions" : isPurchase ? "Purchase Bill" : "Sale Invoice";
+  // KAN-118: a new document starts with its title's predefined terms (Settings → Transaction).
   const [terms, setTerms] = useState(
-    existing?.terms ?? prefill?.terms ?? "Thank you for doing business with us."
+    () =>
+      existing?.terms ??
+      prefill?.terms ??
+      (termsFormatsOf(settings)[initialTermsTitle]?.trim() ||
+        (isPurchaseOrder ? "" : "Thank you for doing business with us."))
   );
-  const [termsTitle, setTermsTitle] = useState(isPurchase ? "Purchase Bill" : "Sale Invoice");
+  // A new PO starts from the Purchase Order template's default terms (Templates → Purchase Order).
+  useEffect(() => {
+    if (!isPurchaseOrder || existing?.terms || prefill?.terms) return;
+    let off = false;
+    getTemplate("PURCHASE_ORDER")
+      .then((t) => {
+        if (!off && t.defaultTerms.trim()) setTerms((cur) => (cur.trim() ? cur : t.defaultTerms));
+      })
+      .catch(() => {});
+    return () => {
+      off = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const [termsTitle, setTermsTitle] = useState(initialTermsTitle);
   /** Vyapar lets the round-off figure itself be nudged by hand. */
   const [roundOffOverride, setRoundOffOverride] = useState<number | null>(null);
   const [notes, setNotes] = useState(existing?.notes ?? prefill?.notes ?? "");
@@ -1656,7 +1677,12 @@ export function InvoiceBuilder({
                       onChange={(v) => setLine(idx, { taxCode: v })}
                       size="sm"
                       placeholder="Select"
-                      options={GST_RATE_OPTIONS}
+                      options={gstRateOptions(l.taxCode)}
+                      onCreate={() => {
+                        const code = promptGstRate();
+                        if (code) setLine(idx, { taxCode: code });
+                      }}
+                      createLabel="Add GST rate"
                     />
                     {isPurchase && (
                       <div className="mt-1">
@@ -1722,7 +1748,12 @@ export function InvoiceBuilder({
               <Field label="Title">
                 <Select
                   value={termsTitle}
-                  onChange={setTermsTitle}
+                  onChange={(t) => {
+                    setTermsTitle(t);
+                    // KAN-118: each title has its own predefined text (Settings → Transaction).
+                    const preset = termsFormatsOf(settings)[t];
+                    if (preset && preset.trim()) setTerms(preset);
+                  }}
                   size="sm"
                   options={TERMS_TITLES.map((t) => ({ value: t, label: t }))}
                 />
@@ -1736,11 +1767,14 @@ export function InvoiceBuilder({
             />
             </>
             )}
+            {/* A PO shows Terms instead of Notes; an old PO that already has notes keeps them visible. */}
+            {(!isPurchaseOrder || notes.trim() !== "") && (
             <div className={showTerms ? "mt-3" : ""}>
               <Field label="Notes">
                 <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} className="input resize-none" />
               </Field>
             </div>
+            )}
           </div>
 
           {/* Middle column — Payment Type / Reference No. / + Add Payment type, then the three

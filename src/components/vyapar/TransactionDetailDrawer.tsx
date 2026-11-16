@@ -69,6 +69,7 @@ export function TransactionDetailDrawer({
   linkedTitle = "Settled against",
   attachment,
   approval,
+  extra,
   onClose,
   onEdit,
   editLabel = "Edit",
@@ -90,6 +91,8 @@ export function TransactionDetailDrawer({
   attachment?: { name: string; href: string } | null;
   /** The approval block (ladder, trail, approve/reject), when this entry went through a chain. */
   approval?: React.ReactNode;
+  /** Anything else under the facts — attachments, notes. */
+  extra?: React.ReactNode;
   onClose: () => void;
   onEdit?: () => void;
   editLabel?: string;
@@ -244,6 +247,8 @@ export function TransactionDetailDrawer({
                 </div>
               ))}
             </dl>
+
+            {extra && <div className="mt-4 rounded-xl border border-gray-200 p-3">{extra}</div>}
 
             {attachment && (
               <button

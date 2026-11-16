@@ -61,6 +61,9 @@ export default function ItemsPage() {
   const [tab, setTab] = useState<Tab>("PRODUCTS");
   const [items, setItems] = useState<Item[]>([]);
   const [selectedId, setSelectedId] = useState<number | null>(null);
+  // KAN-119: tick several items and delete them together.
+  const [picked, setPicked] = useState<Set<number>>(new Set());
+  const [bulkDeleting, setBulkDeleting] = useState(false);
   const [ledger, setLedger] = useState<ItemLedgerRow[]>([]);
   const [ledgerLoading, setLedgerLoading] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -213,6 +216,26 @@ export default function ItemsPage() {
     } catch (err) {
       setError(err instanceof Error ? err.message : "Couldn't delete this item.");
     }
+  }
+
+  async function removePicked() {
+    const ids = [...picked];
+    if (!ids.length) return;
+    if (!confirm(`Delete ${ids.length} item${ids.length > 1 ? "s" : ""}? This can't be undone.`)) return;
+    setBulkDeleting(true);
+    setError("");
+    const failed: string[] = [];
+    for (const id of ids) {
+      try {
+        await vyapar.deleteItem(id);
+      } catch {
+        failed.push(items.find((i) => i.id === id)?.name ?? `#${id}`);
+      }
+    }
+    setBulkDeleting(false);
+    setPicked(new Set());
+    if (failed.length) setError(`Couldn't delete ${failed.length}: ${failed.slice(0, 5).join(", ")}${failed.length > 5 ? "…" : ""} — they are used on documents.`);
+    load();
   }
 
   // --- Category & Unit masters: mutations cascade into items so grouping stays correct. ---
@@ -486,7 +509,29 @@ export default function ItemsPage() {
                 )}
               </div>
 
+              {picked.size > 0 && (
+                <div className="flex items-center justify-between gap-2 border-b border-rose-100 bg-rose-50 px-3 py-2 text-xs">
+                  <span className="font-medium text-rose-700">{picked.size} selected</span>
+                  <div className="flex items-center gap-2">
+                    <button onClick={() => setPicked(new Set())} className="text-gray-500 hover:text-gray-700">Clear</button>
+                    <button
+                      onClick={() => void removePicked()}
+                      disabled={bulkDeleting}
+                      className="rounded-md bg-rose-600 px-2.5 py-1 font-semibold text-white hover:bg-rose-700 disabled:opacity-50"
+                    >
+                      {bulkDeleting ? "Deleting…" : "Delete selected"}
+                    </button>
+                  </div>
+                </div>
+              )}
               <div className="flex items-center justify-between border-b border-gray-100 bg-gray-50 px-3 py-1.5 text-[11px] font-medium tracking-wide text-gray-500 uppercase">
+                <input
+                  type="checkbox"
+                  aria-label="Select all"
+                  checked={filtered.length > 0 && filtered.every((i) => picked.has(i.id))}
+                  onChange={(e) => setPicked(e.target.checked ? new Set(filtered.map((i) => i.id)) : new Set())}
+                  className="mr-2 h-3.5 w-3.5 accent-cyan-600"
+                />
                 <button
                   type="button"
                   onClick={() => setListSort((s) => (s === "name-asc" ? "name-desc" : "name-asc"))}
@@ -511,14 +556,32 @@ export default function ItemsPage() {
                 {filtered.map((i) => {
                   const active = i.id === selectedId;
                   return (
-                    <button
+                    <div
                       key={i.id}
+                      role="button"
+                      tabIndex={0}
                       onClick={() => setSelectedId(i.id)}
-                      className={`flex w-full items-center justify-between gap-2 border-b border-gray-50 px-3 py-2.5 text-left transition-colors duration-150 last:border-b-0 ${
+                      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setSelectedId(i.id); } }}
+                      className={`flex w-full cursor-pointer items-center justify-between gap-2 border-b border-gray-50 px-3 py-2.5 text-left transition-colors duration-150 last:border-b-0 ${
                         active ? "bg-cyan-50" : "hover:bg-gray-50"
                       }`}
                     >
-                      <span className="min-w-0">
+                      <input
+                        type="checkbox"
+                        aria-label={`Select ${i.name}`}
+                        checked={picked.has(i.id)}
+                        onClick={(e) => e.stopPropagation()}
+                        onChange={(e) =>
+                          setPicked((prev) => {
+                            const next = new Set(prev);
+                            if (e.target.checked) next.add(i.id);
+                            else next.delete(i.id);
+                            return next;
+                          })
+                        }
+                        className="h-3.5 w-3.5 shrink-0 accent-cyan-600"
+                      />
+                      <span className="min-w-0 flex-1">
                         <span className={`block truncate text-sm ${active ? "font-medium text-brand-accent" : "text-gray-700"}`}>
                           {i.name}
                         </span>
@@ -535,7 +598,7 @@ export default function ItemsPage() {
                           {i.stockQty}
                         </span>
                       )}
-                    </button>
+                    </div>
                   );
                 })}
                 {filtered.length === 0 && (
@@ -775,11 +838,14 @@ export default function ItemsPage() {
       {(creating || editing) && (
         <ItemDialog
           existing={editing ?? undefined}
+          defaultService={tab === "SERVICES"}
           categories={categoryNames}
           units={masters.units}
           onClose={() => { setCreating(false); setEditing(null); }}
           onSaved={(saved, again) => {
             load();
+            // KAN-117: a service lands on the Services tab, a product on Products.
+            setTab(saved.isService ? "SERVICES" : "PRODUCTS");
             setSelectedId(saved.id);
             if (!again) { setCreating(false); setEditing(null); }
           }}

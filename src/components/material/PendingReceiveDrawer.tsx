@@ -40,7 +40,7 @@ export function PendingReceiveDrawer({
   onChanged?: () => void;
 }) {
   const can = useCan();
-  const canReceive = can("WAREHOUSE_STOCK:CREATE");
+  const canReceive = can(["WAREHOUSE_STOCK:CREATE", "PROJECT_MATERIAL:CREATE"]);
   const { projects } = useProjects();
   const [tab, setTab] = useState<"PO" | "TRANSFER">("PO");
   const [project, setProject] = useState(projectId ? String(projectId) : "");

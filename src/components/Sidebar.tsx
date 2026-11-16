@@ -29,6 +29,7 @@ import {
   PanelLeftOpen,
   LogOut,
   BadgeCheck,
+  LifeBuoy,
   LayoutTemplate,
 } from "lucide-react";
 import { NAV_ITEMS, NAV_BREAK_AFTER, NAV_MODULE, NAV_ANY_MODULE } from "@/lib/nav";
@@ -63,6 +64,7 @@ const ICONS: Record<string, React.ComponentType<{ size?: number; className?: str
   Audit: ScrollText,
   Vyapar: Receipt,
   Approvals: BadgeCheck,
+  Help: LifeBuoy,
   Templates: LayoutTemplate,
 };
 

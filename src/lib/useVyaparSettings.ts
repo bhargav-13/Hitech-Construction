@@ -31,6 +31,7 @@ const DEFAULTS: VyaparSettings = {
   ordersEnabled: true,
   deliveryChallanEnabled: true,
   prefixes: null,
+  termsFormats: null,
 };
 
 let cache: VyaparSettings | null = null;

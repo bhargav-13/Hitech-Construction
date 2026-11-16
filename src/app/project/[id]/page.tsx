@@ -77,7 +77,8 @@ const TAB_NEEDS: Partial<Record<Tab, Need>> = {
   Target: ["PROJECT_BOQ", "PROJECT_PROGRESS"],
   Transaction: "VYAPAR:VIEW",
   Party: "VYAPAR:VIEW",
-  Material: "WAREHOUSE:VIEW",
+  // KAN-121: its own Project feature now; Warehouse View still opens it.
+  Material: ["PROJECT_MATERIAL", "WAREHOUSE:VIEW"],
   Attendance: "PAYROLL_ATTENDANCE",
   Members: "PROJECT_MEMBERS",
   Files: "PROJECT_FILES:VIEW",
