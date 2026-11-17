@@ -7,7 +7,7 @@
 import { fig, shortDate, type PrintModel } from "./docPdf";
 import type { DocKind } from "./docTemplates";
 import type { Rfq } from "./procurementApi";
-import type { WorkOrder } from "./workOrderApi";
+import type { SubconBill, WorkOrder } from "./workOrderApi";
 import type { Invoice, Party } from "./vyaparApi";
 import { invoicePrintModel } from "./vyaparExport";
 
@@ -124,6 +124,88 @@ export function workOrderPrintModel(
     bank,
     terms: wo.terms,
     notes: wo.notes,
+  };
+}
+
+/**
+ * KAN-99: one subcontractor bill as its own PDF — the items billed (or the lump sum), then tax,
+ * retention, material recovery and deduction down to net payable. Printed in the Work Order design
+ * but without the order's terms and conditions, which belong to the order, not to each bill.
+ */
+export function subconBillPrintModel(
+  wo: WorkOrder,
+  bill: SubconBill,
+  opts: { project?: PlaceInfo | null; party?: Pick<Party, "gstin" | "phone" | "billingAddress"> | null } = {},
+): PrintModel {
+  const { project, party } = opts;
+  const lines = bill.lines ?? [];
+  const rows = lines.length
+    ? lines.map((l, i) => [
+        String(i + 1),
+        l.itemName,
+        `${fig(l.quantity, 3).replace(/\.?0+$/, "") || "0"} ${l.unit ?? ""}`.trim(),
+        fig(l.rate, 2).replace(/\.00$/, ""),
+        fig(l.amount ?? l.quantity * l.rate, 2),
+      ])
+    : [["1", bill.note?.trim() || `Running bill against ${wo.woNo}`, "", "", fig(bill.subtotal ?? bill.amount, 2)]];
+
+  const totals: PrintModel["totals"] = [];
+  const subtotal = bill.subtotal ?? (lines.length ? lines.reduce((t, l) => t + (l.amount ?? l.quantity * l.rate), 0) : bill.amount);
+  totals.push({ label: "Item Subtotal", value: `Rs. ${fig(subtotal)}` });
+  if (bill.discount) totals.push({ label: "Discount", value: `- Rs. ${fig(bill.discount)}` });
+  if (bill.charges) totals.push({ label: "Additional Charges", value: `Rs. ${fig(bill.charges)}` });
+  if (bill.taxAmount) totals.push({ label: `Tax (${bill.taxPercent ?? 0}%)`, value: `Rs. ${fig(bill.taxAmount)}` });
+  totals.push({ label: "Bill Amount", value: `Rs. ${fig(bill.amount)}`, strong: true });
+  if (bill.retention) totals.push({ label: "Less: Retention", value: `- Rs. ${fig(bill.retention)}` });
+  if (bill.materialRecovery) totals.push({ label: "Less: Material recovery", value: `- Rs. ${fig(bill.materialRecovery)}` });
+  if (bill.deduction)
+    totals.push({ label: `Less: ${bill.deductionNote?.trim() || "Deduction"}`, value: `- Rs. ${fig(bill.deduction)}` });
+  totals.push({ label: "Net Payable", value: `Rs. ${fig(bill.netPayable)}`, strong: true });
+
+  const bank: [string, string][] = [["Name", wo.bankAccountName || wo.vendorName]];
+  if (wo.bankAccountNumber) bank.push(["A/c No.", wo.bankAccountNumber]);
+  if (wo.bankIfsc) bank.push(["IFSC", wo.bankIfsc]);
+  if (wo.bankName) bank.push(["Bank", wo.bankName]);
+
+  return {
+    kind: "WORK_ORDER",
+    number: `${wo.woNo}-${bill.billNo || bill.id}`,
+    meta: [
+      ["Bill No:", bill.billNo || "—"],
+      ["Bill Date:", shortDate(bill.billDate)],
+      ["Work Order No:", wo.woNo],
+    ],
+    panels: [
+      {
+        rows: [
+          ["Subcontractor:", wo.vendorName],
+          ["GST:", party?.gstin || "N/A"],
+          ["Mobile:", party?.phone || wo.vendorPhone || "N/A"],
+          ["Address:", party?.billingAddress || "N/A"],
+        ],
+      },
+      {
+        rows: [
+          ["Project:", project?.name ?? "—"],
+          ["Site Address:", project?.address ?? "—"],
+          ["Work:", wo.title],
+        ],
+      },
+    ],
+    columns: [
+      { label: "S.No.", align: "left", width: 40 },
+      { label: "Item Name" },
+      { label: "Qty", align: "right", width: 90 },
+      { label: "Rate", align: "right", width: 70 },
+      { label: "Amount", align: "right", width: 90 },
+    ],
+    rows,
+    totals,
+    amountForWords: bill.netPayable,
+    bank,
+    // No terms: they are the order's, and the client asked for the bill without them.
+    terms: null,
+    notes: lines.length ? bill.note : null,
   };
 }
 

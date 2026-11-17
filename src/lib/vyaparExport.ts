@@ -855,9 +855,12 @@ export async function invoicePrintModel(
   if (shipPlace.length) addresses.push({ title: "Ship To", lines: shipPlace });
 
   const tax = splitTax(invoice.lines, firm, party, invoice.stateOfSupply);
+  // KAN-105: a Category column only when some line has one picked — otherwise it isn't printed.
+  const showCategory = invoice.lines.some((l) => l.category?.trim());
   const rows = invoice.lines.map((l, i) => [
     String(i + 1),
     l.itemName + (l.description ? `\n${l.description}` : ""),
+    ...(showCategory ? [l.category?.trim() || ""] : []),
     l.hsn?.trim() || hsnOf(l.itemId) || "",
     `${fmtQty(l.quantity)}${l.unit ? " " + l.unit : ""}`,
     rs(l.rate),
@@ -906,6 +909,7 @@ export async function invoicePrintModel(
     columns: [
       { label: "S.No.", align: "center", width: 34 },
       { label: "Item Name" },
+      ...(showCategory ? [{ label: "Category", width: 80 }] : []),
       { label: "HSN/SAC", align: "center", width: 60, key: "hsn" },
       { label: "Qty", align: "right", width: 64 },
       { label: "Rate", align: "right", width: 70 },

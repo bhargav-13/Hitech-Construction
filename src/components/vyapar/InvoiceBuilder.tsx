@@ -148,6 +148,8 @@ type LineDraft = {
   taxCode: string;
   /** Purchase lines only. */
   itcEligibility: string;
+  /** KAN-105: item category (Purchase Orders). Blank = none, and then it isn't printed. */
+  category: string;
 };
 
 const emptyLine = (isPurchase: boolean): LineDraft => ({
@@ -161,6 +163,7 @@ const emptyLine = (isPurchase: boolean): LineDraft => ({
   discountPercent: 0,
   taxCode: "NONE",
   itcEligibility: isPurchase ? ITC_DEFAULT : "",
+  category: "",
 });
 
 /**
@@ -495,6 +498,7 @@ export function InvoiceBuilder({
           // intra-state GST, which is what the old picker meant.
           taxCode: l.taxCode ?? gstCodeForPercent(l.taxPercent),
           itcEligibility: l.itcEligibility ?? (isPurchase ? ITC_DEFAULT : ""),
+          category: l.category ?? "",
         }))
       : prefill?.lines.length
         ? prefill.lines.map((l) => ({
@@ -510,6 +514,7 @@ export function InvoiceBuilder({
             discountPercent: 0,
             taxCode: l.taxCode,
             itcEligibility: isPurchase ? ITC_DEFAULT : "",
+            category: items.find((it) => it.id === l.itemId)?.category ?? "",
           }))
         : [emptyLine(isPurchase), emptyLine(isPurchase)]
   );
@@ -697,6 +702,7 @@ export function InvoiceBuilder({
           discountPercent: l.discountPercent ?? 0,
           taxCode: code,
           itcEligibility: isPurchase ? ITC_DEFAULT : "",
+          category: item?.category ?? "",
         };
       });
     if (newLines.length > 0) {
@@ -953,6 +959,15 @@ export function InvoiceBuilder({
     if (st) changeSupplyState(st);
   }
 
+  /** KAN-105: the item categories set up under Items, offered on each PO line. */
+  const categoryNames = useMemo(
+    () =>
+      [...new Set([...masters.categories, ...items.map((it) => (it.category ?? "").trim())].filter(Boolean))].sort((a, b) =>
+        a.localeCompare(b),
+      ),
+    [items, masters.categories],
+  );
+
   /** Choosing a catalogue item fills in its rate, unit and tax — the usual billing shortcut. */
   function applyItem(idx: number, item: Item) {
     setLine(idx, {
@@ -961,6 +976,8 @@ export function InvoiceBuilder({
       // Seeded, not linked: the line keeps its own copy so a later edit to the master doesn't
       // silently rewrite the HSN on an invoice that has already been issued.
       hsn: item.hsn ?? "",
+      // KAN-105: the item's category comes across; the buyer can change or clear it on the line.
+      category: item.category ?? "",
       unit: item.unit || "NONE",
       rate: isPurchase ? item.purchasePrice : item.salePrice,
       // The catalogue stores a bare rate, so read it as intra-state GST — the picker can be
@@ -1061,6 +1078,7 @@ export function InvoiceBuilder({
             taxCode: l.taxCode,
             // ITC is a claim on what you buy — a sale line has no such concept.
             itcEligibility: isPurchase ? l.itcEligibility || null : null,
+            category: isPurchaseOrder ? l.category.trim() || null : null,
           };
         }),
       };
@@ -1578,7 +1596,7 @@ export function InvoiceBuilder({
               {/* Vyapar groups the grid header: DISCOUNT and TAX each span a % and an Amount
                   column, so the two pairs read as one concept rather than four loose columns. */}
               <tr className="border-b border-gray-100 bg-gray-50 text-center text-[11px] font-medium tracking-wide text-gray-500 uppercase">
-                <th colSpan={6} className="px-2 pt-2" />
+                <th colSpan={isPurchaseOrder ? 7 : 6} className="px-2 pt-2" />
                 <th colSpan={2} className="border-l border-gray-200 px-2 pt-2">Discount</th>
                 <th colSpan={2} className="border-l border-gray-200 px-2 pt-2">Tax</th>
                 <th colSpan={2} className="px-2 pt-2" />
@@ -1591,6 +1609,7 @@ export function InvoiceBuilder({
                 {/* HSN/SAC sits beside the description because that's where the person entering a
                     line is already looking, and a GST invoice is not compliant without it. */}
                 <th className="w-24 min-w-[80px] px-2 py-2">HSN/SAC</th>
+                {isPurchaseOrder && <th className="w-36 min-w-[130px] px-2 py-2">Category</th>}
                 <th className="w-20 min-w-[72px] px-2 py-2 text-right">Qty</th>
                 <th className="w-24 min-w-[88px] px-2 py-2">Unit</th>
                 <th className="w-32 min-w-[110px] px-2 py-2 text-right">
@@ -1674,6 +1693,20 @@ export function InvoiceBuilder({
                       className="w-full rounded-md border border-gray-200 px-2 py-1 text-sm outline-none focus:border-cyan-500"
                     />
                   </td>
+                  {isPurchaseOrder && (
+                    <td className="px-2 py-1.5">
+                      <Select
+                        value={l.category}
+                        onChange={(v) => setLine(idx, { category: v })}
+                        size="sm"
+                        placeholder="—"
+                        options={[
+                          { value: "", label: "None" },
+                          ...[...new Set([...categoryNames, l.category].filter(Boolean))].map((c) => ({ value: c, label: c })),
+                        ]}
+                      />
+                    </td>
+                  )}
                   <Num value={l.quantity} onChange={(v) => setLine(idx, { quantity: v })} />
                   <td className="px-2 py-1.5">
                     <Select
@@ -1758,6 +1791,7 @@ export function InvoiceBuilder({
                   </button>
                 </td>
                 <td className="px-2 py-2 text-right text-xs text-gray-500">TOTAL</td>
+                {isPurchaseOrder && <td />}
                 <td className="px-2 py-2 text-right">{calc.qty}</td>
                 <td />
                 <td />

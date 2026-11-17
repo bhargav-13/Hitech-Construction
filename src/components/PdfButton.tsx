@@ -3,10 +3,11 @@
 import { useState } from "react";
 import { Download } from "lucide-react";
 import { renderDocPdf } from "@/lib/docPdf";
-import { rfqPrintModel, workOrderPrintModel, type PlaceInfo } from "@/lib/docModels";
+import { rfqPrintModel, subconBillPrintModel, workOrderPrintModel, type PlaceInfo } from "@/lib/docModels";
+import { getTemplate } from "@/lib/docTemplates";
 import { getVendor } from "@/lib/purchaseApi";
 import type { Rfq } from "@/lib/procurementApi";
-import type { WorkOrder } from "@/lib/workOrderApi";
+import type { SubconBill, WorkOrder } from "@/lib/workOrderApi";
 
 /**
  * "PDF" button for a designed document. The look comes from Templates; `build` only gathers the
@@ -61,4 +62,13 @@ export async function downloadRfqPdf(rfq: Rfq, project?: PlaceInfo | null) {
 export async function downloadWorkOrderPdf(w: WorkOrder, project?: PlaceInfo | null) {
   const party = await getVendor(w.vendorPartyId).catch(() => null);
   await renderDocPdf(workOrderPrintModel(w, { project, party }), { save: true });
+}
+
+/** KAN-99: one subcontractor bill, in the Work Order design, titled as a bill and without terms. */
+export async function downloadSubconBillPdf(w: WorkOrder, bill: SubconBill, project?: PlaceInfo | null) {
+  const [party, tpl] = await Promise.all([getVendor(w.vendorPartyId).catch(() => null), getTemplate("WORK_ORDER")]);
+  await renderDocPdf(subconBillPrintModel(w, bill, { project, party }), {
+    save: true,
+    template: { ...tpl, title: "SUBCONTRACTOR BILL" },
+  });
 }

@@ -159,20 +159,23 @@ export const itemImportConfig: ImportConfig = {
     { key: "location", label: "Location" },
     { key: "description", label: "Description" },
   ],
+  // KAN-119: specific headers before broad ones, and no bare substring that can hide inside another
+  // word — Vyapar's own export says "Opening stock quantity", and "openin-g-st-ock" contains "gst",
+  // which sent the quantity into Tax % and pushed the real Tax Rate out.
   guess: (header) => {
     const h = norm(header);
     if (has(h, "itemname") || h === "name" || h === "item") return "name";
-    if (has(h, "code", "barcode")) return "itemCode";
+    if (has(h, "barcode", "itemcode") || h === "code" || h === "sku") return "itemCode";
     if (has(h, "hsn", "sac")) return "hsn";
     if (h.includes("categ")) return "category";
-    if (h.includes("unit")) return "unit";
-    if (h.includes("saleprice") || h === "mrp" || h === "price") return "salePrice";
+    if (has(h, "inclusive", "conversion", "discount", "mrp", "stockvalue", "value")) return "skip";
+    // "Min Stock" / "Minimum stock quantity" contain "stock", so they go before Opening Quantity.
+    if (has(h, "minimum", "minstock", "lowstock", "alert", "reorder") || h.startsWith("min")) return "lowStockAlert";
+    if (has(h, "opening", "stock", "qty", "quantity")) return "openingQty";
+    if (has(h, "unit")) return "unit";
+    if (h.includes("saleprice") || h === "price" || h === "rate" || h === "salesprice") return "salePrice";
     if (has(h, "purchase", "cost")) return "purchasePrice";
-    if (has(h, "tax", "gst")) return "taxPercent";
-    // KAN-119: "Min Stock" contains "stock", so it must be matched before Opening Quantity —
-    // otherwise both headers claim openingQty and Min Stock's values land in the quantity.
-    if (has(h, "min", "low", "alert", "reorder")) return "lowStockAlert";
-    if (has(h, "opening", "qty", "quantity", "stock")) return "openingQty";
+    if (has(h, "tax", "gstrate", "gstpercent") || h === "gst" || h.startsWith("gst")) return "taxPercent";
     if (has(h, "location", "rack")) return "location";
     if (h.includes("desc")) return "description";
     return "skip";

@@ -18,7 +18,7 @@ import { stashPoDraft, vyaparUnit } from "@/lib/poHandoff";
 import * as wo from "@/lib/workOrderApi";
 import * as vyapar from "@/lib/vyaparApi";
 import { inr } from "@/lib/format";
-import { PdfButton, downloadWorkOrderPdf } from "@/components/PdfButton";
+import { PdfButton, downloadSubconBillPdf, downloadWorkOrderPdf } from "@/components/PdfButton";
 import { todayIST } from "@/lib/datetime";
 
 /**
@@ -301,6 +301,7 @@ export default function WorkOrderDetailPage({ params }: { params: Promise<{ id: 
               onEdit={(b) => setBilling(b)}
               onDelete={(billId) => run(() => wo.deleteSubconBill(w.id, billId))}
               onBook={bookInVyapar}
+              place={project ? { name: project.name, address: [project.address, project.city].filter(Boolean).join(", ") || null } : null}
             />
           )}
 
@@ -477,9 +478,11 @@ function BillsTab({
   onEdit,
   onDelete,
   onBook,
+  place,
 }: {
   w: wo.WorkOrder;
   busy: boolean;
+  place: { name: string | null; address: string | null } | null;
   onAdd: () => void;
   onEdit: (bill: wo.SubconBill) => void;
   onDelete: (billId: number) => void;
@@ -562,6 +565,7 @@ function BillsTab({
                     )}
                   </td>
                   <td className="flex items-center gap-0.5 px-2 py-2.5">
+                    <PdfButton size="sm" label="PDF" title="Download this bill as a PDF (without terms)" build={() => downloadSubconBillPdf(w, b, place)} />
                     <button
                       onClick={() => onEdit(b)}
                       disabled={busy}

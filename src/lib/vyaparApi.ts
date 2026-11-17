@@ -149,6 +149,8 @@ export interface InvoiceLine {
   taxCode: string | null;
   /** Purchase lines only — the input-tax-credit claim. See lib/gstRates.ts. */
   itcEligibility: string | null;
+  /** KAN-105: item category on a Purchase Order line; null = none (not printed). */
+  category?: string | null;
   taxAmount: number;
   amount: number;
 }
@@ -422,6 +424,7 @@ export interface InvoiceInput {
     taxPercent: number;
     taxCode?: string | null;
     itcEligibility?: string | null;
+    category?: string | null;
   }[];
 }
 

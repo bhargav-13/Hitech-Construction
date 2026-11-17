@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Check, ChevronLeft, ChevronRight, ClipboardList, Loader2, Lock, Plus, Trash2 } from "lucide-react";
+import { Check, ChevronLeft, ChevronRight, ClipboardList, Loader2, Lock, Plus, Search, Trash2, X } from "lucide-react";
 import { TaskopadShell } from "@/components/task/TaskopadShell";
 import { PeopleSelect, ProgressBar, UserAvatar } from "@/components/task/TaskBits";
 import { Drawer, DrawerField } from "@/components/Drawer";
@@ -163,6 +163,8 @@ export default function ChecklistPage() {
   const [year, setYear] = useState(now.getFullYear());
   const [monthIdx, setMonthIdx] = useState(now.getMonth());
   const [tab, setTab] = useState<ChecklistPeriod>("daily");
+  // KAN-123: find a routine by its name, note or the person it belongs to.
+  const [query, setQuery] = useState("");
   const { rows, scope, loading, error, reload, addRow, saveRow, removeRow, toggleTick } = useChecklist();
   const { users } = useUsers();
   const [selected, setSelected] = useState<string | null>(null);
@@ -192,7 +194,14 @@ export default function ChecklistPage() {
   }, [scope, people, manageable]);
   const view = selected ?? (hasTeam ? EVERYONE : meId);
 
-  const visibleRows = view === EVERYONE ? rows : rows.filter((r) => r.assigneeId === view);
+  const q = query.trim().toLowerCase();
+  const visibleRows = (view === EVERYONE ? rows : rows.filter((r) => r.assigneeId === view)).filter(
+    (r) =>
+      !q ||
+      r.name.toLowerCase().includes(q) ||
+      (r.note ?? "").toLowerCase().includes(q) ||
+      (people.find((p) => p.id === r.assigneeId)?.name ?? "").toLowerCase().includes(q),
+  );
   const tabRows = visibleRows.filter((r) => r.period === tab);
   const { boxes, navLabel } = boxesFor(tab, year, monthIdx, now);
   const atCurrent = boxes.some((b) => b.current);
@@ -333,6 +342,26 @@ export default function ChecklistPage() {
             </div>
           )}
 
+          <div className="relative w-full sm:w-56">
+            <Search size={14} className="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-gray-400" />
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search checklist"
+              aria-label="Search checklist"
+              className="w-full rounded-lg border border-gray-200 py-1.5 pr-7 pl-8 text-sm outline-none focus:border-cyan-500"
+            />
+            {query && (
+              <button
+                onClick={() => setQuery("")}
+                aria-label="Clear search"
+                className="absolute top-1/2 right-1.5 -translate-y-1/2 rounded p-0.5 text-gray-400 hover:text-gray-600"
+              >
+                <X size={13} />
+              </button>
+            )}
+          </div>
+
           {canAdd && (
             <button
               onClick={() => setEditing({ period: tab, row: null })}
@@ -343,7 +372,11 @@ export default function ChecklistPage() {
           )}
         </div>
 
-        {tabRows.length === 0 ? (
+        {tabRows.length === 0 && q ? (
+          <div className="rounded-xl border border-dashed border-gray-200 bg-white py-12 text-center text-sm text-gray-400">
+            No {PERIOD_LABEL[tab].toLowerCase()} routine matches &ldquo;{query.trim()}&rdquo;.
+          </div>
+        ) : tabRows.length === 0 ? (
           <EmptyState period={tab} canAdd={canAdd} onAdd={() => setEditing({ period: tab, row: null })} />
         ) : grid ? (
           <GridTable
