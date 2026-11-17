@@ -5,6 +5,7 @@ import Link from "next/link";
 import { VyaparShell, VyaparEmpty } from "@/components/vyapar/VyaparShell";
 import { PartyDialog } from "@/components/vyapar/PartyDialog";
 import { PartyImportDialog } from "@/components/vyapar/PartyImportDialog";
+import { DeletePartyDialog } from "@/components/vyapar/DeletePartyDialog";
 import { FilterTh, useColumnFilters } from "@/components/vyapar/ColumnFilter";
 import { RowMenu, RowMenuDivider, RowMenuItem } from "@/components/RowMenu";
 import { Spinner } from "@/components/Spinner";
@@ -242,15 +243,10 @@ export default function PartiesPage() {
       .sort((a, b) => b.members.length - a.members.length);
   }, [parties]);
 
-  async function remove(p: Party) {
-    if (!confirm(`Delete ${p.name}? This can't be undone.`)) return;
-    try {
-      await vyapar.deleteParty(p.id);
-      if (selectedId === p.id) setSelectedId(null);
-      load();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Couldn't delete this party.");
-    }
+  // Delete goes through a pop-up that first shows everything linked to the party.
+  const [deleting, setDeleting] = useState<Party | null>(null);
+  function remove(p: Party) {
+    setDeleting(p);
   }
 
   /** Jump from a group card into the Details tab, pre-filtered to that group. */
@@ -875,6 +871,17 @@ export default function PartiesPage() {
               setCreating(false);
               setEditing(null);
             }
+          }}
+        />
+      )}
+
+      {deleting && (
+        <DeletePartyDialog
+          party={deleting}
+          onClose={() => setDeleting(null)}
+          onDone={(deleted) => {
+            if (deleted && selectedId === deleting.id) setSelectedId(null);
+            load();
           }}
         />
       )}

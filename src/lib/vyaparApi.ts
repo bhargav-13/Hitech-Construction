@@ -321,6 +321,32 @@ export const deleteParty = (id: number) =>
 export const getPartyLedger = (id: number) =>
   apiRequest<PartyLedgerRow[]>(`${BASE}/parties/${id}/ledger`);
 /** Bulk create from an imported sheet. */
+/** One line of the delete pop-up: what goes, how many and, for money, how much. */
+export interface PartyLinkedCount {
+  key: string;
+  label: string;
+  count: number;
+  amount: number | null;
+}
+export interface PartyDeletePreview {
+  partyId: number;
+  partyName: string;
+  balance: number;
+  /** A staff member's payroll ledger — never deletable from Vyapar. */
+  staffLedger: boolean;
+  total: number;
+  linked: PartyLinkedCount[];
+  /** Other parties whose balance moves because a transfer with this one is deleted. */
+  affectedParties: { id: number; name: string; transfers: number; amount: number }[];
+}
+export const getPartyDeletePreview = (id: number) =>
+  apiRequest<PartyDeletePreview>(`${BASE}/parties/${id}/delete-preview`);
+/** Deletes the party and every linked record in one transaction (VYAPAR_PARTY_PURGE:DELETE). */
+export const deletePartyWithLinkedData = (id: number) =>
+  apiRequest<{ partyName: string; total: number; deleted: PartyLinkedCount[] }>(
+    `${BASE}/parties/${id}/with-linked-data`,
+    { method: "DELETE" },
+  );
 export const importParties = (rows: Partial<Party>[]) =>
   apiRequest<Party[]>(`${BASE}/parties/import`, { method: "POST", body: { rows } });
 
