@@ -9,7 +9,7 @@ import { Select } from "@/components/Select";
 import { DatePicker } from "@/components/DatePicker";
 import { useTableSort } from "@/lib/useTableSort";
 import { useTenderStore } from "@/lib/tenderStore";
-import { useTenderPrefs, DENSITY_CLASS } from "@/lib/tenderPrefs";
+import { useTenderPrefs, DENSITY_CLASS, type AppliedOutcome } from "@/lib/tenderPrefs";
 import { useCompanyProfile, bidFlags, worstFlag, FLAG_TONE_CLASS } from "@/lib/tenderProfile";
 import {
   STAGE_META,
@@ -339,9 +339,7 @@ export function TenderPipeline({ variant }: { variant: PipelineVariant }) {
   // Applied-only outcome filter — this is where Won and Lost tenders are isolated.
   // Sorting and Research: the client hides lapsed tenders in the sheet rather than closing them.
   const [lapsed, setLapsed] = useState<"ALL" | "LIVE" | "LAPSED">("ALL");
-  const [outcome, setOutcome] = useState<"ALL" | TenderStage>(
-    (params?.get("outcome") as TenderStage | null) ?? "ALL",
-  );
+  const [outcome, setOutcome] = useState<AppliedOutcome>((params?.get("outcome") as AppliedOutcome | null) ?? "ALL");
   // The open drawer is tracked by id and resolved against the live store, so a transition made
   // inside the drawer is reflected immediately. `deepLinkDismissed` lets ?open=<id> be closed
   // without the URL re-opening it on the next render.
@@ -396,7 +394,7 @@ export function TenderPipeline({ variant }: { variant: PipelineVariant }) {
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     return inScope.filter((t) => {
-      if (variant === "applied" && outcome !== "ALL" && t.stage !== outcome) return false;
+      if (variant === "applied" && outcome !== "ALL" && !matchesOutcome(t, outcome)) return false;
       if (variant !== "applied" && lapsed !== "ALL" && isLapsed(t) !== (lapsed === "LAPSED")) return false;
       if (dept !== "ALL" && t.department !== dept) return false;
       if (cls !== "ALL" && t.classReq !== cls) return false;
@@ -655,7 +653,10 @@ export function TenderPipeline({ variant }: { variant: PipelineVariant }) {
               ["ALL", "All"],
               ["APPLIED", "Live"],
               ["WON", "Won"],
+              ["COMPLETED", "Completed"],
               ["LOST", "Lost"],
+              ["CANCELLED", "Cancelled"],
+              ["RETENDERED", "Re-tendered"],
             ] as const).map(([key, label]) => (
               <button
                 key={key}
@@ -1302,4 +1303,15 @@ function RowActions({
       )}
     </RowMenu>
   );
+}
+
+/**
+ * KAN-96: Completed, Cancelled and Re-tendered are closing statuses on top of Won / Lost, so the
+ * Won and Lost tabs leave them out and each has its own tab.
+ */
+function matchesOutcome(t: Tender, outcome: AppliedOutcome): boolean {
+  const closed = t.status === "COMPLETED" || t.status === "CANCELLED" || t.status === "RETENDERED";
+  if (outcome === "COMPLETED" || outcome === "CANCELLED" || outcome === "RETENDERED") return t.status === outcome;
+  if (outcome === "WON" || outcome === "LOST") return t.stage === outcome && !closed;
+  return t.stage === outcome;
 }

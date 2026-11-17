@@ -142,7 +142,17 @@ export function ImportDialog({
     setFileName(file.name);
     setHeaders(rows[0]);
     setRows(rows.slice(1));
-    setMapping(rows[0].map(config.guess));
+    // One column per field: when two headers guess the same field, only the first keeps it, so a
+    // later column can never silently overwrite an earlier one's values.
+    const taken = new Set<string>();
+    setMapping(
+      rows[0].map((h) => {
+        const k = config.guess(h);
+        if (k === "skip" || taken.has(k)) return "skip";
+        taken.add(k);
+        return k;
+      }),
+    );
   }
 
   const dataRows = useMemo(() => (hasHeader ? rows : [headers, ...rows]), [hasHeader, rows, headers]);

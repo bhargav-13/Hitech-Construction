@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { getInvoices } from "@/lib/vyaparApi";
-import { Trash2 } from "lucide-react";
+import { Trash2, X } from "lucide-react";
+import { useAuthStore } from "@/lib/authStore";
 import { Drawer, DrawerField } from "@/components/Drawer";
 import { Select } from "@/components/Select";
 import type { ProjectOption } from "@/lib/useProjects";
@@ -51,7 +52,29 @@ export function BillShipDialog({
    * instead of typing or copying it each time. Read from the saved orders themselves — nothing
    * extra to keep in step, and it is the same list on every device.
    */
-  const [book, setBook] = useState<SavedAddress[]>([]);
+  const [all, setAll] = useState<SavedAddress[]>([]);
+  // KAN-108: each user can remove addresses they don't use from their own list. Only hidden for
+  // that user (this browser) — the orders and everyone else's list are untouched.
+  const myId = useAuthStore((s) => s.user?.id);
+  const hiddenKey = `hitech.hiddenAddresses.${myId ?? "anon"}`;
+  const [hidden, setHidden] = useState<string[]>(() => {
+    try {
+      return JSON.parse(localStorage.getItem(hiddenKey) ?? "[]");
+    } catch {
+      return [];
+    }
+  });
+  const [manage, setManage] = useState(false);
+  const hide = (a: SavedAddress) => {
+    const next = [...new Set([...hidden, keyOf(a)])];
+    setHidden(next);
+    try {
+      localStorage.setItem(hiddenKey, JSON.stringify(next));
+    } catch {
+      /* private window — the list still updates for this visit */
+    }
+  };
+  const book = useMemo(() => all.filter((a) => !hidden.includes(keyOf(a))), [all, hidden]);
   useEffect(() => {
     let off = false;
     getInvoices("PURCHASE_ORDER")
@@ -66,11 +89,11 @@ export function BillShipDialog({
             const name = (a.name ?? "").trim();
             const address = (a.address ?? "").trim();
             if (!name && !address) continue;
-            const key = `${name.toLowerCase()}|${address.toLowerCase()}`;
+            const key = keyOf({ name, address, gstin: "" });
             if (!seen.has(key)) seen.set(key, { name, address, gstin: (a.gstin ?? "").trim() });
           }
         }
-        setBook([...seen.values()].sort((x, y) => x.name.localeCompare(y.name)));
+        setAll([...seen.values()].sort((x, y) => x.name.localeCompare(y.name)));
       })
       .catch(() => {});
     return () => {
@@ -142,6 +165,9 @@ export function BillShipDialog({
                   options={bookOptions}
                 />
               </DrawerField>
+            )}
+            {book.length > 0 && (
+              <ManageList open={manage} onToggle={() => setManage((m) => !m)} book={book} onHide={hide} />
             )}
             <DrawerField label="Name">
               <input
@@ -231,6 +257,9 @@ export function BillShipDialog({
                   />
                 </DrawerField>
               )}
+              {book.length > 0 && (
+                <ManageList open={manage} onToggle={() => setManage((m) => !m)} book={book} onHide={hide} />
+              )}
               <DrawerField label="Name">
                 <input
                   value={v.shipToName}
@@ -261,6 +290,50 @@ export function BillShipDialog({
         </section>
       </div>
     </Drawer>
+  );
+}
+
+const keyOf = (a: SavedAddress) => `${a.name.trim().toLowerCase()}|${a.address.trim().toLowerCase()}`;
+
+/** KAN-108: the saved addresses with a remove button each — removes from this user's list only. */
+function ManageList({
+  open,
+  onToggle,
+  book,
+  onHide,
+}: {
+  open: boolean;
+  onToggle: () => void;
+  book: SavedAddress[];
+  onHide: (a: SavedAddress) => void;
+}) {
+  return (
+    <div className="-mt-1">
+      <button type="button" onClick={onToggle} className="text-xs font-medium text-cyan-700 hover:underline">
+        {open ? "Done" : `Manage saved addresses (${book.length})`}
+      </button>
+      {open && (
+        <ul className="mt-2 max-h-56 divide-y divide-gray-100 overflow-y-auto rounded-lg border border-gray-200">
+          {book.map((a) => (
+            <li key={keyOf(a)} className="flex items-start gap-2 px-3 py-2 text-xs">
+              <div className="min-w-0 flex-1">
+                <div className="font-medium text-gray-800">{a.name || "—"}</div>
+                {a.address && <div className="truncate text-gray-500">{a.address}</div>}
+              </div>
+              <button
+                type="button"
+                onClick={() => onHide(a)}
+                title="Remove from my list"
+                className="rounded p-1 text-gray-400 hover:bg-rose-50 hover:text-rose-600"
+              >
+                <X size={14} />
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      {open && <p className="mt-1 text-[11px] text-gray-400">Removing only hides it from your own list.</p>}
+    </div>
   );
 }
 

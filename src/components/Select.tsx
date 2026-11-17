@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Check, ChevronDown, Plus } from "lucide-react";
+import { Check, ChevronDown, Plus, X } from "lucide-react";
 import { notifyFormTouched } from "@/lib/formDirty";
 
 export interface SelectOption {
@@ -16,6 +16,8 @@ export interface SelectOption {
    * ("Asked on RFQ-2026-007" above the suppliers who were). Never selectable or keyboard-reachable.
    */
   header?: boolean;
+  /** Shows a × on the row that calls the Select's `onRemove` — for user-added entries (KAN-114 / KAN-17). */
+  removable?: boolean;
 }
 
 /**
@@ -43,6 +45,7 @@ export function Select({
   icon,
   onCreate,
   createLabel = "Add new",
+  onRemove,
 }: {
   value: string;
   onChange: (value: string) => void;
@@ -61,6 +64,8 @@ export function Select({
    */
   onCreate?: () => void;
   createLabel?: string;
+  /** Called with an option's value when its × is clicked (only options marked `removable`). */
+  onRemove?: (value: string) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(0);
@@ -250,7 +255,23 @@ export function Select({
                   } ${isSelected ? "font-medium text-brand-accent" : "text-gray-700"}`}
                 >
                   <span className="truncate">{opt.label}</span>
-                  {isSelected && <Check size={14} className="shrink-0 text-brand-accent" />}
+                  <span className="flex shrink-0 items-center gap-1">
+                    {isSelected && <Check size={14} className="text-brand-accent" />}
+                    {onRemove && opt.removable && (
+                      <span
+                        role="button"
+                        aria-label={`Remove ${opt.label}`}
+                        title="Remove"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onRemove(opt.value);
+                        }}
+                        className="rounded p-0.5 text-gray-400 hover:bg-rose-50 hover:text-rose-600"
+                      >
+                        <X size={13} />
+                      </span>
+                    )}
+                  </span>
                 </button>
               );
             })

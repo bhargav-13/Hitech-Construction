@@ -64,9 +64,9 @@ const LIST_HREF: Record<BoardCol, string> = {
   RESEARCH: "/tender/research",
   APPLIED: "/tender/applied",
   WON: "/tender/applied?outcome=WON",
-  COMPLETED: "/tender/applied?outcome=WON",
+  COMPLETED: "/tender/applied?outcome=COMPLETED",
   LOST: "/tender/applied?outcome=LOST",
-  CANCELLED: "/tender/applied?outcome=LOST",
+  CANCELLED: "/tender/applied?outcome=CANCELLED",
 };
 
 /** Columns a card may be dropped into, with the status the drop stamps. */

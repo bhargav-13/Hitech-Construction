@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useAuthStore } from "@/lib/authStore";
 import { Drawer } from "@/components/Drawer";
 import { Select } from "@/components/Select";
 import { DatePicker } from "@/components/DatePicker";
@@ -14,7 +15,7 @@ import { BillShipDialog, type BillShip } from "@/components/BillShipDialog";
 import { inr, qty as formatQty } from "@/lib/format";
 import { usePaymentTypeOptions, useBankAccountResolver } from "@/lib/bankScope";
 import { getTemplate } from "@/lib/docTemplates";
-import { gstRateOptions, promptGstRate, ITC_ELIGIBILITY, ITC_DEFAULT, gstCodeForPercent, gstPercent, gstRate } from "@/lib/gstRates";
+import { gstRateOptions, promptGstRate, removeGstRate, percentOfCode, ITC_ELIGIBILITY, ITC_DEFAULT, gstCodeForPercent, gstPercent, gstRate } from "@/lib/gstRates";
 import { downloadInvoicePdf, getCachedFirmProfile } from "@/lib/vyaparExport";
 import {
   filledNote,
@@ -232,6 +233,8 @@ export function InvoiceBuilder({
   onApprovalChanged?: () => void;
 }) {
   const projectId = useVyaparProjectId(projectOverride);
+  // Re-read the GST picker after a user-added rate is removed (KAN-114).
+  const [, bumpRates] = useState(0);
   const { projects } = useProjects();
   const paymentTypeOptions = usePaymentTypeOptions();
   const bankAccountFor = useBankAccountResolver();
@@ -244,6 +247,29 @@ export function InvoiceBuilder({
   // shows up there and vice-versa — it used to be a hardcoded twelve, which is why the client
   // couldn't bill in anything the list didn't already know about.
   const { masters, addUnit } = useItemMasters();
+  /**
+   * KAN-17: each user can remove units they don't use from their own Unit dropdown — departments use
+   * different units. Hidden for that user only; items and saved documents keep their unit.
+   */
+  const myId = useAuthStore((s) => s.user?.id);
+  const hiddenUnitsKey = `hitech.hiddenUnits.${myId ?? "anon"}`;
+  const [hiddenUnits, setHiddenUnits] = useState<string[]>(() => {
+    try {
+      const raw = JSON.parse(localStorage.getItem(hiddenUnitsKey) ?? "[]");
+      return Array.isArray(raw) ? raw.map(String) : [];
+    } catch {
+      return [];
+    }
+  });
+  const hideUnit = (short: string) => {
+    const next = [...new Set([...hiddenUnits, short])];
+    setHiddenUnits(next);
+    try {
+      localStorage.setItem(hiddenUnitsKey, JSON.stringify(next));
+    } catch {
+      /* private window — hidden for this visit */
+    }
+  };
   const isPurchase = docType === "PURCHASE";
   // Estimates, proformas, sale orders and delivery challans are planning docs: they don't move stock
   // or party balance (see vyapar-service POSTED). So: no cash/credit toggle, no received amount.
@@ -859,24 +885,28 @@ export function InvoiceBuilder({
     const builtIn = new Set(DEFAULT_UNITS.map((u) => u.short));
     const used = new Set(items.map((it) => (it.unit ?? "").trim()).filter((u) => u && u !== "NONE"));
     const seen = new Set(["NONE"]);
-    const opts: { value: string; label: string; short?: string }[] = [{ value: "NONE", label: "Select Unit", short: "NONE" }];
+    const hidden = new Set(hiddenUnits);
+    const onLines = new Set(lines.map((l) => (l.unit ?? "").trim()));
+    const opts: { value: string; label: string; short?: string; removable?: boolean }[] = [{ value: "NONE", label: "Select Unit", short: "NONE" }];
     for (const u of masters.units) {
       const short = u.short.trim();
       if (!short || seen.has(short)) continue;
+      if (hidden.has(short) && !onLines.has(short)) continue;
       if (builtIn.has(short) && !used.has(short)) continue;
       seen.add(short);
       // The list reads "Bags (BAG)", as on the item form; the closed control shows just "BAG" so the
       // narrow grid cell doesn't overflow.
       const name = u.name.trim();
-      opts.push({ value: short, label: name && name.toUpperCase() !== short.toUpperCase() ? `${name} (${short})` : short, short });
+      opts.push({ value: short, label: name && name.toUpperCase() !== short.toUpperCase() ? `${name} (${short})` : short, short, removable: true });
     }
-    for (const short of [...used, ...lines.map((l) => (l.unit ?? "").trim())]) {
+    for (const short of [...used, ...onLines]) {
       if (!short || seen.has(short)) continue;
+      if (hidden.has(short) && !onLines.has(short)) continue;
       seen.add(short);
-      opts.push({ value: short, label: short, short });
+      opts.push({ value: short, label: short, short, removable: true });
     }
     return [...opts, { value: ADD_UNIT, label: "⊕ Add New Unit" }];
-  }, [masters.units, lines, items]);
+  }, [masters.units, lines, items, hiddenUnits]);
 
   /** A line on a catalogue item offers that item's unit (and whatever the line already holds). */
   function unitOptionsFor(l: LineDraft) {
@@ -1650,7 +1680,8 @@ export function InvoiceBuilder({
                       value={l.unit}
                       onChange={(v) => (v === ADD_UNIT ? setCreatingUnit(idx) : setLine(idx, { unit: v }))}
                       size="sm"
-                      options={unitOptionsFor(l)}
+                      options={unitOptionsFor(l).map((o) => ({ ...o, removable: o.removable && o.value !== l.unit }))}
+                      onRemove={hideUnit}
                     />
                   </td>
                   <Num value={l.rate} onChange={(v) => setLine(idx, { rate: v })} />
@@ -1683,6 +1714,10 @@ export function InvoiceBuilder({
                         if (code) setLine(idx, { taxCode: code });
                       }}
                       createLabel="Add GST rate"
+                      onRemove={(code) => {
+                        removeGstRate(percentOfCode(code));
+                        bumpRates((n) => n + 1);
+                      }}
                     />
                     {isPurchase && (
                       <div className="mt-1">

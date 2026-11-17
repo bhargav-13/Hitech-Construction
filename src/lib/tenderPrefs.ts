@@ -20,7 +20,7 @@ export interface SavedView {
   source: "ALL" | TenderSource;
   dept: string;
   cls: string;
-  outcome: "ALL" | TenderStage;
+  outcome: AppliedOutcome;
   search: string;
   sortKey?: string | null;
   sortDir?: "asc" | "desc";
@@ -65,3 +65,6 @@ export const DENSITY_CLASS: Record<RowDensity, { cell: string; head: string }> =
   comfortable: { cell: "px-4 py-2.5", head: "px-4 py-2" },
   compact: { cell: "px-3 py-1.5", head: "px-3 py-1.5" },
 };
+
+/** Applied list filter (KAN-96): a stage, or a closing status — Completed / Cancelled / Re-tendered. */
+export type AppliedOutcome = "ALL" | TenderStage | "COMPLETED" | "CANCELLED" | "RETENDERED";

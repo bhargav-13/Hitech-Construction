@@ -389,7 +389,16 @@ export function ProjectMaterials({ projectId }: { projectId: number }) {
                       </td>
                       <td className="px-3 py-2.5 text-right font-medium text-gray-800 tabular-nums">{fmt(r.received)}</td>
                       <td className="px-3 py-2.5 text-right text-gray-600 tabular-nums">{fmt(r.used)}</td>
-                      <td className={`px-3 py-2.5 text-right font-semibold tabular-nums ${r.stock > 0 ? "text-gray-900" : "text-gray-400"}`}>{fmt(r.stock)}</td>
+                      <td className="px-3 py-2.5 text-right">
+                        {(() => {
+                          const t = stockTone(r);
+                          return (
+                            <span title={t.hint} className={`inline-block rounded-md px-2 py-0.5 font-semibold tabular-nums ${t.cls}`}>
+                              {fmt(r.stock)}
+                            </span>
+                          );
+                        })()}
+                      </td>
                       {canMove && (
                         <td className="px-3 py-2.5">
                           <div className="flex justify-end gap-1.5">
@@ -416,6 +425,11 @@ export function ProjectMaterials({ projectId }: { projectId: number }) {
                 })}
               </tbody>
             </table>
+            <div className="flex flex-wrap items-center gap-3 border-t border-gray-100 px-4 py-2 text-[11px] text-gray-500">
+              <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-rose-500" /> Low — at or below minimum, or none left</span>
+              <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-amber-500" /> Running low</span>
+              <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-emerald-500" /> Enough</span>
+            </div>
           </div>
         )
       ) : ledger.length === 0 ? (
@@ -512,4 +526,20 @@ export function ProjectMaterials({ projectId }: { projectId: number }) {
       )}
     </div>
   );
+}
+
+/**
+ * KAN-104: three colours on Current stock, as on Onsite. Red when it is at or below the item's
+ * minimum (Min stock / reorder level) or nothing is left of what came in; amber when it is within
+ * 50% above the minimum (or, with no minimum set, under 20% of what was received); green otherwise.
+ */
+function stockTone(r: { stock: number; received: number; setting?: { reorderLevel?: number | null } }): { cls: string; hint: string } {
+  const min = Number(r.setting?.reorderLevel ?? 0) || 0;
+  const red = { cls: "bg-rose-50 text-rose-700", hint: min > 0 ? `Low — at or below the minimum of ${min}` : "None left" };
+  const amber = { cls: "bg-amber-50 text-amber-700", hint: "Running low" };
+  const green = { cls: "bg-emerald-50 text-emerald-700", hint: "Enough in stock" };
+  if (r.stock <= 0 && r.received <= 0 && min <= 0) return { cls: "text-gray-400", hint: "Nothing received yet" };
+  if (r.stock <= 0 || (min > 0 && r.stock <= min)) return red;
+  if (min > 0 ? r.stock <= min * 1.5 : r.received > 0 && r.stock < r.received * 0.2) return amber;
+  return green;
 }

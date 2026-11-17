@@ -111,8 +111,10 @@ export const itemImportConfig: ImportConfig = {
     if (h.includes("saleprice") || h === "mrp" || h === "price") return "salePrice";
     if (has(h, "purchase", "cost")) return "purchasePrice";
     if (has(h, "tax", "gst")) return "taxPercent";
-    if (has(h, "opening", "qty", "stock")) return "openingQty";
-    if (h.includes("min")) return "lowStockAlert";
+    // KAN-119: "Min Stock" contains "stock", so it must be matched before Opening Quantity —
+    // otherwise both headers claim openingQty and Min Stock's values land in the quantity.
+    if (has(h, "min", "low", "alert", "reorder")) return "lowStockAlert";
+    if (has(h, "opening", "qty", "quantity", "stock")) return "openingQty";
     if (has(h, "location", "rack")) return "location";
     if (h.includes("desc")) return "description";
     return "skip";

@@ -89,14 +89,37 @@ export function addGstRate(percent: number): string {
   return `GST@${p}%`;
 }
 
-/** Picker options: defaults, user-added rates, and the current value even if it is no longer listed. */
-export function gstRateOptions(current?: string | null): { value: string; label: string }[] {
+/** KAN-114: forget a user-added rate. Lines already saved with it keep their tax. */
+export function removeGstRate(percent: number): void {
+  try {
+    localStorage.setItem(EXTRA_KEY, JSON.stringify(extraGstRates().filter((p) => p !== percent)));
+  } catch {
+    /* private window */
+  }
+}
+
+/** The percent behind a code (`GST@5%` / `IGST@5%` / `5`). */
+export function percentOfCode(code: string): number {
+  return Number(String(code).replace(/^[A-Z]*@?/, "").replace("%", "")) || 0;
+}
+
+/**
+ * Picker options: defaults, user-added rates (marked removable — KAN-114), and the current value
+ * even if it is no longer listed.
+ */
+export function gstRateOptions(current?: string | null): { value: string; label: string; removable?: boolean }[] {
   const codes = [...PICKER_CODES];
+  const added = new Set<string>();
   for (const p of extraGstRates()) {
-    for (const c of [`IGST@${p}%`, `GST@${p}%`]) if (!codes.includes(c)) codes.splice(codes.length - 1, 0, c);
+    for (const c of [`IGST@${p}%`, `GST@${p}%`]) {
+      if (!codes.includes(c)) {
+        codes.splice(codes.length - 1, 0, c);
+        added.add(c);
+      }
+    }
   }
   if (current && !codes.includes(current) && gstRate(current)) codes.push(current);
-  return codes.map((c) => ({ value: c, label: c }));
+  return codes.map((c) => ({ value: c, label: c, removable: added.has(c) && c !== current }));
 }
 
 /** Ask for a new GST rate (KAN-114: "if user wants to add something user should add this"). */
