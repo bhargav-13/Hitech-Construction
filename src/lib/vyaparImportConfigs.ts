@@ -28,33 +28,86 @@ export const partyImportConfig: ImportConfig = {
     { key: "gstin", label: "GSTIN" },
     { key: "gstType", label: "GST Type" },
     { key: "state", label: "State" },
+    { key: "city", label: "City" },
     { key: "billingAddress", label: "Billing Address" },
     { key: "shippingAddress", label: "Shipping Address" },
     { key: "partyGroup", label: "Party Group" },
-    { key: "openingBalance", label: "Opening Balance", numeric: true },
+    { key: "openingBalance", label: "Opening Balance (+ receivable / − payable)", numeric: true },
+    { key: "payableBalance", label: "Payable Balance (you owe them)", numeric: true },
+    { key: "openingDate", label: "Opening Date (As of)" },
     { key: "creditLimit", label: "Credit Limit", numeric: true },
+    { key: "field1", label: "Additional Field 1" },
+    { key: "field2", label: "Additional Field 2" },
+    { key: "field3", label: "Additional Field 3" },
+    { key: "field4", label: "Additional Field 4" },
   ],
+  // KAN-102: every column a party sheet usually carries has a home, so nothing in the Excel is left
+  // behind. Specific headers are checked before broad ones ("GST Type" is not the Party Type,
+  // "Payable Balance" is not the opening balance, "Billing State" is not the address).
   guess: (header) => {
     const h = norm(header);
-    if (has(h, "partyname", "customer", "supplier") || h === "name") return "name";
-    if (h.includes("type")) return "partyType";
-    if (has(h, "phone", "mobile", "contact")) return "phone";
+    if (has(h, "gsttype", "gsttreatment", "registrationtype")) return "gstType";
+    if (has(h, "gstin", "gstno", "gstnumber") || h === "gst") return "gstin";
+    if (has(h, "partytype", "customertype", "type")) return "partyType";
+    if (has(h, "partygroup", "group")) return "partyGroup";
+    if (has(h, "partyname", "customername", "suppliername", "vendorname") || h === "name" || h === "party") return "name";
+    if (has(h, "phone", "mobile", "contactno", "contactnumber")) return "phone";
     if (h.includes("email")) return "email";
-    if (h.includes("gstin") || h === "gst") return "gstin";
-    if (h.includes("gsttype")) return "gstType";
-    if (h.includes("state")) return "state";
-    if (h.includes("shipping")) return "shippingAddress";
+    if (has(h, "state", "placeofsupply")) return "state";
+    if (has(h, "city", "town")) return "city";
+    if (has(h, "shipping", "delivery")) return "shippingAddress";
     if (has(h, "address", "billing")) return "billingAddress";
-    if (h.includes("group")) return "partyGroup";
-    if (has(h, "opening", "balance")) return "openingBalance";
+    if (has(h, "payable", "topay", "youowe")) return "payableBalance";
+    if (has(h, "asof", "openingdate", "balancedate") || h === "date") return "openingDate";
+    if (has(h, "opening", "balance", "receivable", "toreceive")) return "openingBalance";
     if (has(h, "credit", "limit")) return "creditLimit";
+    const extra = /^(additional|custom)?field([1-4])$/.exec(header.toLowerCase().replace(/[^a-z0-9]/g, ""));
+    if (extra) return `field${extra[2]}`;
+    if (has(h, "customer", "supplier", "vendor")) return "name";
     return "skip";
   },
-  coerce: (key, value) => (key === "partyType" ? (/supp|vendor/i.test(value) ? "SUPPLIER" : "CUSTOMER") : undefined),
+  coerce: (key, value) =>
+    key === "partyType"
+      ? /supp|vendor|purchase/i.test(value)
+        ? "SUPPLIER"
+        : "CUSTOMER"
+      : key === "openingDate"
+        ? toIsoDate(value)
+        : undefined,
   template: {
     name: "party-import-template",
-    head: ["Party Name", "Party Type", "Phone Number", "Email", "GSTIN", "State", "Billing Address", "Opening Balance"],
-    row: ["Acme Traders", "Customer", "9876543210", "acme@example.com", "24ABCDE1234F1Z5", "Gujarat", "Rajkot", "0"],
+    head: [
+      "Party Name",
+      "Party Type",
+      "Phone Number",
+      "Email",
+      "GSTIN",
+      "GST Type",
+      "State",
+      "City",
+      "Billing Address",
+      "Shipping Address",
+      "Party Group",
+      "Opening Balance",
+      "As Of Date",
+      "Credit Limit",
+    ],
+    row: [
+      "Acme Traders",
+      "Customer",
+      "9876543210",
+      "acme@example.com",
+      "24ABCDE1234F1Z5",
+      "Registered Business - Regular",
+      "Gujarat",
+      "Rajkot",
+      "Main Road, Rajkot",
+      "Site 4, Morbi",
+      "Contractors",
+      "0",
+      "01/04/2026",
+      "0",
+    ],
   },
   preview: [
     { key: "name", label: "Name" },
@@ -66,7 +119,12 @@ export const partyImportConfig: ImportConfig = {
   commit: async (records, projectId) => {
     // Imported parties join the directory of whatever project was in scope, matching what the
     // Add Party form does.
-    const rows = (records as Partial<vyapar.Party>[]).map((r) => ({ ...r, projectId: projectId ?? null }));
+    // A "Payable" column is money we owe them — fold it into the one signed opening balance.
+    const rows = (records as (Partial<vyapar.Party> & { payableBalance?: number })[]).map(({ payableBalance, ...r }) => ({
+      ...r,
+      openingBalance: (Number(r.openingBalance) || 0) - (Number(payableBalance) || 0),
+      projectId: projectId ?? null,
+    }));
     try {
       return (await vyapar.importParties(rows)).length;
     } catch {

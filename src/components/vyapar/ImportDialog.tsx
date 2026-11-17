@@ -208,6 +208,17 @@ export function ImportDialog({
 
   const validCount = records.length;
 
+  // KAN-102: say out loud what will NOT come across, so nothing in the sheet is lost silently —
+  // columns left on "Don't import" that actually hold data, and rows with no required value.
+  const unusedCols = useMemo(
+    () =>
+      headers
+        .map((h, i) => ({ h: h || `Column ${i + 1}`, i }))
+        .filter(({ i }) => (mapping[i] ?? "skip") === "skip" && dataRows.some((r) => (r[i] ?? "").trim())),
+    [headers, mapping, dataRows],
+  );
+  const blankRows = reqIdx === -1 ? 0 : dataRows.filter((r) => !(r[reqIdx] ?? "").trim()).length;
+
   const preview = useMemo(() => {
     if (reqIdx === -1) return [];
     return dataRows.slice(0, 8).map((r) => {
@@ -314,6 +325,16 @@ export function ImportDialog({
                     </div>
                   ))}
                 </div>
+                {unusedCols.length > 0 && (
+                  <div className="mt-2 flex items-start gap-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700">
+                    <AlertTriangle size={13} className="mt-0.5 shrink-0" />
+                    <span>
+                      {unusedCols.length === 1 ? "This column has data but" : "These columns have data but"} will not be
+                      imported: <strong>{unusedCols.map((c) => c.h).join(", ")}</strong>. Pick a field for{" "}
+                      {unusedCols.length === 1 ? "it" : "them"} above if you need it.
+                    </span>
+                  </div>
+                )}
                 {reqIdx === -1 && (
                   <p className="mt-2 text-xs text-rose-600">
                     Map one column to <strong>{config.requiredLabel}</strong> to continue.
@@ -326,6 +347,11 @@ export function ImportDialog({
             {preview.length > 0 && (
               <section className="animate-fade-in">
                 <Step n={3} title={`Preview — ${validCount} ${config.entityNoun} will be imported`} />
+                {blankRows > 0 && (
+                  <p className="-mt-1 mb-2 text-xs text-amber-700">
+                    {blankRows} row{blankRows === 1 ? "" : "s"} skipped — no {config.requiredLabel}.
+                  </p>
+                )}
                 <div className="overflow-x-auto rounded-xl border border-gray-200">
                   <table className="w-full min-w-[560px] border-collapse text-sm">
                     <thead>
