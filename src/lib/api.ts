@@ -1313,7 +1313,8 @@ export interface ApprovalInboxItem {
 }
 
 /** `module: "vyapar"` narrows to Vyapar's own documents (Vyapar → Approvals). */
-export function getApprovalInbox(scope: "mine" | "raised" | "all" = "mine", module?: "vyapar") {
+/** scope "approved" (KAN-126): requests the caller approved a step of, whatever their status now. */
+export function getApprovalInbox(scope: "mine" | "raised" | "all" | "approved" = "mine", module?: "vyapar") {
   return request<ApprovalInboxItem[]>(`/api/v1/approvals/inbox?scope=${scope}${module ? `&module=${module}` : ""}`);
 }
 

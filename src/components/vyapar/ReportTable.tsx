@@ -161,12 +161,8 @@ export function ReportTable<T>({
         </div>
       </div>
 
-      {sorted.length === 0 ? (
-        <VyaparEmpty
-          icon={FileText}
-          title={rows.length === 0 ? "Nothing in this range" : "Nothing matches these filters"}
-          hint={rows.length === 0 ? "Adjust the date filter to see more." : "Clear a filter to widen the report."}
-        />
+      {rows.length === 0 ? (
+        <VyaparEmpty icon={FileText} title="Nothing in this range" hint="Adjust the date filter to see more." />
       ) : (
         <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white">
           <table className="w-full border-collapse text-sm" style={{ minWidth }}>
@@ -191,6 +187,23 @@ export function ReportTable<T>({
               </tr>
             </thead>
             <tbody>
+              {/* KAN-127: the header stays so a filter that matches nothing can be cleared. */}
+              {sorted.length === 0 && (
+                <tr>
+                  <td colSpan={columns.length} className="px-4 py-12 text-center">
+                    <div className="text-sm font-medium text-gray-600">Nothing matches these filters</div>
+                    <button
+                      onClick={() => {
+                        clearAll();
+                        setQ("");
+                      }}
+                      className="mt-3 rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-600 hover:border-brand-accent hover:text-brand-accent"
+                    >
+                      Clear filters
+                    </button>
+                  </td>
+                </tr>
+              )}
               {sorted.map((r, ri) => {
                 const href = rowHref?.(r) ?? null;
                 return (

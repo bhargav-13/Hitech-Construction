@@ -287,7 +287,7 @@ export function InvoiceWorkspace({
     }),
     []
   );
-  const { filtered, filters, setFilter, options: filterOptions } = useColumnFilters(rows, columns);
+  const { filtered, filters, setFilter, clearAll, options: filterOptions } = useColumnFilters(rows, columns);
 
   // Sortable columns — defaults to newest first, like Vyapar's own lists.
   const { sorted, sortKey, sortDir, toggle } = useTableSort<Invoice>(
@@ -616,17 +616,15 @@ export function InvoiceWorkspace({
         <div className="flex min-h-[240px] items-center justify-center gap-2 rounded-xl border border-dashed border-gray-300 bg-white text-sm text-gray-400">
           <Spinner size={16} className="text-brand-accent" /> Loading…
         </div>
-      ) : filtered.length === 0 ? (
+      ) : invoices.length === 0 ? (
         <VyaparEmpty
           icon={FileText}
-          title={invoices.length === 0 ? `No ${title.toLowerCase()} yet` : "Nothing matches"}
-          hint={invoices.length === 0 ? "Create your first document to start billing." : "Try a different search or filter."}
+          title={`No ${title.toLowerCase()} yet`}
+          hint="Create your first document to start billing."
           action={
-            invoices.length === 0 ? (
-              <button onClick={() => setCreating(true)} className={`rounded-lg px-4 py-2 text-sm font-medium text-white ${addBtn}`}>
-                + Add {noun}
-              </button>
-            ) : null
+            <button onClick={() => setCreating(true)} className={`rounded-lg px-4 py-2 text-sm font-medium text-white ${addBtn}`}>
+              + Add {noun}
+            </button>
           }
         />
       ) : (
@@ -650,6 +648,25 @@ export function InvoiceWorkspace({
               </tr>
             </thead>
             <tbody>
+              {/* KAN-127: a filter that matches nothing keeps the header (and its filters) on screen,
+                  so the filter can be changed or cleared instead of the whole table vanishing. */}
+              {sorted.length === 0 && (
+                <tr>
+                  <td colSpan={20} className="px-4 py-12 text-center">
+                    <div className="text-sm font-medium text-gray-600">Nothing matches</div>
+                    <div className="mt-1 text-xs text-gray-400">No entries for this search or filter.</div>
+                    <button
+                      onClick={() => {
+                        clearAll();
+                        setSearch("");
+                      }}
+                      className="mt-3 rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-600 hover:border-brand-accent hover:text-brand-accent"
+                    >
+                      Clear filters
+                    </button>
+                  </td>
+                </tr>
+              )}
               {sorted.map((i) => (
                 <tr
                   key={i.id}

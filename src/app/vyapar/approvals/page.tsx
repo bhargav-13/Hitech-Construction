@@ -12,7 +12,7 @@ import { formatDateTimeIST } from "@/lib/datetime";
 import { inr } from "@/lib/format";
 import { ArrowUpRight, BadgeCheck, Check, ChevronDown, ChevronRight, Search, X } from "lucide-react";
 
-type Scope = "mine" | "raised" | "all";
+type Scope = "mine" | "raised" | "all" | "approved";
 
 /**
  * Vyapar → Approvals: every Vyapar document going through a ladder in Settings → Multi Level
@@ -109,6 +109,8 @@ export default function VyaparApprovalsPage() {
     { key: "mine", label: "Waiting on me" },
     { key: "raised", label: "Raised by me" },
     ...(canApprove ? [{ key: "all" as const, label: "All pending" }] : []),
+    // KAN-126: what I approved — and whether it is still climbing the ladder or fully approved.
+    { key: "approved", label: "Approved" },
   ];
 
   return (
@@ -179,7 +181,15 @@ export default function VyaparApprovalsPage() {
         ) : visible.length === 0 ? (
           <VyaparEmpty
             icon={BadgeCheck}
-            title={scope === "mine" ? "Nothing waiting on you" : scope === "raised" ? "You haven't raised any requests" : "Nothing pending"}
+            title={
+              scope === "mine"
+                ? "Nothing waiting on you"
+                : scope === "raised"
+                  ? "You haven't raised any requests"
+                  : scope === "approved"
+                    ? "You haven't approved anything yet"
+                    : "Nothing pending"
+            }
             hint="A document shows here when it's saved under a published approval chain."
           />
         ) : (
@@ -210,7 +220,12 @@ export default function VyaparApprovalsPage() {
                         {r.requestedByName && <span>Requested by {r.requestedByName}</span>}
                         {r.requestedAt && <span>{formatDateTimeIST(r.requestedAt)}</span>}
                         {r.state.status === "PENDING" && r.state.awaitingRoleNames && !actNow && (
-                          <span>Waiting on {r.state.awaitingRoleNames}</span>
+                          <span className={scope === "approved" ? "font-medium text-amber-700" : ""}>
+                            Waiting on {r.state.awaitingRoleNames}
+                          </span>
+                        )}
+                        {scope === "approved" && r.state.status === "APPROVED" && (
+                          <span className="font-medium text-emerald-700">Fully approved</span>
                         )}
                       </div>
                     </button>

@@ -198,7 +198,7 @@ export default function PartiesPage() {
     }),
     []
   );
-  const { filtered: ledgerFiltered, filters: ledgerFilters, setFilter: setLedgerFilter } =
+  const { filtered: ledgerFiltered, filters: ledgerFilters, setFilter: setLedgerFilter, clearAll: clearLedgerFilters } =
     useColumnFilters(ledgerRows, ledgerColumns);
 
   // Sortable ledger. Type/Number/Date sort as text; Total/Balance numerically.
@@ -786,7 +786,7 @@ export default function PartiesPage() {
                     <div className="flex min-h-[160px] items-center justify-center gap-2 text-sm text-gray-400">
                       <Spinner size={14} className="text-brand-accent" /> Loading ledger…
                     </div>
-                  ) : sortedLedger.length === 0 ? (
+                  ) : ledger.length === 0 ? (
                     <div className="px-4 py-12 text-center text-sm text-gray-400">
                       No transactions for this party yet.
                     </div>
@@ -806,6 +806,23 @@ export default function PartiesPage() {
                           </tr>
                         </thead>
                         <tbody>
+                          {/* KAN-127: a filter that matches nothing keeps the header so it can be cleared. */}
+                          {sortedLedger.length === 0 && (
+                            <tr>
+                              <td colSpan={10} className="px-4 py-10 text-center">
+                                <div className="text-sm text-gray-500">No transactions match this search, date or filter.</div>
+                                <button
+                                  onClick={() => {
+                                    clearLedgerFilters();
+                                    setLedgerSearch("");
+                                  }}
+                                  className="mt-3 rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-600 hover:border-brand-accent hover:text-brand-accent"
+                                >
+                                  Clear filters
+                                </button>
+                              </td>
+                            </tr>
+                          )}
                           {sortedLedger.map((r) => {
                             const href = partyLedgerHref(r);
                             return (
