@@ -10,7 +10,6 @@ import { useAuthStore } from "@/lib/authStore";
 import {
   QUERY_CATEGORIES,
   getAllQueries,
-  getHrPeople,
   getMyQueries,
   getQuery,
   getQueryMedia,
@@ -19,7 +18,6 @@ import {
   setQueryStatus,
   deleteQuery,
   translateText,
-  type HrPersonApi,
   type MessageBody,
   type QueryApi,
   type QueryLanguage,
@@ -182,12 +180,7 @@ export function QueryDesk({ mode }: { mode: "me" | "hr" }) {
 function NewQuery({ onCancel, onRaised }: { onCancel: () => void; onRaised: (q: QueryApi) => void }) {
   const [subject, setSubject] = useState("");
   const [category, setCategory] = useState(QUERY_CATEGORIES[0]);
-  const [to, setTo] = useState("");
-  const [hr, setHr] = useState<HrPersonApi[]>([]);
   const [error, setError] = useState("");
-  useEffect(() => {
-    getHrPeople().then(setHr).catch(() => setHr([]));
-  }, []);
 
   return (
     <div className="space-y-4 rounded-xl border border-gray-200 bg-white p-4">
@@ -204,14 +197,7 @@ function NewQuery({ onCancel, onRaised }: { onCancel: () => void; onRaised: (q: 
           <span className="mb-1 block text-xs font-medium text-gray-500">About</span>
           <Select value={category} onChange={setCategory} options={QUERY_CATEGORIES.map((c) => ({ value: c, label: c }))} />
         </label>
-        <label className="block">
-          <span className="mb-1 block text-xs font-medium text-gray-500">Send to</span>
-          <Select
-            value={to}
-            onChange={setTo}
-            options={[{ value: "", label: "HR team (everyone in HR)" }, ...hr.map((p) => ({ value: String(p.id), label: `${p.fullName} · ${p.roleName}` }))]}
-          />
-        </label>
+        {/* KAN-57: a query always goes to the HR team — no "Send to" choice for the staff member. */}
       </div>
       {error && <p className="text-sm text-rose-600">{error}</p>}
       <Composer
@@ -222,7 +208,7 @@ function NewQuery({ onCancel, onRaised }: { onCancel: () => void; onRaised: (q: 
             return false;
           }
           try {
-            onRaised(await raiseQuery({ subject: subject.trim(), category, assignedTo: to ? Number(to) : null, message: m }));
+            onRaised(await raiseQuery({ subject: subject.trim(), category, assignedTo: null, message: m }));
             return true;
           } catch (e) {
             setError(e instanceof Error ? e.message : "Couldn't send your query.");
