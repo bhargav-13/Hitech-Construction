@@ -55,6 +55,52 @@ const FONT = { small: 0.92, normal: 1, large: 1.1 } as const;
 /** jsPDF's standard fonts have no ₹ glyph; it prints as "¹" and breaks column widths. */
 const clean = (s: string | null | undefined) => String(s ?? "").replace(/₹\s?/g, "Rs. ");
 
+/** Text in a script jsPDF's standard fonts can't draw — Devanagari, Gujarati and the like. */
+const NON_LATIN = /[^\u0000-ɏ -⁯₹™ -ÿ]/;
+
+/**
+ * Wrap text to `widthPt` and draw each line onto a canvas with the browser's own fonts, which shape
+ * Indic scripts correctly. Returns one PNG per line, sized in points for jsPDF.
+ */
+function scriptLines(text: string, widthPt: number, sizePt: number, lineHeightPt: number) {
+  const SCALE = 4; // canvas pixels per point — keeps the text sharp when printed
+  const canvas = document.createElement("canvas");
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return [];
+  const fontCss = `${sizePt * SCALE}px "Nirmala UI", "Noto Sans Devanagari", "Noto Sans Gujarati", Mangal, Shruti, sans-serif`;
+  ctx.font = fontCss;
+  const maxPx = widthPt * SCALE;
+  const lines: string[] = [];
+  for (const para of text.replace(/\r/g, "").split("\n")) {
+    if (!para.trim()) {
+      lines.push("");
+      continue;
+    }
+    let cur = "";
+    for (const word of para.split(/(\s+)/)) {
+      const next = cur + word;
+      if (cur && ctx.measureText(next).width > maxPx) {
+        lines.push(cur.trimEnd());
+        cur = word.trimStart();
+      } else {
+        cur = next;
+      }
+    }
+    if (cur.trim()) lines.push(cur.trimEnd());
+  }
+  const hPx = Math.ceil(lineHeightPt * SCALE);
+  return lines.map((line) => {
+    canvas.width = Math.ceil(maxPx);
+    canvas.height = hPx;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.font = fontCss;
+    ctx.fillStyle = "rgb(60,60,60)";
+    ctx.textBaseline = "alphabetic";
+    ctx.fillText(line, 0, sizePt * SCALE * 0.95);
+    return { data: canvas.toDataURL("image/png"), w: widthPt, h: lineHeightPt };
+  });
+}
+
 function hexToRgb(hex: string): [number, number, number] {
   const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
   if (!m) return [33, 37, 41];
@@ -412,10 +458,21 @@ export async function renderDocPdf(
     y += 14;
     font("normal", 9);
     grey(60);
-    for (const line of doc.splitTextToSize(clean(body), contentW) as string[]) {
-      y = ensure(y, 12);
-      doc.text(line, M, y);
-      y += 12;
+    if (NON_LATIN.test(body)) {
+      // KAN-129: jsPDF's built-in fonts only cover Latin, so Hindi/Gujarati terms printed as junk.
+      // The browser shapes those scripts properly, so each line is drawn on a canvas and placed as
+      // an image instead.
+      for (const img of scriptLines(body, contentW, 9 * fs, 13)) {
+        y = ensure(y, 12);
+        doc.addImage(img.data, "PNG", M, y - 9 * fs * 0.95, img.w, img.h);
+        y += 13;
+      }
+    } else {
+      for (const line of doc.splitTextToSize(clean(body), contentW) as string[]) {
+        y = ensure(y, 12);
+        doc.text(line, M, y);
+        y += 12;
+      }
     }
     y += 10;
   }

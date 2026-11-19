@@ -5,6 +5,7 @@ import { SessionGuard } from "@/components/SessionGuard";
 import { WebLocationReporter } from "@/components/WebLocationReporter";
 import { TenderAnalysisSync } from "@/components/tender/TenderAnalysisSync";
 import { GlobalFilePreview } from "@/components/GlobalFilePreview";
+import { ChecklistPopupGate } from "@/components/task/ChecklistPopupGate";
 
 // Inter — the workhorse UI typeface used across production ERP / SaaS dashboards.
 const inter = Inter({
@@ -41,6 +42,7 @@ export default function RootLayout({
         <TenderAnalysisSync />
         {children}
         <GlobalFilePreview />
+        <ChecklistPopupGate />
       </body>
     </html>
   );

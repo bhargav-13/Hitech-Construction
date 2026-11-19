@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { Check, ChevronLeft, ChevronRight, ClipboardList, Loader2, Lock, Plus, Search, Trash2, X } from "lucide-react";
 import { TaskopadShell } from "@/components/task/TaskopadShell";
 import { PeopleSelect, ProgressBar, UserAvatar } from "@/components/task/TaskBits";
+import { ChecklistPopupSettings, EMPTY_POPUP } from "@/components/task/ChecklistPopupSettings";
 import { Drawer, DrawerField } from "@/components/Drawer";
 import { Select } from "@/components/Select";
 import { useUsers } from "@/lib/useUsers";
@@ -276,6 +277,8 @@ export default function ChecklistPage() {
             <Select
               value={view}
               onChange={setSelected}
+              searchable
+              searchPlaceholder="Search people"
               className="w-full sm:w-[240px]"
               options={[
                 { value: EVERYONE, label: superAdmin ? "Everyone" : "Me + my team" },
@@ -408,6 +411,8 @@ export default function ChecklistPage() {
           assignable={manageable}
           defaultAssignee={defaultAssignee}
           nameOf={nameOf}
+          superAdmin={superAdmin}
+          people={people}
           onSave={async (input) => {
             if (editing.row) await saveRow(editing.row.id, input);
             else await addRow(input);
@@ -659,6 +664,8 @@ function RowDrawer({
   assignable,
   defaultAssignee,
   nameOf,
+  superAdmin,
+  people,
   onSave,
   onDelete,
   onClose,
@@ -668,6 +675,8 @@ function RowDrawer({
   assignable: Person[];
   defaultAssignee: string;
   nameOf: (id: string) => string;
+  superAdmin: boolean;
+  people: Person[];
   onSave: (input: RoutineInput) => Promise<void>;
   onDelete: () => Promise<void>;
   onClose: () => void;
@@ -675,6 +684,8 @@ function RowDrawer({
   const [name, setName] = useState(row?.name ?? "");
   const [note, setNote] = useState(row?.note ?? "");
   const [assigneeId, setAssigneeId] = useState(row?.assigneeId ?? defaultAssignee);
+  // KAN-124: the scheduled pop-up — Super Admin sets it.
+  const [popup, setPopup] = useState(row?.popup ?? EMPTY_POPUP);
   const [busy, setBusy] = useState(false);
   const editable = row === null || row.canManage;
   const ticked = row ? Object.values(row.ticks).filter(Boolean).length : 0;
@@ -696,7 +707,11 @@ function RowDrawer({
     if (busy) return;
     if (!name.trim()) return alert("Give the routine a name.");
     if (!assigneeId) return alert("Pick who this routine is for.");
-    void run(() => onSave({ period, name, note, assigneeId }));
+    if (superAdmin && popup.enabled) {
+      if (!popup.time) return alert("Pick the pop-up time.");
+      if (popup.repeat === "ONCE" && !popup.date) return alert("Pick the date for the one-time pop-up.");
+    }
+    void run(() => onSave({ period, name, note, assigneeId, ...(superAdmin ? { popup } : {}) }));
   }
 
   const title = row ? `${PERIOD_LABEL[period]} routine` : `New ${PERIOD_LABEL[period].toLowerCase()} routine`;
@@ -749,6 +764,16 @@ function RowDrawer({
             placeholder={period === "weekly" ? "e.g. Construction Tender Analysis" : "Anything worth remembering about this routine"}
           />
         </DrawerField>
+
+        {superAdmin && editable && (
+          <ChecklistPopupSettings
+            value={popup}
+            onChange={setPopup}
+            people={people}
+            assigneeId={assigneeId}
+            routineId={row ? Number(row.id) : null}
+          />
+        )}
 
         {row && (
           <p className="text-xs text-gray-400">

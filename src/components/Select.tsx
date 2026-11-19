@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Check, ChevronDown, Plus, X } from "lucide-react";
+import { Check, ChevronDown, Plus, Search, X } from "lucide-react";
 import { notifyFormTouched } from "@/lib/formDirty";
 
 export interface SelectOption {
@@ -46,6 +46,8 @@ export function Select({
   onCreate,
   createLabel = "Add new",
   onRemove,
+  searchable = false,
+  searchPlaceholder = "Search",
 }: {
   value: string;
   onChange: (value: string) => void;
@@ -66,6 +68,9 @@ export function Select({
   createLabel?: string;
   /** Called with an option's value when its × is clicked (only options marked `removable`). */
   onRemove?: (value: string) => void;
+  /** KAN-123: a search box at the top of the open list, filtering by label — for long lists of people. */
+  searchable?: boolean;
+  searchPlaceholder?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(0);
@@ -75,6 +80,13 @@ export function Select({
   // Start off-screen so the panel can be measured before it's painted in its final spot.
   const [pos, setPos] = useState({ top: -9999, left: -9999, width: 0, openUp: false });
   const [mounted, setMounted] = useState(false);
+  const [query, setQuery] = useState("");
+  // What the open list shows: everything, or (searching) the options whose label matches.
+  const shown = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!searchable || !q) return options;
+    return options.filter((o) => !o.header && o.label.toLowerCase().includes(q));
+  }, [options, query, searchable]);
 
   useEffect(() => setMounted(true), []);
 
@@ -123,10 +135,10 @@ export function Select({
 
   useEffect(() => {
     if (open) {
-      const i = options.findIndex((o) => o.value === value);
+      const i = shown.findIndex((o) => o.value === value);
       setActive(i >= 0 ? i : 0);
     }
-  }, [open, options, value]);
+  }, [open, shown, value]);
 
   useEffect(() => {
     if (open) listRef.current?.querySelector<HTMLElement>(`[data-idx="${active}"]`)?.scrollIntoView({ block: "nearest" });
@@ -145,9 +157,9 @@ export function Select({
   const moveActive = (dir: 1 | -1) => {
     setActive((cur) => {
       let next = cur;
-      for (let step = 0; step < options.length; step++) {
-        next = (next + dir + options.length) % options.length;
-        if (!options[next]?.disabled && !options[next]?.header) return next;
+      for (let step = 0; step < shown.length; step++) {
+        next = (next + dir + shown.length) % shown.length;
+        if (!shown[next]?.disabled && !shown[next]?.header) return next;
       }
       return cur;
     });
@@ -157,6 +169,7 @@ export function Select({
     if (disabled) return;
     if (!open && (e.key === "Enter" || e.key === " " || e.key === "ArrowDown" || e.key === "ArrowUp")) {
       e.preventDefault();
+      setQuery("");
       setOpen(true);
       return;
     }
@@ -169,13 +182,13 @@ export function Select({
       moveActive(-1);
     } else if (e.key === "Enter" || e.key === " ") {
       e.preventDefault();
-      if (options[active]) pick(options[active]);
+      if (shown[active]) pick(shown[active]);
     } else if (e.key === "Escape") {
       e.preventDefault();
       setOpen(false);
     } else if (e.key === "Tab") {
       setOpen(false);
-    } else if (e.key.length === 1) {
+    } else if (e.key.length === 1 && !searchable) {
       // type-ahead
       const now = Date.now();
       typed.current = { str: now - typed.current.at < 800 ? typed.current.str + e.key : e.key, at: now };
@@ -193,7 +206,12 @@ export function Select({
         type="button"
         disabled={disabled}
         title={title}
-        onClick={() => !disabled && setOpen((o) => !o)}
+        onClick={() => {
+          if (disabled) return;
+          // A fresh search each time the list opens.
+          if (!open) setQuery("");
+          setOpen(!open);
+        }}
         onKeyDown={onKeyDown}
         aria-haspopup="listbox"
         aria-expanded={open}
@@ -223,10 +241,32 @@ export function Select({
             pos.openUp ? "origin-bottom-left" : "origin-top-left"
           }`}
         >
-          {options.length === 0 ? (
-            <div className="px-3 py-2 text-xs text-gray-400">No options</div>
+          {searchable && (
+            <div className="sticky top-0 z-10 border-b border-gray-100 bg-white px-2 pt-1 pb-2">
+              <div className="flex items-center gap-2 rounded-lg border border-gray-200 px-2.5 py-1.5 focus-within:border-cyan-500">
+                <Search size={14} className="shrink-0 text-gray-400" />
+                <input
+                  autoFocus
+                  value={query}
+                  onChange={(e) => {
+                    setQuery(e.target.value);
+                    setActive(0);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "ArrowDown" || e.key === "ArrowUp" || e.key === "Enter" || e.key === "Escape" || e.key === "Tab") {
+                      onKeyDown(e);
+                    }
+                  }}
+                  placeholder={searchPlaceholder}
+                  className="w-full bg-transparent text-sm outline-none"
+                />
+              </div>
+            </div>
+          )}
+          {shown.length === 0 ? (
+            <div className="px-3 py-2 text-xs text-gray-400">{query ? "No match" : "No options"}</div>
           ) : (
-            options.map((opt, i) => {
+            shown.map((opt, i) => {
               if (opt.header) {
                 return (
                   <div

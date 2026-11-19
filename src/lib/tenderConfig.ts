@@ -54,6 +54,8 @@ export const TENDER_NAV: TenderNavNode[] = [
   { label: "Status Tracker", href: "/tender/tracker", feature: "TENDER_TRACKER", icon: "check", section: "Trackers" },
   { label: "Documents", href: "/tender/documents", feature: "TENDER_DOCUMENTS", icon: "file" },
   { label: "Hardcopy", href: "/tender/hardcopy", feature: "TENDER_DOCUMENTS", icon: "truck" },
+  // KAN-133: letters received, beside the documents they relate to.
+  { label: "Letters", href: "/tender/letters", feature: "TENDER_DOCUMENTS", icon: "mail" },
 
   // Reference data and configuration.
   { label: "Materials", href: "/tender/materials", feature: "TENDER_MATERIALS", icon: "boxes", section: "Reference" },

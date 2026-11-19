@@ -31,9 +31,11 @@ import { PasswordField } from "@/components/PasswordField";
 import { StoredPassword } from "@/components/StoredPassword";
 import { useAuthStore } from "@/lib/authStore";
 import { isSuperAdminRole } from "@/lib/taskPermissions";
+import { RecycleBin } from "@/components/settings/RecycleBin";
 
 // Unimplemented sections used to be listed here as "Coming soon" placeholders — that's been removed.
-const SECTIONS = ["Roles & Access", "Multi Level Approval", "Companies"] as const;
+// KAN-107: Recycle Bin is Super Admin only.
+const SECTIONS = ["Roles & Access", "Multi Level Approval", "Companies", "Recycle Bin"] as const;
 type Section = (typeof SECTIONS)[number];
 
 export default function SettingsPage() {
@@ -48,6 +50,9 @@ export default function SettingsPage() {
     const requested = new URLSearchParams(window.location.search).get("section");
     return SECTIONS.includes(requested as Section) ? (requested as Section) : "Roles & Access";
   });
+
+  const isSuperAdmin = isSuperAdminRole(useAuthStore((s) => s.user?.role.name));
+  const visibleSections = SECTIONS.filter((s) => s !== "Recycle Bin" || isSuperAdmin);
 
   return (
     <AppShell title="Setting">
@@ -66,7 +71,7 @@ export default function SettingsPage() {
 
         {/* Horizontal section tabs */}
         <div className="flex gap-5 overflow-x-auto border-b border-gray-200">
-          {SECTIONS.map((s) => (
+          {visibleSections.map((s) => (
             <button
               key={s}
               onClick={() => setSection(s)}
@@ -89,6 +94,8 @@ export default function SettingsPage() {
             <RolesAndAccess />
           ) : section === "Companies" ? (
             <CompanySettings />
+          ) : section === "Recycle Bin" ? (
+            isSuperAdmin ? <RecycleBin /> : null
           ) : (
             <MultiLevelApproval />
           )}

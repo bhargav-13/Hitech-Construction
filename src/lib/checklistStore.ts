@@ -9,6 +9,7 @@ import {
   toggleRoutineTick,
   updateRoutine,
   type ChecklistPeriodApi,
+  type PopupSettingsDto,
   type RoutineDto,
 } from "./checklistApi";
 
@@ -52,6 +53,8 @@ export interface ChecklistRow {
   ticks: Record<string, boolean>;
   canManage: boolean;
   canTick: boolean;
+  /** KAN-124: the scheduled pop-up, or null. */
+  popup: PopupSettingsDto | null;
 }
 
 export interface ChecklistScope {
@@ -66,6 +69,8 @@ export interface RoutineInput {
   name: string;
   assigneeId: string;
   note: string;
+  /** KAN-124: Super Admin only; undefined leaves it unchanged. */
+  popup?: PopupSettingsDto;
 }
 
 function toRow(d: RoutineDto): ChecklistRow {
@@ -78,6 +83,7 @@ function toRow(d: RoutineDto): ChecklistRow {
     ticks: Object.fromEntries(d.ticks.map((k) => [k, true])),
     canManage: d.canManage,
     canTick: d.canTick,
+    popup: d.popup ?? null,
   };
 }
 
@@ -86,6 +92,7 @@ const toRequest = (r: RoutineInput) => ({
   name: r.name.trim(),
   assigneeId: Number(r.assigneeId),
   note: r.note.trim() || null,
+  ...(r.popup ? { popup: r.popup } : {}),
 });
 
 export function useChecklist() {

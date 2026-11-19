@@ -68,7 +68,7 @@ export default function PayrollRunPage() {
   const [payType, setPayType] = useState("all");
   const [slipStatus, setSlipStatus] = useState("all");
   const [sub, setSub] = useState<SubTab>("summary");
-  const [unmarked, setUnmarked] = useState<UnmarkedDayPolicy>("ABSENT");
+  const [unmarked, setUnmarked] = useState<UnmarkedDayPolicy>("ABSENT_PAY_OFFS");
   const [cutoff, setCutoff] = useState("");
   const [assumption, setAssumption] = useState<RunAssumption>("PRESENT");
   const [conditionsOpen, setConditionsOpen] = useState(false);
@@ -899,8 +899,8 @@ function ConditionsDialog({ monthKey, unmarked, cutoff, assumption, onClose, onC
       <div className="space-y-4 px-5 py-4">
         <label className="block text-xs text-gray-500">Unmarked days (up to the cut-off)
           <Select value={u} onChange={(v) => setU(v as UnmarkedDayPolicy)} options={[
-            { value: "ABSENT", label: "Count as unpaid" },
-            { value: "ABSENT_PAY_OFFS", label: "Unpaid, but pay weekly offs & holidays" },
+            { value: "ABSENT_PAY_OFFS", label: "Unpaid, but pay weekly offs & holidays (default)" },
+            { value: "ABSENT", label: "Count as unpaid (offs and holidays too)" },
             { value: "PRESENT", label: "Count as paid" },
           ]} />
         </label>

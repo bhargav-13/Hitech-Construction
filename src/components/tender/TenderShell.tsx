@@ -27,6 +27,7 @@ import {
   Send,
   Settings,
   Truck,
+  Mail,
 } from "lucide-react";
 
 const ICONS: Record<string, React.ComponentType<{ size?: number; className?: string }>> = {
@@ -39,6 +40,7 @@ const ICONS: Record<string, React.ComponentType<{ size?: number; className?: str
   check: CheckSquare,
   file: FileText,
   truck: Truck,
+  mail: Mail,
   boxes: Boxes,
   clipboard: ClipboardList,
   settings: Settings,

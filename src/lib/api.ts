@@ -1580,7 +1580,7 @@ export type UnmarkedDayPolicy = "PRESENT" | "ABSENT" | "ABSENT_PAY_OFFS";
 
 export function generatePayrollRun(
   month: string,
-  unmarked: UnmarkedDayPolicy = "ABSENT",
+  unmarked: UnmarkedDayPolicy = "ABSENT_PAY_OFFS",
   cutoff?: string | null,
   assumption?: RunAssumption | null,
 ) {

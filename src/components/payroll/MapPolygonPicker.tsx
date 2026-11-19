@@ -32,16 +32,71 @@ export function MapPolygonPicker({ value, onChange }: { value: GeoPoint[]; onCha
     if (!L || !layer) return;
     layer.clearLayers();
     const pts = ptsRef.current;
-    const latlngs = pts.map((p) => [p.lat, p.lng] as [number, number]);
+    const latlngs = () => ptsRef.current.map((p) => [p.lat, p.lng] as [number, number]);
+    let shape: LeafletNS.Polygon | LeafletNS.Polyline | null = null;
     if (pts.length >= 3) {
-      L.polygon(latlngs, { color: "#0891b2", weight: 2, fillColor: "#0891b2", fillOpacity: 0.15 }).addTo(layer);
+      shape = L.polygon(latlngs(), { color: "#0891b2", weight: 2, fillColor: "#0891b2", fillOpacity: 0.15 }).addTo(layer);
     } else if (pts.length === 2) {
-      L.polyline(latlngs, { color: "#0891b2", weight: 2, dashArray: "4" }).addTo(layer);
+      shape = L.polyline(latlngs(), { color: "#0891b2", weight: 2, dashArray: "4" }).addTo(layer);
     }
-    // Numbered corner dots on top of the shape.
-    pts.forEach((p) => {
-      L.circleMarker([p.lat, p.lng], { radius: 5, color: "#fff", weight: 2, fillColor: "#0891b2", fillOpacity: 1 }).addTo(layer);
+    const live = () => shape?.setLatLngs(latlngs());
+
+    // KAN-128: corners are draggable dots — pull one to reshape the site. Double-click removes it.
+    const cornerIcon = L.divIcon({
+      className: "",
+      html: '<div style="width:16px;height:16px;border-radius:9999px;background:#0891b2;border:3px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,.4);cursor:grab"></div>',
+      iconSize: [16, 16],
+      iconAnchor: [8, 8],
     });
+    pts.forEach((p, i) => {
+      const m = L.marker([p.lat, p.lng], { icon: cornerIcon, draggable: true, title: "Drag to move · double-click or right-click to remove" }).addTo(layer);
+      m.on("drag", () => {
+        const ll = m.getLatLng();
+        ptsRef.current[i] = { lat: ll.lat, lng: ll.lng };
+        live();
+      });
+      m.on("dragend", () => commit());
+      const remove = (e: LeafletNS.LeafletMouseEvent) => {
+        L.DomEvent.stop(e.originalEvent);
+        ptsRef.current = ptsRef.current.filter((_, j) => j !== i);
+        commit();
+      };
+      m.on("dblclick", remove);
+      m.on("contextmenu", remove);
+    });
+
+    // Stretch a side: a small handle in the middle of each edge — drag it out to add a corner there.
+    if (pts.length >= 2) {
+      const midIcon = L.divIcon({
+        className: "",
+        html: '<div style="width:12px;height:12px;border-radius:9999px;background:#fff;border:2px solid #0891b2;opacity:.9;cursor:grab"></div>',
+        iconSize: [12, 12],
+        iconAnchor: [6, 6],
+      });
+      const edges = pts.length >= 3 ? pts.length : 1;
+      for (let i = 0; i < edges; i++) {
+        const a = pts[i];
+        const b = pts[(i + 1) % pts.length];
+        const mid = L.marker([(a.lat + b.lat) / 2, (a.lng + b.lng) / 2], {
+          icon: midIcon,
+          draggable: true,
+          title: "Drag to add a corner here",
+        }).addTo(layer);
+        let at = -1;
+        mid.on("dragstart", () => {
+          const ll = mid.getLatLng();
+          at = i + 1;
+          ptsRef.current = [...ptsRef.current.slice(0, at), { lat: ll.lat, lng: ll.lng }, ...ptsRef.current.slice(at)];
+        });
+        mid.on("drag", () => {
+          if (at < 0) return;
+          const ll = mid.getLatLng();
+          ptsRef.current[at] = { lat: ll.lat, lng: ll.lng };
+          live();
+        });
+        mid.on("dragend", () => commit());
+      }
+    }
   }
 
   function commit() {
@@ -73,8 +128,20 @@ export function MapPolygonPicker({ value, onChange }: { value: GeoPoint[]; onCha
         else map.setView([ptsRef.current[0].lat, ptsRef.current[0].lng], 17);
       }
 
+      // Double-click removes a corner here, so it must not also zoom the map.
+      map.doubleClickZoom.disable();
       map.on("click", (e: LeafletNS.LeafletMouseEvent) => {
+        // A click on (or right beside) an existing dot is meant for that dot — never a new corner.
+        const near = ptsRef.current.some((p) => map.latLngToContainerPoint([p.lat, p.lng]).distanceTo(e.containerPoint) < 14);
+        if (near) return;
         ptsRef.current = [...ptsRef.current, { lat: e.latlng.lat, lng: e.latlng.lng }];
+        commit();
+      });
+      // Double-clicking a dot removes it, whether the browser hands the event to the dot or the map.
+      map.on("dblclick", (e: LeafletNS.LeafletMouseEvent) => {
+        const i = ptsRef.current.findIndex((p) => map.latLngToContainerPoint([p.lat, p.lng]).distanceTo(e.containerPoint) < 14);
+        if (i < 0) return;
+        ptsRef.current = ptsRef.current.filter((_, j) => j !== i);
         commit();
       });
 
@@ -141,10 +208,10 @@ export function MapPolygonPicker({ value, onChange }: { value: GeoPoint[]; onCha
 
   const hint =
     count === 0
-      ? "Tap each corner of the site on the map."
+      ? "Tap each corner of the site on the map. Drag a dot to move it, or pull the small dot on a side to add a corner."
       : count < 3
         ? `${count} point${count > 1 ? "s" : ""} — add at least ${3 - count} more to close the shape.`
-        : `${count} points · boundary closed ✓ — keep tapping to add more corners.`;
+        : `${count} points · boundary closed ✓ — drag dots to adjust, pull a side's middle dot to add a corner, double-click a dot to remove it.`;
 
   return (
     <div className="space-y-2">

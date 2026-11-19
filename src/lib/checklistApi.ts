@@ -24,6 +24,53 @@ export interface RoutineDto {
   canManage: boolean;
   /** The caller is the assignee or sits above them: may tick. */
   canTick: boolean;
+  /** KAN-124: the scheduled pop-up, or null. */
+  popup: PopupSettingsDto | null;
+}
+
+/** KAN-124: when a routine pops up on people's screens. Times are IST. */
+export interface PopupSettingsDto {
+  enabled: boolean;
+  repeat: "ONCE" | "DAILY" | "WEEKLY" | null;
+  /** "HH:mm" */
+  time: string | null;
+  /** ONCE: yyyy-MM-dd */
+  date: string | null;
+  /** WEEKLY: 0 = Sunday … 6 = Saturday */
+  weekday: number | null;
+  /** Can't be closed until marked done. */
+  lock: boolean;
+  /** Empty = the routine's assignee. */
+  userIds: number[];
+}
+
+export interface DuePopupDto {
+  routineId: number;
+  name: string;
+  note: string | null;
+  period: ChecklistPeriodApi;
+  occurrenceKey: string;
+  dueAt: string;
+  lock: boolean;
+}
+
+export interface PopupLogRowDto {
+  occurrenceKey: string;
+  userId: number;
+  shownAt: string | null;
+  doneAt: string | null;
+}
+
+export function getDuePopups() {
+  return apiRequest<DuePopupDto[]>("/api/v1/checklist/popups/due");
+}
+
+export function completePopup(routineId: number, occurrenceKey: string) {
+  return apiRequest<void>(`/api/v1/checklist/popups/${routineId}/${occurrenceKey}/done`, { method: "POST" });
+}
+
+export function getPopupLog(routineId: number) {
+  return apiRequest<PopupLogRowDto[]>(`/api/v1/checklist/routines/${routineId}/popup-log`);
 }
 
 export interface RoutineRequest {
@@ -31,6 +78,8 @@ export interface RoutineRequest {
   name: string;
   assigneeId: number;
   note: string | null;
+  /** Super Admin only; undefined leaves it unchanged. */
+  popup?: PopupSettingsDto;
 }
 
 export function getChecklistScope() {
