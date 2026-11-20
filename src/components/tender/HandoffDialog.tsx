@@ -1,6 +1,8 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import Link from "next/link";
+import { ArrowLeft, ClipboardList, FolderPlus } from "lucide-react";
 import { Modal } from "@/components/Modal";
 import { inr } from "@/lib/format";
 import { analysisTotals, groupedBoq } from "@/lib/tenderAnalysisCalc";
@@ -42,6 +44,8 @@ export function HandoffDialog({
   );
 
   const hasBoq = !!analysis && analysis.boqLines.length > 0;
+  // KAN-141: first ask whether the project comes with the health analysis or without it.
+  const [mode, setMode] = useState<"CHOOSE" | "WITH" | "WITHOUT">("CHOOSE");
   const targetCount =
     opts.targets === "PER_GROUP" ? groups.length : opts.targets === "PER_LINE" ? (analysis?.boqLines.length ?? 0) : 0;
   const boqValue =
@@ -61,10 +65,34 @@ export function HandoffDialog({
           {tender.department ?? "the department"} as the customer. Execution is tracked there from then on.
         </p>
 
-        {!hasBoq ? (
+        {mode === "CHOOSE" ? (
+          <div className="mt-4 grid gap-3 sm:grid-cols-2">
+            <ModeCard
+              icon={FolderPlus}
+              title="Without health analysis"
+              detail="Create the project now. It starts empty — no BOQ, no budget, no targets. They can be added in the project later."
+              onClick={() => setMode("WITHOUT")}
+            />
+            <ModeCard
+              icon={ClipboardList}
+              title="After health analysis"
+              detail={
+                hasBoq
+                  ? `Bring the analysis across — ${analysis!.boqLines.length} BOQ items, the cost estimate as budget, and targets.`
+                  : "No analysis yet for this tender. Do the health analysis first, then create the project with its BOQ."
+              }
+              onClick={() => setMode("WITH")}
+            />
+          </div>
+        ) : mode === "WITHOUT" ? (
+          <div className="mt-4 rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-600">
+            The project starts empty — no BOQ, no targets.
+            {hasBoq ? " The health analysis stays with the tender and is not copied." : ""}
+          </div>
+        ) : !hasBoq ? (
           <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50/70 px-4 py-3 text-sm text-amber-800">
-            This tender has no health analysis, so the project starts empty — no BOQ, no targets. Run the analysis
-            first if you want the BOQ to come across with it.
+            This tender has no health analysis yet. Open it, fill in the BOQ and costs, then come back to Create
+            Project — the BOQ, budget and targets will come across with it.
           </div>
         ) : (
           <div className="mt-4 space-y-3">
@@ -157,20 +185,37 @@ export function HandoffDialog({
           </div>
         )}
 
-        <div className="mt-5 flex justify-end gap-2">
+        <div className="mt-5 flex items-center justify-end gap-2">
+          {mode !== "CHOOSE" && (
+            <button
+              onClick={() => setMode("CHOOSE")}
+              className="mr-auto flex items-center gap-1 rounded-lg px-2 py-2 text-sm text-gray-500 transition-colors duration-150 hover:bg-gray-50"
+            >
+              <ArrowLeft size={14} /> Back
+            </button>
+          )}
           <button
             onClick={onCancel}
             className="rounded-lg border border-gray-200 px-3.5 py-2 text-sm text-gray-600 transition-colors duration-150 hover:bg-gray-50"
           >
             Cancel
           </button>
-          <button
-            onClick={() => onConfirm(hasBoq ? opts : null)}
-            disabled={busy}
-            className="rounded-lg bg-brand-accent px-3.5 py-2 text-sm font-semibold text-white transition-all duration-150 hover:opacity-90 active:scale-95 disabled:opacity-60"
-          >
-            {busy ? "Creating…" : "Create project"}
-          </button>
+          {mode === "WITH" && !hasBoq ? (
+            <Link
+              href={`/tender/analysis/${tender.id}`}
+              className="rounded-lg bg-brand-accent px-3.5 py-2 text-sm font-semibold text-white transition-all duration-150 hover:opacity-90 active:scale-95"
+            >
+              Open health analysis
+            </Link>
+          ) : mode !== "CHOOSE" ? (
+            <button
+              onClick={() => onConfirm(mode === "WITH" && hasBoq ? opts : null)}
+              disabled={busy}
+              className="rounded-lg bg-brand-accent px-3.5 py-2 text-sm font-semibold text-white transition-all duration-150 hover:opacity-90 active:scale-95 disabled:opacity-60"
+            >
+              {busy ? "Creating…" : mode === "WITH" ? "Create project with analysis" : "Create project"}
+            </button>
+          ) : null}
         </div>
       </div>
     </Modal>
@@ -233,6 +278,30 @@ function Toggle({ checked, onChange, label }: { checked: boolean; onChange: (v: 
           checked ? "left-[18px]" : "left-0.5"
         }`}
       />
+    </button>
+  );
+}
+
+function ModeCard({
+  icon: Icon,
+  title,
+  detail,
+  onClick,
+}: {
+  icon: React.ComponentType<{ size?: number; className?: string }>;
+  title: string;
+  detail: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="flex flex-col items-start gap-2 rounded-xl border border-gray-200 p-4 text-left transition-all duration-150 hover:border-brand-accent hover:bg-cyan-50/40 active:scale-[0.99]"
+    >
+      <Icon size={20} className="text-brand-accent" />
+      <span className="text-sm font-semibold text-gray-800">{title}</span>
+      <span className="text-xs leading-relaxed text-gray-500">{detail}</span>
     </button>
   );
 }

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ChevronRight,
   FolderPlus,
+  FolderUp,
   Grid2x2,
   Home,
   Layers,
@@ -34,6 +35,7 @@ import { msIST } from "@/lib/datetime";
 import { FilePreviewDrawer } from "./FilePreviewDrawer";
 import { NodeRow, NodeCard, SmartFolderCard } from "./FileViews";
 import { UploadTray, type UploadJob } from "./UploadTray";
+import { fromDrop, fromFolderInput, isZip, unzip, type PathedFile } from "./folderUpload";
 
 /**
  * Project → Files.
@@ -78,6 +80,7 @@ export function ProjectFiles({ projectId }: { projectId: number }) {
   const [uploads, setUploads] = useState<UploadJob[]>([]);
 
   const fileInput = useRef<HTMLInputElement>(null);
+  const folderInput = useRef<HTMLInputElement>(null);
   const jobSeq = useRef(0);
 
   /**
@@ -182,49 +185,110 @@ export function ProjectFiles({ projectId }: { projectId: number }) {
     [projectId, refresh]
   );
 
-  const startUpload = useCallback(
-    (files: FileList | File[]) => {
-      const parentId = loc.folderId;
-      for (const file of Array.from(files)) {
-        const id = ++jobSeq.current;
-        const controller = new AbortController();
-        setUploads((u) => [
-          ...u,
-          { id, name: file.name, size: file.size, percent: 0, status: "running", controller },
-        ]);
+  /** Upload one file into a folder, with its own line in the upload tray. */
+  const uploadOne = useCallback(
+    (file: File, parentId: number | null) => {
+      const id = ++jobSeq.current;
+      const controller = new AbortController();
+      setUploads((u) => [
+        ...u,
+        { id, name: file.name, size: file.size, percent: 0, status: "running", controller },
+      ]);
 
-        void uploadFile(file, {
-          projectId,
-          parentId,
-          signal: controller.signal,
-          onProgress: (percent) =>
-            setUploads((u) => u.map((j) => (j.id === id ? { ...j, percent } : j))),
+      return uploadFile(file, {
+        projectId,
+        parentId,
+        signal: controller.signal,
+        onProgress: (percent) =>
+          setUploads((u) => u.map((j) => (j.id === id ? { ...j, percent } : j))),
+      })
+        .then(() => {
+          setUploads((u) =>
+            u.map((j) => (j.id === id ? { ...j, percent: 100, status: "done" } : j))
+          );
+          cache.invalidate(projectId, parentId);
+          // Only repaint if the user is still looking at the folder they uploaded into.
+          if (parentId === loc.folderId) refresh(true);
         })
-          .then(() => {
-            setUploads((u) =>
-              u.map((j) => (j.id === id ? { ...j, percent: 100, status: "done" } : j))
-            );
-            cache.invalidate(projectId, parentId);
-            // Only repaint if the user is still looking at the folder they uploaded into.
-            if (parentId === loc.folderId) refresh(true);
-          })
-          .catch((e: unknown) => {
-            const aborted = e instanceof DOMException && e.name === "AbortError";
-            setUploads((u) =>
-              u.map((j) =>
-                j.id === id
-                  ? {
-                      ...j,
-                      status: aborted ? "cancelled" : "failed",
-                      error: aborted ? "" : message(e, "Upload failed."),
-                    }
-                  : j
-              )
-            );
-          });
-      }
+        .catch((e: unknown) => {
+          const aborted = e instanceof DOMException && e.name === "AbortError";
+          setUploads((u) =>
+            u.map((j) =>
+              j.id === id
+                ? {
+                    ...j,
+                    status: aborted ? "cancelled" : "failed",
+                    error: aborted ? "" : message(e, "Upload failed."),
+                  }
+                : j
+            )
+          );
+        });
     },
     [projectId, loc.folderId, refresh]
+  );
+
+  /**
+   * KAN-136: files with folder paths — from "Upload folder", a dragged-in folder or an unpacked ZIP.
+   * Each folder is created once (an existing folder of the same name in the current folder is
+   * reused), then every file goes into its own folder. A ZIP is unpacked into a folder named after
+   * it instead of being stored as one file.
+   */
+  const uploadPathed = useCallback(
+    async (items: PathedFile[]) => {
+      const base = loc.folderId;
+      const expanded: PathedFile[] = [];
+      for (const it of items) {
+        if (isZip(it.file)) {
+          try {
+            const inner = await unzip(it.file);
+            const folder = it.file.name.replace(/\.zip$/i, "");
+            for (const f of inner) expanded.push({ file: f.file, dirs: [...it.dirs, folder, ...f.dirs] });
+          } catch {
+            setError(`Couldn't open ${it.file.name} as a ZIP — uploaded it as a file instead.`);
+            expanded.push(it);
+          }
+        } else {
+          expanded.push(it);
+        }
+      }
+      const existing = new Map(
+        (listing?.nodes ?? []).filter((n) => n.kind === "FOLDER" && n.id != null).map((n) => [n.name.toLowerCase(), n.id as number])
+      );
+      const folderIds = new Map<string, number | null>([["", base]]);
+      const folderFor = async (dirs: string[]): Promise<number | null> => {
+        let parent: number | null = base;
+        let key = "";
+        for (const d of dirs) {
+          key = key ? `${key}/${d}` : d;
+          if (!folderIds.has(key)) {
+            const reuse = key === d ? existing.get(d.toLowerCase()) : undefined;
+            const id = reuse ?? (await createFolder(projectId, d, parent)).id ?? null;
+            folderIds.set(key, id);
+          }
+          parent = folderIds.get(key) ?? null;
+        }
+        return parent;
+      };
+      try {
+        const jobs: Promise<unknown>[] = [];
+        for (const it of expanded) jobs.push(uploadOne(it.file, await folderFor(it.dirs)));
+        if (folderIds.size > 1) after([base]);
+        await Promise.all(jobs);
+      } catch (e) {
+        setError(message(e, "Couldn't create the folders for this upload."));
+      }
+    },
+    [loc.folderId, listing, projectId, uploadOne, after]
+  );
+
+  const startUpload = useCallback(
+    (files: FileList | File[]) => {
+      const list = Array.from(files);
+      if (list.some(isZip)) void uploadPathed(list.map((file) => ({ file, dirs: [] })));
+      else for (const file of list) void uploadOne(file, loc.folderId);
+    },
+    [uploadPathed, uploadOne, loc.folderId]
   );
 
   const onCreateFolder = async (name: string) => {
@@ -343,7 +407,10 @@ export function ProjectFiles({ projectId }: { projectId: number }) {
         if (!canUpload) return;
         e.preventDefault();
         setDragOver(false);
-        if (e.dataTransfer.files?.length) startUpload(e.dataTransfer.files);
+        // Folders dragged in keep their structure (KAN-136); plain files go straight in.
+        void fromDrop(e.dataTransfer).then((items) => {
+          if (items.length) void uploadPathed(items);
+        });
       }}
     >
       {/* ---- toolbar ---- */}
@@ -415,6 +482,25 @@ export function ProjectFiles({ projectId }: { projectId: number }) {
               >
                 <Upload size={15} /> Upload
               </button>
+              <button
+                type="button"
+                onClick={() => folderInput.current?.click()}
+                title="Upload a whole folder, with its sub-folders"
+                className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50"
+              >
+                <FolderUp size={15} /> Upload folder
+              </button>
+              <input
+                ref={folderInput}
+                type="file"
+                multiple
+                hidden
+                {...({ webkitdirectory: "", directory: "" } as Record<string, string>)}
+                onChange={(e) => {
+                  if (e.target.files?.length) void uploadPathed(fromFolderInput(e.target.files));
+                  e.target.value = "";
+                }}
+              />
               <input
                 ref={fileInput}
                 type="file"

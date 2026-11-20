@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Download, Mail, Pencil, Plus, Search, Trash2 } from "lucide-react";
+import { Download, FileText, Mail, Pencil, Plus, Search, Send, Trash2 } from "lucide-react";
 import { TenderShell, TenderEmpty } from "@/components/tender/TenderShell";
 import { Drawer, DrawerField } from "@/components/Drawer";
 import { DatePicker } from "@/components/DatePicker";
@@ -12,6 +12,8 @@ import { exportRowsToCsv } from "@/lib/vyaparExport";
 import { useTableSort } from "@/lib/useTableSort";
 import { useCan } from "@/lib/permissions";
 import { tdate, tval } from "@/lib/tenderHelpers";
+import { attachmentsFor, fileUrl, thumbUrl, type FileNode } from "@/lib/filesApi";
+import { previewFile } from "@/lib/filePreview";
 import {
   addLetterChannel,
   createLetter,
@@ -40,7 +42,11 @@ export default function TenderLettersPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
-  const [editing, setEditing] = useState<TenderLetter | "new" | null>(null);
+  const [editing, setEditing] = useState<TenderLetter | "RECEIVED" | "SENT" | null>(null);
+  // KAN-138: letters received and letters sent, on two tabs.
+  const [tab, setTab] = useState<"RECEIVED" | "SENT">("RECEIVED");
+  const dirOf = (l: TenderLetter) => (l.direction === "SENT" ? "SENT" : "RECEIVED");
+  const sent = tab === "SENT";
 
   const load = useCallback(async () => {
     try {
@@ -72,11 +78,12 @@ export default function TenderLettersPage() {
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return letters;
-    return letters.filter((l) =>
+    const mine = letters.filter((l) => dirOf(l) === tab);
+    if (!q) return mine;
+    return mine.filter((l) =>
       [l.referenceNo, l.description, l.receivedThrough, l.notes, l.tenderRef].some((v) => (v ?? "").toLowerCase().includes(q)),
     );
-  }, [letters, search]);
+  }, [letters, search, tab]);
 
   const { sorted, sortKey, sortDir, toggle } = useTableSort<TenderLetter>(
     filtered,
@@ -104,14 +111,14 @@ export default function TenderLettersPage() {
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <h1 className="text-lg font-semibold text-gray-800">Letter Correspondence</h1>
-            <p className="text-sm text-gray-500">Letters received from departments and others, and how they came in.</p>
+            <p className="text-sm text-gray-500">Letters received from and sent to departments and others.</p>
           </div>
           <div className="flex items-center gap-2">
             <button
               onClick={() =>
                 exportRowsToCsv(
-                  "tender-letters",
-                  ["Date", "Reference No.", "Description", "Received Through", "Notes", "Tender"],
+                  sent ? "tender-letters-sent" : "tender-letters-received",
+                  ["Date", "Reference No.", "Description", sent ? "Send By" : "Received Through", "Notes", "Tender"],
                   sorted.map((l) => [l.letterDate, l.referenceNo, l.description, l.receivedThrough, l.notes, l.tenderRef]),
                 )
               }
@@ -121,14 +128,39 @@ export default function TenderLettersPage() {
             </button>
             {canCreate && (
               <button
-                onClick={() => setEditing("new")}
+                onClick={() => setEditing("RECEIVED")}
                 className="flex items-center gap-1.5 rounded-lg bg-brand-accent px-3 py-2 text-sm font-medium text-white transition-all duration-150 hover:opacity-90 active:scale-95"
               >
                 <Plus size={14} /> Add letter
               </button>
             )}
+            {canCreate && (
+              <button
+                onClick={() => setEditing("SENT")}
+                className="flex items-center gap-1.5 rounded-lg border border-brand-accent bg-white px-3 py-2 text-sm font-medium text-brand-accent transition-all duration-150 hover:bg-cyan-50 active:scale-95"
+              >
+                <Send size={14} /> Send Letter
+              </button>
+            )}
             <div className="text-sm text-gray-500">{filtered.length} letters</div>
           </div>
+        </div>
+
+        <div className="flex gap-1 rounded-lg border border-gray-200 bg-white p-1 sm:w-fit">
+          {(["RECEIVED", "SENT"] as const).map((d) => {
+            const n = letters.filter((l) => dirOf(l) === d).length;
+            return (
+              <button
+                key={d}
+                onClick={() => setTab(d)}
+                className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+                  tab === d ? "bg-cyan-50 text-brand-accent" : "text-gray-500 hover:bg-gray-50"
+                }`}
+              >
+                {d === "RECEIVED" ? "Received" : "Sent"} <span className="text-xs text-gray-400">{n}</span>
+              </button>
+            );
+          })}
         </div>
 
         <div className="flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 transition-colors duration-150 focus-within:border-cyan-500">
@@ -155,16 +187,17 @@ export default function TenderLettersPage() {
                   <SortTh label="Date" sortKey="letterDate" activeKey={sortKey} dir={sortDir} onSort={toggle} />
                   <SortTh label="Reference No." sortKey="referenceNo" activeKey={sortKey} dir={sortDir} onSort={toggle} />
                   <th className="px-4 py-2 font-medium text-gray-500">Description</th>
-                  <SortTh label="Received Through" sortKey="receivedThrough" activeKey={sortKey} dir={sortDir} onSort={toggle} />
+                  <SortTh label={sent ? "Send By" : "Received Through"} sortKey="receivedThrough" activeKey={sortKey} dir={sortDir} onSort={toggle} />
                   <th className="px-4 py-2 font-medium text-gray-500">Notes</th>
+                  <th className="px-4 py-2 font-medium text-gray-500">Attachment</th>
                   <th className="px-4 py-2 font-medium text-gray-500">Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {sorted.length === 0 && (
                   <tr>
-                    <td colSpan={6} className="px-4 py-10 text-center text-sm text-gray-400">
-                      No letters match &ldquo;{search.trim()}&rdquo;.
+                    <td colSpan={7} className="px-4 py-10 text-center text-sm text-gray-400">
+                      {search.trim() ? <>No letters match &ldquo;{search.trim()}&rdquo;.</> : sent ? "No letters sent yet." : "No letters received yet."}
                     </td>
                   </tr>
                 )}
@@ -190,6 +223,9 @@ export default function TenderLettersPage() {
                     </td>
                     <td className="px-4 py-2.5 text-gray-600">
                       <span className="line-clamp-2 block max-w-[260px] whitespace-pre-wrap text-xs">{tval(l.notes)}</span>
+                    </td>
+                    <td className="px-4 py-2.5" onClick={(e) => e.stopPropagation()}>
+                      <LetterAttachmentPreview letterId={l.id} />
                     </td>
                     <td className="px-4 py-2.5" onClick={(e) => e.stopPropagation()}>
                       <div className="flex items-center gap-1">
@@ -223,12 +259,14 @@ export default function TenderLettersPage() {
 
       {editing && (
         <LetterDrawer
-          letter={editing === "new" ? null : editing}
+          letter={typeof editing === "string" ? null : editing}
+          direction={typeof editing === "string" ? editing : dirOf(editing)}
           channels={channels}
           onChannels={setChannels}
-          canEdit={editing === "new" ? canCreate : canEdit}
+          canEdit={typeof editing === "string" ? canCreate : canEdit}
           onClose={() => setEditing(null)}
           onSaved={() => {
+            if (typeof editing === "string") setTab(editing);
             setEditing(null);
             void load();
           }}
@@ -240,6 +278,7 @@ export default function TenderLettersPage() {
 
 function LetterDrawer({
   letter,
+  direction,
   channels,
   onChannels,
   canEdit,
@@ -247,6 +286,7 @@ function LetterDrawer({
   onSaved,
 }: {
   letter: TenderLetter | null;
+  direction: "RECEIVED" | "SENT";
   channels: LetterChannel[];
   onChannels: (c: LetterChannel[]) => void;
   canEdit: boolean;
@@ -260,7 +300,9 @@ function LetterDrawer({
     receivedThrough: letter?.receivedThrough ?? "",
     notes: letter?.notes ?? "",
     tenderRef: letter?.tenderRef ?? "",
+    direction,
   }));
+  const isSent = direction === "SENT";
   const set = (patch: Partial<TenderLetterInput>) => setF((p) => ({ ...p, ...patch }));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -326,10 +368,10 @@ function LetterDrawer({
 
   return (
     <Drawer
-      title={letter ? "Letter" : "Add letter"}
+      title={letter ? (isSent ? "Sent letter" : "Letter") : isSent ? "Send letter" : "Add letter"}
       onClose={onClose}
       onSave={canEdit ? save : undefined}
-      saveLabel={busy ? "Saving…" : letter ? "Save" : "Add letter"}
+      saveLabel={busy ? "Saving…" : letter ? "Save" : isSent ? "Save sent letter" : "Add letter"}
       width="max-w-lg"
     >
       <div className="space-y-4">
@@ -358,7 +400,7 @@ function LetterDrawer({
             disabled={!canEdit}
           />
         </DrawerField>
-        <DrawerField label="Received Through">
+        <DrawerField label={isSent ? "Send By" : "Received Through"}>
           <Select
             value={f.receivedThrough ?? ""}
             onChange={(v) => set({ receivedThrough: v })}
@@ -388,15 +430,23 @@ function LetterDrawer({
             </div>
           )}
         </DrawerField>
-        <DrawerField label="Notes">
-          <textarea
-            value={f.notes ?? ""}
-            onChange={(e) => set({ notes: e.target.value })}
-            rows={3}
-            className="input resize-none"
-            disabled={!canEdit}
-          />
-        </DrawerField>
+        <div className={letter ? "grid gap-3 sm:grid-cols-[1fr_160px]" : ""}>
+          <DrawerField label="Notes">
+            <textarea
+              value={f.notes ?? ""}
+              onChange={(e) => set({ notes: e.target.value })}
+              rows={letter ? 5 : 3}
+              className="input resize-none"
+              disabled={!canEdit}
+            />
+          </DrawerField>
+          {/* KAN-138: the letter itself, previewed beside the notes. */}
+          {letter && (
+            <DrawerField label="Attachment">
+              <LetterAttachmentPreview letterId={letter.id} large />
+            </DrawerField>
+          )}
+        </div>
         <DrawerField label="Tender (optional)" hint="The tender ID or number this letter is about.">
           <input
             value={f.tenderRef ?? ""}
@@ -412,5 +462,60 @@ function LetterDrawer({
         )}
       </div>
     </Drawer>
+  );
+}
+
+/**
+ * KAN-138: the first file attached to a letter, as a thumbnail (images) or a file chip, opening the
+ * viewer on click. Shows "—" when nothing is attached.
+ */
+function LetterAttachmentPreview({ letterId, large = false }: { letterId: number; large?: boolean }) {
+  const [files, setFiles] = useState<FileNode[] | null>(null);
+  const [thumb, setThumb] = useState<string | null>(null);
+
+  useEffect(() => {
+    let off = false;
+    attachmentsFor("TENDER", letterId, "LETTER")
+      .then(async (list) => {
+        if (off) return;
+        setFiles(list);
+        const first = list[0];
+        if (first?.fileId != null) {
+          // No thumbnail yet (or none made) — an image can show itself.
+          const t =
+            (await thumbUrl(first.fileId)) ??
+            (first.contentType?.startsWith("image/") ? await fileUrl(first.fileId, true).catch(() => null) : null);
+          if (!off) setThumb(t);
+        }
+      })
+      .catch(() => !off && setFiles([]));
+    return () => {
+      off = true;
+    };
+  }, [letterId]);
+
+  if (files === null) return <span className="text-xs text-gray-300">…</span>;
+  if (files.length === 0) return <span className="text-xs text-gray-400">—</span>;
+  const first = files[0];
+  const open = async () => {
+    if (first.fileId == null) return;
+    previewFile({ name: first.name, url: await fileUrl(first.fileId, true), contentType: first.contentType });
+  };
+  const size = large ? "h-36 w-full" : "h-10 w-14";
+  return (
+    <button type="button" onClick={() => void open()} title={first.name} className="group block text-left">
+      {thumb ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={thumb} alt={first.name} className={`${size} rounded-md border border-gray-200 object-cover group-hover:border-brand-accent`} />
+      ) : (
+        <span
+          className={`flex ${large ? "h-36 w-full flex-col justify-center" : "max-w-[140px]"} items-center gap-1 rounded-md border border-gray-200 bg-gray-50 px-2 py-1 text-xs text-gray-600 group-hover:border-brand-accent group-hover:text-brand-accent`}
+        >
+          <FileText size={large ? 28 : 13} className="shrink-0" />
+          <span className="truncate">{first.name}</span>
+        </span>
+      )}
+      {files.length > 1 && <span className="mt-0.5 block text-[10px] text-gray-400">+{files.length - 1} more</span>}
+    </button>
   );
 }

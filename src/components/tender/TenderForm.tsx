@@ -509,7 +509,16 @@ export function TenderForm({
               placeholder="Defect liability period"
             />
           </DrawerField>
-          <TextField label="Stage Documents" value={f.stageDocuments} onChange={(v) => set({ stageDocuments: v })} />
+          {/* KAN-140: one document per line — Enter starts a new line. */}
+          <DrawerField label="Stage Documents">
+            <textarea
+              className="input min-h-[80px] resize-y"
+              rows={3}
+              value={f.stageDocuments ?? ""}
+              onChange={(e) => set({ stageDocuments: e.target.value })}
+              placeholder="One document per line"
+            />
+          </DrawerField>
           <TextField label="View Documents (link/name)" value={f.viewDocuments} onChange={(v) => set({ viewDocuments: v })} />
           <TextField label="Remarks" value={f.remarks} onChange={(v) => set({ remarks: v })} wide />
         </Section>

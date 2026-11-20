@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   Eye,
   EyeOff,
@@ -316,52 +317,91 @@ type MenuItem =
   | null
   | { label: string; icon: React.ReactNode; onClick: () => void; danger?: boolean };
 
+/**
+ * KAN-135: the menu is drawn at the page level (portal, fixed position) rather than inside the card.
+ * The card clips its overflow for the rounded thumbnail, which cut the open menu off — the ⋯ opened
+ * with nothing visible.
+ */
 function RowMenu({ items }: { items: MenuItem[] }) {
   const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState({ top: 0, left: 0 });
   const ref = useRef<HTMLDivElement>(null);
+  const panel = useRef<HTMLDivElement>(null);
   const actions = items.filter(Boolean) as Exclude<MenuItem, false | null | undefined>[];
 
   useEffect(() => {
     if (!open) return;
     const onAway = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+      const t = e.target as Node;
+      if (ref.current?.contains(t) || panel.current?.contains(t)) return;
+      setOpen(false);
     };
+    const close = () => setOpen(false);
     document.addEventListener("mousedown", onAway);
-    return () => document.removeEventListener("mousedown", onAway);
+    window.addEventListener("scroll", close, true);
+    window.addEventListener("resize", close);
+    return () => {
+      document.removeEventListener("mousedown", onAway);
+      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("resize", close);
+    };
   }, [open]);
 
   if (actions.length === 0) return null;
+
+  function toggle() {
+    if (!open) {
+      const b = ref.current?.getBoundingClientRect();
+      if (b) {
+        const width = 176;
+        const height = actions.length * 34 + 8;
+        const below = window.innerHeight - b.bottom > height + 8;
+        setPos({
+          top: below ? b.bottom + 4 : Math.max(8, b.top - height - 4),
+          left: Math.min(Math.max(8, b.right - width), window.innerWidth - width - 8),
+        });
+      }
+    }
+    setOpen((o) => !o);
+  }
 
   return (
     <div ref={ref} className="relative" onClick={(e) => e.stopPropagation()}>
       <button
         type="button"
-        onClick={() => setOpen((o) => !o)}
+        onClick={toggle}
         aria-label="More actions"
         className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
       >
         <MoreVertical size={15} />
       </button>
-      {open && (
-        <div className="absolute right-0 z-20 mt-1 w-44 overflow-hidden rounded-md border border-slate-200 bg-white py-1 shadow-lg">
-          {actions.map((a) => (
-            <button
-              key={a.label}
-              type="button"
-              onClick={() => {
-                setOpen(false);
-                a.onClick();
-              }}
-              className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-slate-50 ${
-                a.danger ? "text-rose-600" : "text-slate-700"
-              }`}
-            >
-              {a.icon}
-              {a.label}
-            </button>
-          ))}
-        </div>
-      )}
+      {open &&
+        createPortal(
+          <div
+            ref={panel}
+            onClick={(e) => e.stopPropagation()}
+            style={{ top: pos.top, left: pos.left }}
+            className="fixed z-[70] w-44 overflow-hidden rounded-md border border-slate-200 bg-white py-1 shadow-lg"
+          >
+            {actions.map((a) => (
+              <button
+                key={a.label}
+                type="button"
+                onClick={() => {
+                  setOpen(false);
+                  a.onClick();
+                }}
+                className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-slate-50 ${
+                  a.danger ? "text-rose-600" : "text-slate-700"
+                }`}
+              >
+                {a.icon}
+                {a.label}
+              </button>
+            ))}
+          </div>,
+          document.body,
+        )}
     </div>
   );
 }

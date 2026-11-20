@@ -40,7 +40,7 @@ import { ImportDialog } from "@/components/vyapar/ImportDialog";
 import { documentImportConfig } from "@/lib/vyaparImportConfigs";
 import * as vyapar from "@/lib/vyaparApi";
 import type { Invoice, InvoiceLine, Party } from "@/lib/vyaparApi";
-import { Download, FileText, Plus, Receipt, Search, Tags, Upload, X } from "lucide-react";
+import { Download, FileText, Paperclip, Plus, Receipt, Search, Tags, Upload, X } from "lucide-react";
 import { previewFile } from "@/lib/filePreview";
 import { isBackgroundRefresh, useAutoRefresh } from "@/lib/autoRefresh";
 import { todayIST } from "@/lib/datetime";
@@ -664,6 +664,9 @@ function ExpenseForm({
     documentName: existing?.documentName ?? null,
     documentDataUrl: existing?.documentDataUrl ?? null,
   });
+  // KAN-137: attach the bill/receipt by hand too (optional), not only through Scan with AI.
+  const attachInput = useRef<HTMLInputElement>(null);
+  const hasAttachment = !!(attachment.imageDataUrl || attachment.documentDataUrl);
   const projectId = useVyaparProjectId();
   const { projects } = useProjects();
   const [selectedProjectId, setSelectedProjectId] = useState(
@@ -883,6 +886,58 @@ function ExpenseForm({
           }}
           onResult={applyReceipt}
         />
+
+        {/* KAN-137: optional attachment — a photo or PDF of the bill, kept with the expense. */}
+        <div className="flex flex-wrap items-center gap-2 rounded-lg border border-dashed border-gray-200 px-3 py-2">
+          <Paperclip size={14} className="text-gray-400" />
+          <span className="text-xs font-medium text-gray-600">Attachment</span>
+          <span className="text-xs text-gray-400">(optional)</span>
+          {hasAttachment ? (
+            <>
+              <button
+                type="button"
+                onClick={() =>
+                  previewFile({
+                    name: attachment.documentName ?? "Receipt",
+                    url: attachment.imageDataUrl ?? attachment.documentDataUrl ?? null,
+                  })
+                }
+                className="flex items-center gap-1 text-xs font-medium text-brand-accent hover:underline"
+              >
+                <FileText size={13} /> {attachment.documentName ?? "Receipt"}
+              </button>
+              <button
+                type="button"
+                onClick={() => setAttachment({ imageDataUrl: null, documentName: null, documentDataUrl: null })}
+                aria-label="Remove attachment"
+                className="rounded p-0.5 text-gray-400 hover:bg-rose-50 hover:text-rose-600"
+              >
+                <X size={13} />
+              </button>
+            </>
+          ) : null}
+          <button
+            type="button"
+            onClick={() => attachInput.current?.click()}
+            className="ml-auto rounded-md border border-gray-200 bg-white px-2.5 py-1 text-xs font-medium text-gray-600 hover:border-brand-accent hover:text-brand-accent"
+          >
+            {hasAttachment ? "Replace" : "Attach bill / receipt"}
+          </button>
+          <input
+            ref={attachInput}
+            type="file"
+            accept="image/*,application/pdf"
+            hidden
+            onChange={async (e) => {
+              const file = e.target.files?.[0];
+              e.target.value = "";
+              if (!file) return;
+              const a = await fileToAttachment(file).catch(() => null);
+              if (a) setAttachment(a);
+              else setError("Couldn't read that file. Use a photo or PDF.");
+            }}
+          />
+        </div>
 
         <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
           <div className="space-y-3">

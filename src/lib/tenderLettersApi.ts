@@ -13,6 +13,8 @@ export interface TenderLetter {
   /** Optional tender number this letter is about. */
   tenderRef: string | null;
   createdAt: string | null;
+  /** KAN-138: RECEIVED (came in) or SENT (we sent it). `receivedThrough` holds "Send By" for SENT. */
+  direction: "RECEIVED" | "SENT";
 }
 
 export type TenderLetterInput = Omit<TenderLetter, "id" | "createdAt">;

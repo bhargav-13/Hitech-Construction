@@ -3,7 +3,9 @@
 import { useCan } from "@/lib/permissions";
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { ClipboardList, Plus, Search, Unlink } from "lucide-react";
+import { ClipboardList, Plus, Search, Trash2, Undo2, Unlink } from "lucide-react";
+import { RowMenu, RowMenuItem } from "@/components/RowMenu";
+import { canTransition } from "@/lib/tenderStateMachine";
 import { TenderShell, TenderEmpty } from "@/components/tender/TenderShell";
 import { TenderHealthChip } from "@/components/tender/TenderHealthChip";
 import { Modal } from "@/components/Modal";
@@ -43,7 +45,26 @@ export default function TenderAnalysisListPage() {
   const [picking, setPicking] = useState(false);
   const [attaching, setAttaching] = useState<TenderAnalysis | null>(null);
   // KAN-87: without Costs & Margins the list shows only what the tender is worth.
-  const showCosts = useCan()("TENDER_ANALYSIS_COSTS");
+  const can = useCan();
+  const showCosts = can("TENDER_ANALYSIS_COSTS");
+  // KAN-139: each action has its own switch in Roles & Access.
+  const canDelete = can("TENDER_ANALYSIS:DELETE");
+  const canBack = can("TENDER_ANALYSIS_BACK");
+  const removeAnalysis = useAnalysisStore((s) => s.removeAnalysis);
+  const setStage = useTenderStore((s) => s.setStage);
+  const [notice, setNotice] = useState<{ text: string; error: boolean } | null>(null);
+
+  async function backToSorting(a: TenderAnalysis, tender: Tender) {
+    if (!confirm(`Send tender ${tender.tenderId || a.tenderId} back to Sorting? The analysis is kept.`)) return;
+    const msg = await setStage(tender.id, "SORTING", null);
+    setNotice(msg ? { text: msg, error: true } : { text: `Tender ${tender.tenderId || a.tenderId} moved back to Sorting.`, error: false });
+  }
+
+  function deleteAnalysis(a: TenderAnalysis) {
+    if (!confirm(`Delete the analysis "${a.title}"? This cannot be undone.`)) return;
+    removeAnalysis(a.id);
+    setNotice({ text: `Analysis "${a.title}" deleted.`, error: false });
+  }
 
   const rows = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -119,6 +140,14 @@ export default function TenderAnalysisListPage() {
           </button>
         </header>
 
+        {notice && (
+          <div
+            className={`rounded-lg px-4 py-2 text-sm ${notice.error ? "bg-rose-50 text-rose-700" : "bg-emerald-50 text-emerald-700"}`}
+          >
+            {notice.text}
+          </div>
+        )}
+
         {orphans > 0 && (
           <div className="rounded-xl border border-amber-200 bg-amber-50/70 px-4 py-3 text-sm text-amber-800">
             <div className="flex items-start gap-2">
@@ -171,6 +200,7 @@ export default function TenderAnalysisListPage() {
                     </>
                   )}
                   <th className="px-4 py-2.5 text-left font-medium">Updated</th>
+                  {(canDelete || canBack) && <th className="w-12 px-2 py-2.5" />}
                 </tr>
               </thead>
               <tbody>
@@ -222,6 +252,37 @@ export default function TenderAnalysisListPage() {
                       </>
                     )}
                     <td className="px-4 py-2.5 text-xs text-gray-400">{tdate(a.updatedAt.slice(0, 10))}</td>
+                    {(canDelete || canBack) && (
+                      <td className="px-2 py-2.5 text-right">
+                        <RowMenu buttonLabel={`Actions for ${a.title}`}>
+                          {(close) => (
+                            <>
+                              {canBack && tender && canTransition(tender.stage, "SORTING") && (
+                                <RowMenuItem
+                                  icon={Undo2}
+                                  label="Back to Sorting"
+                                  onClick={() => {
+                                    close();
+                                    void backToSorting(a, tender);
+                                  }}
+                                />
+                              )}
+                              {canDelete && (
+                                <RowMenuItem
+                                  icon={Trash2}
+                                  label="Delete analysis"
+                                  tone="danger"
+                                  onClick={() => {
+                                    close();
+                                    deleteAnalysis(a);
+                                  }}
+                                />
+                              )}
+                            </>
+                          )}
+                        </RowMenu>
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>
