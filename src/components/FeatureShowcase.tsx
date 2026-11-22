@@ -11,7 +11,6 @@ import {
   MapPinned,
   ScanFace,
   Scale,
-  Sparkles,
   X,
   type LucideIcon,
 } from "lucide-react";
@@ -119,66 +118,65 @@ export function FeatureShowcase() {
   const close = () => setOpen(false);
 
   return (
-    <div className="fixed inset-0 z-[9500] flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-sm" onClick={close}>
+    <div className="fixed inset-0 z-[9500] flex items-center justify-center bg-slate-900/50 p-4" onClick={close}>
       <div
         role="dialog"
         aria-modal="true"
         aria-label="AI features"
         onClick={(e) => e.stopPropagation()}
-        className="relative max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-2xl bg-white shadow-2xl"
+        className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-xl border border-gray-200 bg-white shadow-xl"
       >
-        <button
-          onClick={close}
-          aria-label="Close"
-          className="absolute right-4 top-4 z-10 flex h-8 w-8 items-center justify-center rounded-lg text-white/80 hover:bg-white/15 hover:text-white"
-        >
-          <X size={18} />
-        </button>
-
-        <div className="bg-gradient-to-br from-violet-600 via-indigo-600 to-cyan-500 px-8 pb-7 pt-8 text-white">
-          <div className="inline-flex items-center gap-1.5 rounded-full bg-white/15 px-3 py-1 text-xs font-medium">
-            <Sparkles size={13} /> Built-in AI
+        <div className="flex items-start justify-between border-b border-gray-100 px-6 py-5">
+          <div>
+            <div className="text-xs font-medium text-brand-accent">What&apos;s inside</div>
+            <h2 className="mt-0.5 text-lg font-semibold text-gray-900">Welcome to {BRAND_NAME}</h2>
+            <p className="mt-1 text-sm text-gray-500">
+              Tenders, projects, purchase, billing and payroll in one place — with AI to take care of the paperwork.
+            </p>
           </div>
-          <h2 className="mt-3 text-2xl font-semibold leading-tight">Welcome to {BRAND_NAME}</h2>
-          <p className="mt-1.5 max-w-xl text-sm text-white/80">
-            Tenders, projects, purchase, billing and payroll in one place — with AI doing the paperwork for you.
-          </p>
+          <button
+            onClick={close}
+            aria-label="Close"
+            className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+          >
+            <X size={18} />
+          </button>
         </div>
 
-        <div className="px-8 py-6">
-          <div className="grid gap-4 md:grid-cols-3">
+        <div className="px-6 py-5">
+          <div className="text-xs font-semibold uppercase tracking-wide text-gray-400">AI features</div>
+          <div className="mt-2 grid gap-3 md:grid-cols-3">
             {AI_FEATURES.map((f) => (
               <Link
                 key={f.title}
                 href={f.href}
                 onClick={close}
-                className="group flex flex-col rounded-xl border border-violet-100 bg-gradient-to-b from-violet-50/70 to-white p-4 transition hover:-translate-y-0.5 hover:border-violet-300 hover:shadow-md"
+                className="group flex flex-col rounded-lg border border-gray-200 p-4 transition hover:border-brand-accent/40 hover:bg-cyan-50/40"
               >
-                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-gradient-to-br from-violet-500 to-cyan-500 text-white shadow-sm">
-                  <f.icon size={20} />
+                <div className="flex items-center gap-2.5">
+                  <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-cyan-50 text-brand-accent">
+                    <f.icon size={18} />
+                  </div>
+                  <div className="text-sm font-semibold text-gray-800">{f.title}</div>
                 </div>
-                <div className="mt-3 flex items-center gap-1.5 text-sm font-semibold text-gray-900">
-                  {f.title}
-                  <span className="rounded bg-violet-100 px-1.5 py-0.5 text-[10px] font-semibold text-violet-700">AI</span>
-                </div>
-                <p className="mt-1 flex-1 text-xs leading-relaxed text-gray-500">{f.body}</p>
-                <span className="mt-3 inline-flex items-center gap-1 text-xs font-medium text-violet-700 group-hover:gap-2">
+                <p className="mt-2.5 flex-1 text-xs leading-relaxed text-gray-500">{f.body}</p>
+                <span className="mt-3 inline-flex items-center gap-1 text-xs font-medium text-brand-accent group-hover:gap-1.5">
                   {f.cta} <ArrowRight size={13} className="transition-all" />
                 </span>
               </Link>
             ))}
           </div>
 
-          <div className="mt-6 text-xs font-semibold uppercase tracking-wide text-gray-400">Also smart</div>
+          <div className="mt-5 text-xs font-semibold uppercase tracking-wide text-gray-400">Also included</div>
           <div className="mt-2 grid gap-3 md:grid-cols-3">
             {SMART_FEATURES.map((f) => (
               <Link
                 key={f.title}
                 href={f.href}
                 onClick={close}
-                className="flex gap-3 rounded-xl border border-gray-100 p-3 transition hover:border-cyan-200 hover:bg-cyan-50/40"
+                className="flex gap-3 rounded-lg border border-gray-100 p-3 transition hover:border-brand-accent/40 hover:bg-cyan-50/40"
               >
-                <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg bg-cyan-50 text-cyan-700">
+                <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg bg-gray-50 text-gray-500">
                   <f.icon size={16} />
                 </div>
                 <div className="min-w-0">
@@ -188,16 +186,13 @@ export function FeatureShowcase() {
               </Link>
             ))}
           </div>
+        </div>
 
-          <div className="mt-6 flex items-center justify-between border-t border-gray-100 pt-4">
-            <span className="text-[11px] text-gray-400">Open this again any time from “AI features” in the sidebar.</span>
-            <button
-              onClick={close}
-              className="rounded-lg bg-brand-accent px-4 py-2 text-sm font-medium text-white hover:opacity-90"
-            >
-              Start exploring
-            </button>
-          </div>
+        <div className="flex items-center justify-between border-t border-gray-100 px-6 py-4">
+          <span className="text-[11px] text-gray-400">Open this again any time from “Features” in the sidebar.</span>
+          <button onClick={close} className="rounded-lg bg-brand-accent px-4 py-2 text-sm font-medium text-white hover:bg-brand-accent-strong">
+            Start exploring
+          </button>
         </div>
       </div>
     </div>

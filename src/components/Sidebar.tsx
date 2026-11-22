@@ -210,23 +210,18 @@ export function Sidebar() {
       {/* Self-service actions every signed-in person gets, not just admins: Punch, and a private
           To-Do list (board, calendar, reminders) that nobody else can read — Taskopad stays the
           team's task system. */}
-      {/* White-label (demo) builds: a standing way back into the AI feature tour. */}
+      {/* White-label (demo) builds: a standing way back into the feature tour. */}
       {WHITE_LABEL && (authUser || currentUser) && (
         <div className={`border-t border-sidebar-border px-3 pt-3 ${collapsed ? "flex justify-center" : ""}`}>
           <button
             onClick={openFeatureShowcase}
-            title="AI features"
-            className={`flex items-center gap-2 rounded-lg bg-gradient-to-r from-violet-500 to-cyan-500 text-sm font-medium text-white shadow-sm transition-all duration-150 hover:opacity-90 active:scale-95 ${
+            title="Features"
+            className={`flex items-center gap-2 rounded-lg border border-sidebar-border text-[12px] text-sidebar-text transition-all duration-150 hover:border-sidebar-active/40 hover:bg-sidebar-active/5 hover:text-sidebar-active active:scale-95 ${
               collapsed ? "h-9 w-9 justify-center" : "w-full px-3 py-2"
             }`}
           >
-            <Sparkles size={16} />
-            {!collapsed && (
-              <>
-                <span>AI features</span>
-                <span className="ml-auto rounded-full bg-white/25 px-1.5 py-0.5 text-[10px] font-semibold">NEW</span>
-              </>
-            )}
+            <Sparkles size={15} />
+            {!collapsed && <span>Features</span>}
           </button>
         </div>
       )}
