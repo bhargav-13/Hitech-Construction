@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type { NotificationDto } from "./tasksApi";
+import { BRAND_ICON } from "./brand";
 
 /**
  * Desktop (browser) notifications — the Chrome / Edge pop-ups — mirroring the in-app bell.
@@ -109,7 +110,7 @@ export function announceNew(userId: number, items: NotificationDto[]) {
 
   const show = (title: string, body: string, tag: string, link: string | null, id: number | null) => {
     try {
-      const n = new Notification(title, { body, tag, icon: "/logo.png", badge: "/logo.png" });
+      const n = new Notification(title, { body, tag, icon: BRAND_ICON, badge: BRAND_ICON });
       n.onclick = () => {
         window.focus();
         window.dispatchEvent(new CustomEvent(OPEN_EVENT, { detail: { id, link } }));

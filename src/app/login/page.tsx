@@ -6,6 +6,7 @@ import { Building2, Lock, Mail } from "lucide-react";
 import { useAppStore } from "@/lib/store";
 import { useAuthStore } from "@/lib/authStore";
 import { landingPath } from "@/lib/nav";
+import { BRAND_LOGO, BRAND_NAME, WHITE_LABEL, brandInitials } from "@/lib/brand";
 
 // Real login against the Spring Boot backend (hitech-backend). On success we also sign the
 // mock store into its seeded "Admin" user so the not-yet-migrated feature screens (which
@@ -19,7 +20,7 @@ export default function LoginPage() {
   const authLogin = useAuthStore((s) => s.login);
   const mockLogin = useAppStore((s) => s.login);
 
-  const [email, setEmail] = useState("admin@hitech.local");
+  const [email, setEmail] = useState(WHITE_LABEL ? "" : "admin@hitech.local");
   const [password, setPassword] = useState("");
 
   // Set while a sign-in from this form is landing, so the effect below doesn't race it with a
@@ -49,11 +50,16 @@ export default function LoginPage() {
         {/* Brand panel */}
         <div className="hidden flex-col justify-between bg-brand-accent p-8 text-white md:flex">
           <div className="flex items-center gap-3">
-            <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-white/15 text-lg font-bold">
-              HT
-            </div>
+            {BRAND_LOGO && WHITE_LABEL ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={BRAND_LOGO} alt="" className="h-11 w-11 rounded-xl bg-white object-contain p-1" />
+            ) : (
+              <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-white/15 text-lg font-bold">
+                {WHITE_LABEL ? brandInitials() : "HT"}
+              </div>
+            )}
             <div>
-              <div className="text-sm font-semibold">Hi-Tech Construction</div>
+              <div className="text-sm font-semibold">{BRAND_NAME}</div>
               <div className="text-xs text-white/70">Management Platform</div>
             </div>
           </div>
@@ -67,13 +73,13 @@ export default function LoginPage() {
               requests.
             </p>
           </div>
-          <div className="text-xs text-white/50">© Hi-Tech Construction · v1.0.0</div>
+          <div className="text-xs text-white/50">© {BRAND_NAME} · v1.0.0</div>
         </div>
 
         {/* Form panel */}
         <div className="p-8">
           <h1 className="text-lg font-semibold text-gray-800">Sign in</h1>
-          <p className="mt-1 text-sm text-gray-500">Sign in with your Hitech ERP account.</p>
+          <p className="mt-1 text-sm text-gray-500">Sign in with your {WHITE_LABEL ? "" : "Hitech ERP "}account.</p>
 
           <label className="mt-6 block">
             <span className="mb-1 block text-xs font-medium text-gray-500">Email</span>
@@ -84,7 +90,7 @@ export default function LoginPage() {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && signIn()}
-                placeholder="you@hitech.local"
+                placeholder={WHITE_LABEL ? "you@company.com" : "you@hitech.local"}
                 className="w-full bg-transparent py-2.5 text-sm outline-none"
               />
             </div>
@@ -115,10 +121,12 @@ export default function LoginPage() {
             {authLoading ? "Signing in…" : "Sign in"}
           </button>
 
-          <div className="mt-4 rounded-lg bg-gray-50 px-3 py-2 text-xs text-gray-500">
-            Test admin: <span className="font-semibold text-gray-700">admin@hitech.local</span> /{" "}
-            <span className="font-semibold text-gray-700">Admin@123</span>
-          </div>
+          {!WHITE_LABEL && (
+            <div className="mt-4 rounded-lg bg-gray-50 px-3 py-2 text-xs text-gray-500">
+              Test admin: <span className="font-semibold text-gray-700">admin@hitech.local</span> /{" "}
+              <span className="font-semibold text-gray-700">Admin@123</span>
+            </div>
+          )}
         </div>
       </div>
     </div>

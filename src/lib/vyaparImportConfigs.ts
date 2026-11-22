@@ -9,6 +9,7 @@ import * as vyapar from "./vyaparApi";
 import type { DocType } from "./vyaparApi";
 import type { ImportConfig } from "@/components/vyapar/ImportDialog";
 import { toIsoDate } from "./format";
+import { WHITE_LABEL } from "./brand";
 
 const has = (h: string, ...needles: string[]) => needles.some((n) => h.includes(n));
 const norm = (header: string) => header.toLowerCase().replace(/[^a-z]/g, "");
@@ -242,7 +243,7 @@ export const bankAccountImportConfig: ImportConfig = {
   template: {
     name: "bank-account-import-template",
     head: ["Account Name", "Bank Name", "Account Number", "IFSC Code", "Account Holder", "UPI ID", "Opening Balance"],
-    row: ["Current A/c", "HDFC Bank", "50100123456789", "HDFC0001234", "Hi-Tech Construction", "hitech@okhdfc", "0"],
+    row: ["Current A/c", "HDFC Bank", "50100123456789", "HDFC0001234", WHITE_LABEL ? "Your Company Pvt Ltd" : "Hi-Tech Construction", WHITE_LABEL ? "company@okhdfc" : "hitech@okhdfc", "0"],
   },
   preview: [
     { key: "name", label: "Account" },

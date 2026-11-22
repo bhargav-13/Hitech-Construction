@@ -10,6 +10,7 @@ import type { Rfq } from "./procurementApi";
 import type { SubconBill, WorkOrder } from "./workOrderApi";
 import type { Invoice, Party } from "./vyaparApi";
 import { invoicePrintModel } from "./vyaparExport";
+import { WHITE_LABEL } from "./brand";
 
 export interface PlaceInfo {
   name: string | null;
@@ -223,9 +224,11 @@ const SAMPLE_INVOICE = (docType: string): Invoice =>
     partyName: "Shree Nakoda Cement Products",
     billingName: null,
     billingAddress: "G-2, City Center, Udaipur Road, Nimbahera, Rajasthan 312601",
-    billToName: "Hi-Tech Construction",
-    billToAddress: "Office No. 420, Level 6, Opp. Imperial Heights, 150 Feet Ring Road, Rajkot, Gujarat 360005",
-    billToGstin: "24BKIPP9665F1ZP",
+    billToName: WHITE_LABEL ? "Your Company Pvt Ltd" : "Hi-Tech Construction",
+    billToAddress: WHITE_LABEL
+      ? "101, Business Park, Main Road, Ahmedabad, Gujarat 380001"
+      : "Office No. 420, Level 6, Opp. Imperial Heights, 150 Feet Ring Road, Rajkot, Gujarat 360005",
+    billToGstin: WHITE_LABEL ? "24AAAAA0000A1Z5" : "24BKIPP9665F1ZP",
     shipToName: "Sewerage Network Zone 8 & 9 at Ujjain",
     shipToAddress: "Vasant Vihar, Near Taramandal, Nanakheda, Ujjain, Madhya Pradesh 456010",
     shipToGstin: null,
@@ -291,7 +294,7 @@ export async function sampleModel(kind: DocKind): Promise<PrintModel> {
         woNo: "WO-24",
         title: "Manhole chamber construction",
         woDate: "2026-09-15",
-        vendorName: "Hitech Infraspace Pvt Ltd",
+        vendorName: WHITE_LABEL ? "Sample Contractors Pvt Ltd" : "Hitech Infraspace Pvt Ltd",
         vendorPhone: null,
         startDate: null,
         endDate: null,
@@ -301,7 +304,7 @@ export async function sampleModel(kind: DocKind): Promise<PrintModel> {
         itemSubTotal: 94500,
         taxAmount: 17010,
         orderValue: 111510,
-        bankAccountName: "Hitech Infraspace Pvt Ltd",
+        bankAccountName: WHITE_LABEL ? "Sample Contractors Pvt Ltd" : "Hitech Infraspace Pvt Ltd",
         bankAccountNumber: "50200012345678",
         bankIfsc: "HDFC0001234",
         bankName: "HDFC Bank",

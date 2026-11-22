@@ -6,6 +6,8 @@ import { WebLocationReporter } from "@/components/WebLocationReporter";
 import { TenderAnalysisSync } from "@/components/tender/TenderAnalysisSync";
 import { GlobalFilePreview } from "@/components/GlobalFilePreview";
 import { ChecklistPopupGate } from "@/components/task/ChecklistPopupGate";
+import { TrialGate } from "@/components/TrialGate";
+import { BRAND_ICON, BRAND_NAME, WHITE_LABEL } from "@/lib/brand";
 
 // Inter — the workhorse UI typeface used across production ERP / SaaS dashboards.
 const inter = Inter({
@@ -22,8 +24,9 @@ const jetbrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Hi-Tech Construction",
-  description: "Hi-Tech Construction internal management platform",
+  title: BRAND_NAME,
+  description: WHITE_LABEL ? "Construction management platform" : `${BRAND_NAME} internal management platform`,
+  icons: { icon: BRAND_ICON },
 };
 
 export default function RootLayout({
@@ -43,6 +46,7 @@ export default function RootLayout({
         {children}
         <GlobalFilePreview />
         <ChecklistPopupGate />
+        <TrialGate />
       </body>
     </html>
   );

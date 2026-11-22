@@ -2,6 +2,7 @@ import { useAppStore } from "./store";
 import type { ReportColumn } from "./reportSchema";
 import { formatLakh } from "./format";
 import { pick, randomDate, seededRandom } from "./random";
+import { WHITE_LABEL } from "./brand";
 
 const PEOPLE = [
   "Ramesh Patel",
@@ -19,7 +20,7 @@ const CLIENTS = [
   "Amreli Gram Panchayat",
   "GERI Testing Labs",
   "Directorate Urban Administration",
-  "Hi-Tech Construction Pvt Ltd",
+  WHITE_LABEL ? "Shree Ganesh Builders" : "Hi-Tech Construction Pvt Ltd",
 ];
 
 const PARTY_TYPES = ["Client", "Subcontractor", "Material Supplier", "Other Vendor"];

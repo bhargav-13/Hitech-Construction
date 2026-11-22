@@ -106,8 +106,8 @@ function statusOf(r: LiveLocationApi, sites: LiveSite[], now: number): Status {
       warning:
         phoneProblem ??
         (!r.trackingState
-          ? "Their phone hasn't sent anything yet. Ask them to open Hitech on the phone (the website in Chrome/Safari works too), go to Punch, and allow location when asked — the Punch screen shows whether it is sharing. A browser only shares while the page is open."
-          : "The phone stopped sending. Ask them to open Hitech on the phone again and keep Location (GPS) on."),
+          ? "Their phone hasn't sent anything yet. Ask them to open the app on the phone (the website in Chrome/Safari works too), go to Punch, and allow location when asked — the Punch screen shows whether it is sharing. A browser only shares while the page is open."
+          : "The phone stopped sending. Ask them to open the app on the phone again and keep Location (GPS) on."),
     };
   }
   if (sites.length > 0) {
@@ -183,7 +183,7 @@ export default function LiveMapPage() {
           <div>
             <h2 className="text-lg font-semibold text-gray-800">Live Staff Map</h2>
             <p className="mt-0.5 text-sm text-gray-500">
-              Where staff are now, from the Hitech mobile app. Only people set to <b>Yes</b> on the Tracking tab are tracked.
+              Where staff are now, from the mobile app. Only people set to <b>Yes</b> on the Tracking tab are tracked.
             </p>
           </div>
           <div className="inline-flex overflow-hidden rounded-lg border border-gray-200 bg-white">
@@ -291,7 +291,7 @@ function MapTab({ onManage }: { onManage: () => void }) {
         <PayrollEmpty
           icon={LocateFixed}
           title="Nobody is being tracked yet"
-          hint="Set tracking to Yes for the people you want on the map. Their phones start sending their location once they open the Hitech app and allow location access."
+          hint="Set tracking to Yes for the people you want on the map. Their phones start sending their location once they open the app and allow location access."
           action={<button onClick={onManage} className="rounded-lg bg-brand-accent px-4 py-2 text-sm font-medium text-white hover:opacity-90">Choose who is tracked</button>}
         />
       ) : (

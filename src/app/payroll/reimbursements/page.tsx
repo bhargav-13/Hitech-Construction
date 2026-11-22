@@ -307,7 +307,7 @@ function ClaimDetailDrawer({
               <Banknote size={15} /> Mark paid
             </button>
             <p className="mt-2 text-[11px] text-gray-400">
-              Records that Hi-Tech settled this claim manually — no money is moved by the system.
+              Records that the company settled this claim manually — no money is moved by the system.
             </p>
           </div>
         )}

@@ -21,6 +21,7 @@ import { gstRate } from "./gstRates";
 import { getTemplate, type DocKind, type DocTemplate } from "./docTemplates";
 import type { PrintModel } from "./docPdf";
 import { todayIST } from "@/lib/datetime";
+import { BRAND_LOGO } from "./brand";
 
 type Cell = string | number | null | undefined;
 
@@ -351,6 +352,9 @@ let appLogoCache: string | null | undefined;
  */
 export async function getAppLogo(): Promise<string | null> {
   if (appLogoCache !== undefined) return appLogoCache;
+  // A white-label build without its own logo prints no logo rather than Hi-Tech's.
+  const logoUrl = BRAND_LOGO;
+  if (!logoUrl) return (appLogoCache = null);
   try {
     appLogoCache = await new Promise<string>((resolve, reject) => {
       const img = new Image();
@@ -369,7 +373,7 @@ export async function getAppLogo(): Promise<string | null> {
         ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
         resolve(canvas.toDataURL("image/png"));
       };
-      img.src = "/logo.png";
+      img.src = logoUrl;
     });
   } catch {
     appLogoCache = null;

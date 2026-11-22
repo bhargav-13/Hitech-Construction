@@ -140,7 +140,7 @@ export default function FirmProfilePage() {
 
         <div className="grid grid-cols-1 gap-3 rounded-xl border border-gray-200 bg-white p-5 sm:grid-cols-2">
           <F label="Business Name" full>
-            <input value={profile.businessName ?? ""} onChange={(e) => set("businessName", e.target.value)} className="input" placeholder="Hitech Construction" />
+            <input value={profile.businessName ?? ""} onChange={(e) => set("businessName", e.target.value)} className="input" placeholder="Your business name" />
           </F>
           <F label="Address" full>
             <textarea value={profile.address ?? ""} onChange={(e) => set("address", e.target.value)} className="input" rows={2} placeholder="Street, city, PIN" />

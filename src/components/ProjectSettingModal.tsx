@@ -13,6 +13,7 @@ import { useAuthStore } from "@/lib/authStore";
 import { useDrawerDismiss } from "@/lib/useDrawerDismiss";
 import * as api from "@/lib/api";
 import type { ProjectResponse } from "@/lib/api";
+import { WHITE_LABEL } from "@/lib/brand";
 
 const STAGES = [
   "Received LOA",
@@ -34,7 +35,10 @@ const CATEGORIES = [
   "Directorate Urban Administration and Development",
   "Gujarat State Electricity Corporation Limited",
 ];
-const BRANCHES = ["Hi-Tech Construction - Head Office", "Hi-Tech Construction - Rajkot Branch"];
+// Hi-Tech projects already store the old branch names, so its own install keeps them.
+const BRANCHES = WHITE_LABEL
+  ? ["Head Office", "Branch Office"]
+  : ["Hi-Tech Construction - Head Office", "Hi-Tech Construction - Rajkot Branch"];
 
 const TABS = ["Project Details", "Members", "Location Structure"] as const;
 type Tab = (typeof TABS)[number];

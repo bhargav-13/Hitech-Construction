@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Check, ChevronDown, Lock, Settings } from "lucide-react";
 import { useCompanies, switchCompany, companyAccent, companyInitials, type Company } from "@/lib/companyScope";
+import { BRAND_LOGO, BRAND_NAME, brandInitials } from "@/lib/brand";
 
 /**
  * The company switcher that sits where the firm's name used to be printed at the top of the sidebar.
@@ -166,22 +167,27 @@ function CompanyMark({ company, size }: { company: Company; size: number }) {
  * an empty gap.
  */
 function BrandFallback({ collapsed }: { collapsed: boolean }) {
-  if (collapsed) {
-    return (
-      // eslint-disable-next-line @next/next/no-img-element
-      <img src="/logo.png" alt="" className="h-[38px] w-[38px] rounded-xl bg-white object-contain p-1 shadow-sm" />
-    );
-  }
+  // White-label builds without their own logo show an initials badge, never Hi-Tech's mark.
+  const mark = BRAND_LOGO ? (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={BRAND_LOGO}
+      alt=""
+      className={`${collapsed ? "h-[38px] w-[38px]" : "h-[42px] w-[42px]"} flex-shrink-0 rounded-xl bg-white object-contain p-1 shadow-sm`}
+    />
+  ) : (
+    <div
+      className={`${collapsed ? "h-[38px] w-[38px]" : "h-[42px] w-[42px]"} flex flex-shrink-0 items-center justify-center rounded-xl bg-white text-sm font-bold text-cyan-700 shadow-sm`}
+    >
+      {brandInitials()}
+    </div>
+  );
+  if (collapsed) return mark;
   return (
     <div className="flex min-w-0 flex-1 items-center gap-3 p-1">
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img
-        src="/logo.png"
-        alt="Hi-Tech Construction"
-        className="h-[42px] w-[42px] flex-shrink-0 rounded-xl bg-white object-contain p-1 shadow-sm"
-      />
+      {mark}
       <div className="min-w-0">
-        <div className="truncate text-[15px] font-semibold leading-tight text-white">Hi-Tech Construction</div>
+        <div className="truncate text-[15px] font-semibold leading-tight text-white">{BRAND_NAME}</div>
       </div>
     </div>
   );

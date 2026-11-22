@@ -7,6 +7,7 @@ import * as api from "@/lib/api";
 import { useAppStore } from "@/lib/store";
 import { projectAvatarColor, projectInitials } from "@/lib/projectHelpers";
 import type { Project } from "@/lib/types";
+import { WHITE_LABEL } from "@/lib/brand";
 
 const STAGES = [
   "Received LOA",
@@ -28,7 +29,10 @@ const CATEGORIES = [
   "Directorate Urban Administration and Development",
   "Gujarat State Electricity Corporation Limited",
 ];
-const BRANCHES = ["Hi-Tech Construction - Head Office", "Hi-Tech Construction - Rajkot Branch"];
+// Hi-Tech projects already store the old branch names, so its own install keeps them.
+const BRANCHES = WHITE_LABEL
+  ? ["Head Office", "Branch Office"]
+  : ["Hi-Tech Construction - Head Office", "Hi-Tech Construction - Rajkot Branch"];
 const STATUS_OPTIONS = ["Not Started", "Ongoing", "Onhold", "Completed"] as const;
 const HEALTH_OPTIONS = ["Healthy", "At Risk"] as const;
 

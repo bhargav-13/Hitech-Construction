@@ -99,7 +99,7 @@ export function StaffLoginDialog({ employee, onClose }: { employee: Employee; on
         {mode === "CREATE" ? (
           <>
             <F label="Login Email" required>
-              <input value={email} onChange={(e) => setEmail(e.target.value)} className="input" placeholder="name@hitech.local" autoFocus />
+              <input value={email} onChange={(e) => setEmail(e.target.value)} className="input" placeholder="name@company.com" autoFocus />
             </F>
             <F label="Role" required>
               <Select value={roleValue} onChange={setRoleId} placeholder={loading ? "Loading roles…" : "Select role"} options={roles.map((r) => ({ value: String(r.id), label: r.name }))} />

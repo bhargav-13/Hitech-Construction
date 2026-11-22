@@ -149,7 +149,7 @@ function NewCompanyModal({ onClose }: { onClose: () => void }) {
             value={name}
             onChange={(e) => setName(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter") save(); }}
-            placeholder="e.g. Hi-Tech Infra"
+            placeholder="e.g. Acme Infra"
             className="input"
             autoFocus
           />

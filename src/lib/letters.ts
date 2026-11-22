@@ -1,3 +1,4 @@
+import { WHITE_LABEL } from "./brand";
 /**
  * HR letters — offer, appointment, increment, experience, relieving and the rest.
  *
@@ -283,7 +284,7 @@ export const SAMPLE_LETTER_VALUES: Record<string, string> = {
   firstName: "Aniket",
   designation: "Site Engineer",
   department: "Civil",
-  staffId: "HT-0142",
+  staffId: WHITE_LABEL ? "EMP-0142" : "HT-0142",
   joiningDate: "1 June 2024",
   address: "12, Shanti Nagar, Rajkot, Gujarat 360005",
   fatherName: "Ramesh Rami",
@@ -292,9 +293,9 @@ export const SAMPLE_LETTER_VALUES: Record<string, string> = {
   basic: "Rs. 22,500",
   pan: "ABCDE1234F",
   uan: "100912345678",
-  company: "Hi-Tech Construction",
+  company: WHITE_LABEL ? "Your Company Pvt Ltd" : "Hi-Tech Construction",
   date: "26 October 2026",
-  refNo: "HTC/HR/2026/118",
+  refNo: WHITE_LABEL ? "HR/2026/118" : "HTC/HR/2026/118",
   effectiveDate: "1 November 2026",
   lastWorkingDate: "31 October 2026",
   offerValidTill: "5 November 2026",

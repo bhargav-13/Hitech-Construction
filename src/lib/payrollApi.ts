@@ -14,6 +14,7 @@ import { useAuthStore } from "./authStore";
 import type { StaffCategory, AttendanceCode } from "./payrollConfig";
 import { DEPARTMENTS } from "./payrollConfig";
 import type { PayrollProfileResponse } from "./api";
+import { WHITE_LABEL } from "./brand";
 
 // ---------------- Types ----------------
 
@@ -206,7 +207,7 @@ function seedEmployees(): Employee[] {
       department,
       designation,
       phone: `98${String(76543210 - i * 111).slice(0, 8)}`,
-      email: category === "REGULAR" ? `${name.split(" ")[0].toLowerCase()}@hitech.local` : null,
+      email: category === "REGULAR" ? `${name.split(" ")[0].toLowerCase()}@${WHITE_LABEL ? "company.com" : "hitech.local"}` : null,
       joiningDate: monthsAgo(6 + i),
       active: i !== 11,
       salary: {

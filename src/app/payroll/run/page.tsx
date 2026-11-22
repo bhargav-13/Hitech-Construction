@@ -778,7 +778,7 @@ function PaymentPanel({ monthKey, slips, status, profiles, onChanged }: {
         <button onClick={() => slips.filter((p) => p.payStatus === "PAID").forEach((p) => downloadPayslip(p, p.memberName, { profile: profiles[p.userId] }))} className="flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-600 hover:bg-gray-50">
           <Download size={14} /> Payslips of paid staff
         </button>
-        <span className="text-xs text-gray-400">Online payout is not available — Hi-Tech pays by bank / cash and records it here.</span>
+        <span className="text-xs text-gray-400">Online payout is not available — the company pays by bank / cash and records it here.</span>
       </div>
       <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white">
         <table className="w-full min-w-[720px] text-sm">

@@ -29,6 +29,7 @@ import type {
 } from "./types";
 import { TXN_TYPE_META } from "./types";
 import { AUTH_STORAGE_KEY } from "./auth";
+import { WHITE_LABEL } from "./brand";
 
 const RB_DIVISION = "Road and Building Division";
 
@@ -56,7 +57,7 @@ type SeedProject = Omit<
 
 const PROJECTS: SeedProject[] = [
   { name: "Construction of CC Road", category: "Directorate Urban Administration and Development", status: "Not Started", health: "Healthy", startDate: "", endDate: "", stage: "Received LOA", address: "", city: "" },
-  { name: "HI-TECH OFFICE", category: "", status: "Ongoing", health: "Healthy", startDate: "", endDate: "", stage: "", address: "", city: "" },
+  { name: WHITE_LABEL ? "HEAD OFFICE" : "HI-TECH OFFICE", category: "", status: "Ongoing", health: "Healthy", startDate: "", endDate: "", stage: "", address: "", city: "" },
   { name: "Ishwariya (Gram Panchayat) Amreli", category: RB_DIVISION, status: "Ongoing", health: "At Risk", startDate: "13-Jan-2026", endDate: "13-Jul-2026", stage: "Pending For Land Clearance", address: "Village Ishwariya, Tal. Kunkavav, Amreli", city: "Amreli" },
   { name: "Jetpur (Fire System)", category: "", status: "Completed", health: "At Risk", startDate: "22-Oct-2024", endDate: "22-Nov-2024", stage: "Completed", address: "Jetpur, Jetpur", city: "Jetpur" },
   { name: "Lakhapadar (Gram Panchayat) Amreli", category: RB_DIVISION, status: "Ongoing", health: "At Risk", startDate: "13-Jan-2026", endDate: "13-Jul-2026", stage: "Pending For Land Clearance", address: "Village Lakhapadar, Ta. Kunkavav, Amreli", city: "Amreli" },
@@ -403,8 +404,8 @@ const SEED_PAYMENT_REQUESTS: PaymentRequest[] = [
 
 const SEED_ACCOUNTS: BankAccount[] = [
   { id: "acc-1", name: "Cash Account", type: "Cash", balance: 2363293, isPrimary: false },
-  { id: "acc-2", name: "HDFC Bank - Current", type: "Bank", accountNo: "50100XXXX9933", balance: 3279671, isPrimary: true, acHolder: "Hi-Tech Construction", ifsc: "HDFC0001234", upi: "hitech@hdfc", openingBalance: 500000 },
-  { id: "acc-3", name: "SBI - Site Operations", type: "Bank", accountNo: "3812XXXX3456", balance: 916377, isPrimary: false, acHolder: "Hi-Tech Construction", ifsc: "SBIN0005678", upi: "", openingBalance: 250000 },
+  { id: "acc-2", name: "HDFC Bank - Current", type: "Bank", accountNo: "50100XXXX9933", balance: 3279671, isPrimary: true, acHolder: WHITE_LABEL ? "Your Company Pvt Ltd" : "Hi-Tech Construction", ifsc: "HDFC0001234", upi: WHITE_LABEL ? "company@hdfc" : "hitech@hdfc", openingBalance: 500000 },
+  { id: "acc-3", name: "SBI - Site Operations", type: "Bank", accountNo: "3812XXXX3456", balance: 916377, isPrimary: false, acHolder: WHITE_LABEL ? "Your Company Pvt Ltd" : "Hi-Tech Construction", ifsc: "SBIN0005678", upi: "", openingBalance: 250000 },
 ];
 
 const SEED_WAREHOUSES: Warehouse[] = [

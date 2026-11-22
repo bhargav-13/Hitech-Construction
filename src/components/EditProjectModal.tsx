@@ -5,6 +5,7 @@ import { Modal } from "./Modal";
 import { useAppStore } from "@/lib/store";
 import { projectAvatarColor, projectInitials } from "@/lib/projectHelpers";
 import type { Project } from "@/lib/types";
+import { WHITE_LABEL } from "@/lib/brand";
 
 const STAGES = ["Received LOA", "Pending For Land Clearance", "Sample Testing At GERI", "Final Bill In Progress", "Completed"];
 const CATEGORIES = ["Road and Building Division", "Rajkot Municipal Corporation", "Directorate Urban Administration and Development"];
@@ -144,8 +145,8 @@ export function EditProjectModal({
                 className="input"
               >
                 <option value="">Select Company Address</option>
-                <option>Hi-Tech Construction - Head Office</option>
-                <option>Hi-Tech Construction - Rajkot Branch</option>
+                <option>{WHITE_LABEL ? "Head Office" : "Hi-Tech Construction - Head Office"}</option>
+                <option>{WHITE_LABEL ? "Branch Office" : "Hi-Tech Construction - Rajkot Branch"}</option>
               </select>
             </Field>
           </div>

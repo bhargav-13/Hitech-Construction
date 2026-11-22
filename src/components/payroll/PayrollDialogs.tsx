@@ -163,7 +163,7 @@ export function AddPaymentDialog({
         <Field label="Description">
           <input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Enter description" className="input w-full" />
         </Field>
-        <p className="text-[11px] text-gray-400">This records a payment Hi-Tech made by hand (cash / bank / UPI). The system never transfers money.</p>
+        <p className="text-[11px] text-gray-400">This records a payment the company made by hand (cash / bank / UPI). The system never transfers money.</p>
       </Shell>
     </Modal>
   );
