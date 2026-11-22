@@ -23,7 +23,14 @@ export const BRAND_NAME = envName || "Hi-Tech Construction";
 export const BRAND_LOGO: string | null = envLogo || (WHITE_LABEL ? null : "/logo.png");
 
 /** Favicon / notification icon. Never null — falls back to a neutral mark on white-label builds. */
-export const BRAND_ICON = envLogo || (WHITE_LABEL ? "/brand-mark.svg" : "/favicon.ico");
+export const BRAND_ICON = envLogo || (WHITE_LABEL ? "/brand-icon.svg" : "/favicon.ico");
+
+/**
+ * Vendor credit ("Powered by …") shown on white-label builds only. NEXT_PUBLIC_POWERED_BY
+ * overrides the name; set it to "-" to hide the credit.
+ */
+const envPoweredBy = process.env.NEXT_PUBLIC_POWERED_BY?.trim() || "";
+export const POWERED_BY: string | null = !WHITE_LABEL || envPoweredBy === "-" ? null : envPoweredBy || "Codelix IT Solutions";
 
 /** Two-letter mark for the brand — "Hi-Tech Construction" → "HC", "Acme" → "AC". */
 export function brandInitials(name: string = BRAND_NAME): string {

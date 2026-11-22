@@ -31,6 +31,7 @@ import {
   BadgeCheck,
   LifeBuoy,
   LayoutTemplate,
+  Sparkles,
 } from "lucide-react";
 import { NAV_ITEMS, NAV_BREAK_AFTER, NAV_MODULE, NAV_ANY_MODULE } from "@/lib/nav";
 import { useAppStore } from "@/lib/store";
@@ -42,6 +43,8 @@ import { useApprovalInboxCount } from "@/lib/approvals";
 import { projectAvatarColor, projectInitials } from "@/lib/projectHelpers";
 import { CompanySwitcher } from "@/components/CompanySwitcher";
 import { useCompanies, companyAccent } from "@/lib/companyScope";
+import { POWERED_BY, WHITE_LABEL } from "@/lib/brand";
+import { openFeatureShowcase } from "@/components/FeatureShowcase";
 
 const ICONS: Record<string, React.ComponentType<{ size?: number; className?: string }>> = {
   Dashboard: LayoutGrid,
@@ -207,6 +210,27 @@ export function Sidebar() {
       {/* Self-service actions every signed-in person gets, not just admins: Punch, and a private
           To-Do list (board, calendar, reminders) that nobody else can read — Taskopad stays the
           team's task system. */}
+      {/* White-label (demo) builds: a standing way back into the AI feature tour. */}
+      {WHITE_LABEL && (authUser || currentUser) && (
+        <div className={`border-t border-sidebar-border px-3 pt-3 ${collapsed ? "flex justify-center" : ""}`}>
+          <button
+            onClick={openFeatureShowcase}
+            title="AI features"
+            className={`flex items-center gap-2 rounded-lg bg-gradient-to-r from-violet-500 to-cyan-500 text-sm font-medium text-white shadow-sm transition-all duration-150 hover:opacity-90 active:scale-95 ${
+              collapsed ? "h-9 w-9 justify-center" : "w-full px-3 py-2"
+            }`}
+          >
+            <Sparkles size={16} />
+            {!collapsed && (
+              <>
+                <span>AI features</span>
+                <span className="ml-auto rounded-full bg-white/25 px-1.5 py-0.5 text-[10px] font-semibold">NEW</span>
+              </>
+            )}
+          </button>
+        </div>
+      )}
+
       {(authUser || currentUser) && (
         <div className={`grid gap-2 border-t border-sidebar-border px-3 py-3 ${collapsed ? "grid-cols-1" : "grid-cols-2"}`}>
           <QuickAction icon={MapPin} label="Punch" href="/punch" collapsed={collapsed} active={pathname.startsWith("/punch")} />
@@ -243,6 +267,9 @@ export function Sidebar() {
                 <LogOut size={16} />
               </button>
             </div>
+          )}
+          {POWERED_BY && !collapsed && (
+            <div className="mt-2 text-center text-[10px] text-sidebar-text/70">Powered by {POWERED_BY}</div>
           )}
         </div>
       )}

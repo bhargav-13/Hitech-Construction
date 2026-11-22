@@ -7,6 +7,7 @@ import { TenderAnalysisSync } from "@/components/tender/TenderAnalysisSync";
 import { GlobalFilePreview } from "@/components/GlobalFilePreview";
 import { ChecklistPopupGate } from "@/components/task/ChecklistPopupGate";
 import { TrialGate } from "@/components/TrialGate";
+import { FeatureShowcase } from "@/components/FeatureShowcase";
 import { BRAND_ICON, BRAND_NAME, WHITE_LABEL } from "@/lib/brand";
 
 // Inter — the workhorse UI typeface used across production ERP / SaaS dashboards.
@@ -46,6 +47,7 @@ export default function RootLayout({
         {children}
         <GlobalFilePreview />
         <ChecklistPopupGate />
+        <FeatureShowcase />
         <TrialGate />
       </body>
     </html>

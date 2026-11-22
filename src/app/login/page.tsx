@@ -6,7 +6,7 @@ import { Building2, Lock, Mail } from "lucide-react";
 import { useAppStore } from "@/lib/store";
 import { useAuthStore } from "@/lib/authStore";
 import { landingPath } from "@/lib/nav";
-import { BRAND_LOGO, BRAND_NAME, WHITE_LABEL, brandInitials } from "@/lib/brand";
+import { BRAND_LOGO, BRAND_NAME, POWERED_BY, WHITE_LABEL, brandInitials } from "@/lib/brand";
 
 // Real login against the Spring Boot backend (hitech-backend). On success we also sign the
 // mock store into its seeded "Admin" user so the not-yet-migrated feature screens (which
@@ -73,7 +73,10 @@ export default function LoginPage() {
               requests.
             </p>
           </div>
-          <div className="text-xs text-white/50">© {BRAND_NAME} · v1.0.0</div>
+          <div className="text-xs text-white/50">
+            © {BRAND_NAME} · v1.0.0
+            {POWERED_BY && <span className="block pt-1">Powered by {POWERED_BY}</span>}
+          </div>
         </div>
 
         {/* Form panel */}
@@ -120,6 +123,10 @@ export default function LoginPage() {
           >
             {authLoading ? "Signing in…" : "Sign in"}
           </button>
+
+          {POWERED_BY && (
+            <p className="mt-6 text-center text-[11px] text-gray-400 md:hidden">Powered by {POWERED_BY}</p>
+          )}
 
           {!WHITE_LABEL && (
             <div className="mt-4 rounded-lg bg-gray-50 px-3 py-2 text-xs text-gray-500">
