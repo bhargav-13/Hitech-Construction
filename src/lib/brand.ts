@@ -32,6 +32,9 @@ export const BRAND_ICON = envLogo || (WHITE_LABEL ? "/brand-icon.svg" : "/favico
 const envPoweredBy = process.env.NEXT_PUBLIC_POWERED_BY?.trim() || "";
 export const POWERED_BY: string | null = !WHITE_LABEL || envPoweredBy === "-" ? null : envPoweredBy || "Codelix IT Solutions";
 
+/** Our product's own name, used where the vendor's product is marketed (the feature tour). */
+export const PRODUCT_NAME = process.env.NEXT_PUBLIC_PRODUCT_NAME?.trim() || "Construction ERP";
+
 /** Two-letter mark for the brand — "Hi-Tech Construction" → "HC", "Acme" → "AC". */
 export function brandInitials(name: string = BRAND_NAME): string {
   const words = name.replace(/[^A-Za-z0-9 ]+/g, " ").trim().split(/\s+/).filter(Boolean);
