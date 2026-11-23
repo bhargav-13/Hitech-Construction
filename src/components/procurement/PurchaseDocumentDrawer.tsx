@@ -9,10 +9,11 @@ import { getItems } from "@/lib/vyaparApi";
 import type { Item, Party } from "@/lib/vyaparApi";
 import { Drawer } from "@/components/Drawer";
 import { Spinner } from "@/components/Spinner";
-import { getPurchaseDocument, getVendor, getVendors, updatePurchaseDocument } from "@/lib/purchaseApi";
+import { getPurchaseDocument, getVendor, getVendors, setPurchaseOrderClosed, updatePurchaseDocument } from "@/lib/purchaseApi";
 import { downloadInvoicePdf } from "@/lib/vyaparExport";
 import { DOC_APPROVAL_TYPE, useApprovalStates } from "@/lib/approvals";
 import { ApprovalPanel } from "@/components/approval/ApprovalBadge";
+import { PoDraftBar } from "@/components/approval/PoDraftBar";
 import { inr } from "@/lib/format";
 import type { Invoice } from "@/lib/vyaparApi";
 import { DOC_STATUS_CLS } from "@/components/procurement/PurchaseDocumentList";
@@ -109,6 +110,26 @@ export function PurchaseDocumentDrawer({
   const [editing, setEditing] = useState<{ parties: Party[]; items: Item[] } | null>(null);
   const [editLoading, setEditLoading] = useState(false);
   const [editError, setEditError] = useState("");
+  const [closing, setClosing] = useState(false);
+  /** Onsite's PO Status Close / Reopen — a closed PO drops out of Pending to Receive. */
+  async function toggleClosed() {
+    const closing = !doc.poClosed;
+    if (
+      closing &&
+      !confirm(`Close ${doc.invoiceNo ?? "this PO"}? Whatever hasn't arrived yet stops showing in Pending to Receive. You can reopen it later.`)
+    )
+      return;
+    setClosing(true);
+    setEditError("");
+    try {
+      setDoc(await setPurchaseOrderClosed(doc.id, closing));
+      onSaved?.();
+    } catch (e) {
+      setEditError(e instanceof Error ? e.message : "Couldn't change the PO status.");
+    } finally {
+      setClosing(false);
+    }
+  }
   async function startEdit() {
     setEditLoading(true);
     setEditError("");
@@ -179,6 +200,15 @@ export function PurchaseDocumentDrawer({
               {doc.docType === "PURCHASE_RETURN" ? "Debit notes are edited in Vyapar." : "Your role can view this but not edit it."}
             </span>
           )}
+          {isPo && editable && !doc.cancelled && (
+            <button
+              onClick={() => void toggleClosed()}
+              disabled={closing || loading}
+              className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 transition hover:border-brand-accent hover:text-brand-accent disabled:opacity-60"
+            >
+              {closing ? "Saving…" : doc.poClosed ? "Reopen PO" : "Close PO"}
+            </button>
+          )}
           {editError && <span className="text-xs text-rose-600">{editError}</span>}
           {canOpenVyapar && (
             <Link
@@ -216,9 +246,21 @@ export function PurchaseDocumentDrawer({
             >
               {doc.status ?? "—"}
             </span>
+            {isPo && !doc.cancelled && (
+              <span
+                className={`rounded-full px-2 py-0.5 text-[11px] font-medium ring-1 ring-inset ${
+                  doc.poClosed ? "bg-gray-100 text-gray-600 ring-gray-400/20" : "bg-sky-50 text-sky-700 ring-sky-600/20"
+                }`}
+              >
+                {doc.poClosed ? "Closed" : "Open"}
+              </span>
+            )}
           </div>
         </div>
 
+        {approvalType === "PURCHASE_ORDER" && !approval && !loading && (
+          <PoDraftBar entityId={documentId} onPublished={reloadApproval} />
+        )}
         {approvalType && approval && (
           <ApprovalPanel
             entityType={approvalType}

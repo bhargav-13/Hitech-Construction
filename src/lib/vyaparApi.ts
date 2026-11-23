@@ -211,6 +211,8 @@ export interface Invoice {
   status: "Paid" | "Partial" | "Unpaid" | "Cancelled";
   /** Cancelled documents keep their number but stop counting towards balances and stock. */
   cancelled: boolean;
+  /** Purchase orders: closed (Onsite's PO Status "Close") — nothing more is expected against it. */
+  poClosed?: boolean;
   notes: string | null;
   /** Vyapar's ADD DESCRIPTION — free text carried with the document. */
   description: string | null;
@@ -431,8 +433,9 @@ export interface InvoiceInput {
 export const getInvoices = (docType?: DocType, projectId?: number) =>
   apiRequest<Invoice[]>(`${BASE}/invoices${qs({ docType, projectId })}`);
 export const getInvoice = (id: number) => apiRequest<Invoice>(`${BASE}/invoices/${id}`);
-export const createInvoice = (body: InvoiceInput) =>
-  apiRequest<Invoice>(`${BASE}/invoices`, { method: "POST", body });
+/** `draft` (purchase orders only): save without sending it for approval — Onsite's "Save as Draft". */
+export const createInvoice = (body: InvoiceInput, opts?: { draft?: boolean }) =>
+  apiRequest<Invoice>(`${BASE}/invoices${opts?.draft ? "?draft=true" : ""}`, { method: "POST", body });
 export const updateInvoice = (id: number, body: InvoiceInput) =>
   apiRequest<Invoice>(`${BASE}/invoices/${id}`, { method: "PUT", body });
 export const deleteInvoice = (id: number) =>

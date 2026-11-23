@@ -143,7 +143,7 @@ export function InvoiceWorkspace({
   const [sharing, setSharing] = useState<{ inv: Invoice; channel: ShareChannel } | null>(null);
 
   const poStatus = (i: Invoice) =>
-    i.cancelled ? "Cancelled" : /Onsite PO status:\s*Closed/i.test(i.description ?? "") ? "Closed" : "Open";
+    i.cancelled ? "Cancelled" : i.poClosed || /Onsite PO status:\s*Closed/i.test(i.description ?? "") ? "Closed" : "Open";
   /**
    * KAN-76: approve or reject an order straight from the list when it's waiting on you. Rejecting
    * cancels the PO (it keeps its number and can be reopened once it's fixed) — the approval chain's
@@ -605,7 +605,7 @@ export function InvoiceWorkspace({
                 approvalFilter === s ? "bg-navy text-white shadow-sm" : "bg-white text-gray-600 ring-1 ring-gray-200 hover:bg-gray-50"
               }`}
             >
-              {s === "All" ? "All approvals" : s === "Mine" ? "Waiting on me" : s}
+              {s === "All" ? "All approvals" : s === "Mine" ? "Waiting on me" : s === "Not sent" ? "Draft" : s}
             </button>
           ))}
       </div>
@@ -705,13 +705,13 @@ export function InvoiceWorkspace({
                     <td className="px-4 py-2.5" onClick={(e) => e.stopPropagation()}>
                       {approvalBucket(i) === "Not sent" && !i.cancelled ? (
                         <span className="flex items-center gap-1.5 whitespace-nowrap">
-                          <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-500">Not sent</span>
+                          <span className="rounded-full bg-sky-50 px-2 py-0.5 text-[10px] font-semibold text-sky-700">Draft</span>
                           <button
                             onClick={() => void sendForApproval(i)}
                             disabled={sending === i.id}
                             className="text-[11px] font-medium text-brand-accent hover:underline disabled:opacity-50"
                           >
-                            {sending === i.id ? "Sending…" : "Send"}
+                            {sending === i.id ? "Publishing…" : "Publish"}
                           </button>
                         </span>
                       ) : (

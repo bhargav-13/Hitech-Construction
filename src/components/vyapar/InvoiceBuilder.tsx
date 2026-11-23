@@ -34,6 +34,7 @@ import {
   type ScannedBill,
 } from "@/lib/docScan";
 import { BillPreviewPane, type ScanNote } from "@/components/vyapar/BillPreviewPane";
+import { PoDraftBar } from "@/components/approval/PoDraftBar";
 import { ApprovalPanel } from "@/components/approval/ApprovalBadge";
 import type { ApprovalState } from "@/lib/api";
 import { shareInvoice } from "@/components/vyapar/TxnRowActions";
@@ -191,9 +192,12 @@ export function InvoiceBuilder({
   onApprovalChanged,
   saveExisting,
   createNew,
+  hideSaveAndNew = false,
 }: {
+  /** No "Save & New" — the form was opened for one specific job (e.g. billing ticked deliveries). */
+  hideSaveAndNew?: boolean;
   /** Creates a new document through another module's endpoint (Procurement raises POs itself). */
-  createNew?: (body: vyapar.InvoiceInput) => Promise<Invoice>;
+  createNew?: (body: vyapar.InvoiceInput, opts?: { draft?: boolean }) => Promise<Invoice>;
   /**
    * Saves an edit through another module's endpoint — Procurement edits POs and bills through its
    * own window so buyers don't need Vyapar access. Defaults to Vyapar's own update.
@@ -987,7 +991,7 @@ export function InvoiceBuilder({
   }
 
   /** Returns the saved document so the Print / Share actions can act on it, or null if it failed. */
-  async function save(again = false): Promise<Invoice | null> {
+  async function save(again = false, asDraft = false): Promise<Invoice | null> {
     if (lock?.edit) {
       setError(lock.edit);
       return null;
@@ -1090,7 +1094,7 @@ export function InvoiceBuilder({
 
       const saved = existing
         ? await (saveExisting ?? vyapar.updateInvoice)(existing.id, body)
-        : await (createNew ?? vyapar.createInvoice)(body);
+        : await (createNew ?? vyapar.createInvoice)(body, asDraft && docType === "PURCHASE_ORDER" ? { draft: true } : undefined);
 
       if (spreading) {
         const spentElsewhere = paymentLinks.reduce((s, l) => s + l.amount, 0);
@@ -1274,7 +1278,7 @@ export function InvoiceBuilder({
       onClose={onClose}
       onSave={lock?.edit ? undefined : () => save(false)}
       // Only offered when creating — "Save & New" on an edit would be a confusing no-op.
-      onSaveAndNew={existing || lock?.edit || prefill?.mrLines?.length ? undefined : () => save(true)}
+      onSaveAndNew={existing || lock?.edit || prefill?.mrLines?.length || hideSaveAndNew ? undefined : () => save(true)}
       saveLabel={saving ? "Saving…" : "Save"}
       dirty={dirty}
       width={showPreview ? "max-w-[98vw]" : "max-w-6xl"}
@@ -1301,11 +1305,22 @@ export function InvoiceBuilder({
               <span className="rounded bg-white/25 px-1.5 text-xs">{paymentLinks.length}</span>
             )}
           </button>
+          {docType === "PURCHASE_ORDER" && !existing && (
+            <button
+              type="button"
+              disabled={saving}
+              onClick={() => void save(false, true)}
+              title="Keep this PO as a draft — it isn't sent for approval and can't be received until it's published"
+              className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:border-brand-accent hover:text-brand-accent disabled:opacity-60"
+            >
+              Save as Draft
+            </button>
+          )}
           {!lock?.output && (
             <SaveMenu
               onPrint={() => saveThen("print")}
               onShare={() => saveThen("share")}
-              onSaveAndNew={existing || lock?.edit || prefill?.mrLines?.length ? undefined : () => save(true)}
+              onSaveAndNew={existing || lock?.edit || prefill?.mrLines?.length || hideSaveAndNew ? undefined : () => save(true)}
               busy={saving}
               printLabel={docType === "PURCHASE_ORDER" ? "Download" : "Print"}
             />
@@ -1326,6 +1341,9 @@ export function InvoiceBuilder({
         />
       )}
       <div className="min-w-0 space-y-5">
+        {existing && docType === "PURCHASE_ORDER" && approvalType && !approval && (
+          <PoDraftBar entityId={existing.id} onPublished={() => onApprovalChanged?.()} />
+        )}
         {existing && approval && approvalType && approval.status !== "CANCELLED" && (
           <ApprovalPanel
             entityType={approvalType}
