@@ -55,3 +55,9 @@ export const TRIAL_ENDS_AT: number | null = Number.isFinite(trialMs) ? trialMs :
 
 /** Shown on the banner and the lock screen — a phone number, email or both. */
 export const TRIAL_CONTACT = process.env.NEXT_PUBLIC_TRIAL_CONTACT?.trim() || "";
+
+/** WhatsApp number for "Chat on WhatsApp" — digits with country code, e.g. 919876543210. */
+export const TRIAL_WHATSAPP = (process.env.NEXT_PUBLIC_TRIAL_WHATSAPP ?? "").replace(/\D/g, "");
+
+/** Email for "Talk to us" (mailto). */
+export const TRIAL_EMAIL = process.env.NEXT_PUBLIC_TRIAL_EMAIL?.trim() || "";
