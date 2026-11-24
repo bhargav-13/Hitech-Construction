@@ -15,11 +15,13 @@ import { useTableSort, type SortDir } from "@/lib/useTableSort";
 import type { Invoice } from "@/lib/vyaparApi";
 import { DOC_APPROVAL_TYPE, useApprovalStates } from "@/lib/approvals";
 import { ApprovalBadge, wasRecalled } from "@/components/approval/ApprovalBadge";
+import { PoDraftBadge, usePoChainActive } from "@/components/approval/PoDraftBar";
 import type { ApprovalState } from "@/lib/api";
 
 /** Onsite's "Approval Status" filter, read off the ladder state. */
-function approvalBucket(state: ApprovalState | undefined): string {
-  if (!state) return "none";
+function approvalBucket(state: ApprovalState | undefined, draftable = false): string {
+  // A PO never sent for approval is Onsite's "Draft" (while PO approvals are switched on).
+  if (!state) return draftable ? "draft" : "none";
   if (state.status === "CANCELLED") return wasRecalled(state) ? "recalled" : "none";
   return state.status.toLowerCase();
 }
@@ -92,10 +94,14 @@ export function PurchaseDocumentList({
    */
   const [source, setSource] = useState<"procurement" | "all">("procurement");
   const [approvalFilter, setApprovalFilter] = useState("all");
+  /** Onsite's PO Status filter: Open / Closed (purchase orders only). */
+  const [poState, setPoState] = useState("all");
   // Every row on one screen is the same document type, so one approval type covers the list.
   const approvalType = rows[0] ? (DOC_APPROVAL_TYPE[rows[0].docType] ?? null) : null;
   const rowIds = useMemo(() => rows.map((r) => r.id), [rows]);
   const { states: approvals, reload: reloadApprovals } = useApprovalStates(approvalType, rowIds);
+  const poChainOn = usePoChainActive();
+  const poDrafts = approvalType === "PURCHASE_ORDER" && !!poChainOn;
   const [open, setOpen] = useState<Invoice | null>(null);
   // Vyapar's screens are gated on VYAPAR:VIEW, so the handoff link is only shown to people who
   // would get through — the whole reason these screens exist is that most buyers would not.
@@ -130,7 +136,8 @@ export function PurchaseDocumentList({
     const pool = source === "procurement" ? fromProcurement : rows;
     return pool.filter((r) => {
       if (status !== "all" && r.status !== status) return false;
-      if (approvalFilter !== "all" && approvalBucket(approvals[r.id]) !== approvalFilter) return false;
+      if (approvalFilter !== "all" && approvalBucket(approvals[r.id], poDrafts) !== approvalFilter) return false;
+      if (poState !== "all" && (r.cancelled ? "cancelled" : r.poClosed ? "closed" : "open") !== poState) return false;
       if (vendor !== "all" && (r.partyName ?? "") !== vendor) return false;
       if (project !== "all" && String(r.projectId ?? "") !== project) return false;
       if (from && (r.invoiceDate ?? "") < from) return false;
@@ -142,7 +149,7 @@ export function PurchaseDocumentList({
         (r.notes ?? "").toLowerCase().includes(query)
       );
     });
-  }, [rows, fromProcurement, source, q, status, vendor, project, from, to, approvalFilter, approvals]);
+  }, [rows, fromProcurement, source, q, status, vendor, project, from, to, approvalFilter, approvals, poState, poDrafts]);
 
   const accessors = useMemo(
     () => ({
@@ -212,6 +219,20 @@ export function PurchaseDocumentList({
           className="w-44"
           options={[{ value: "all", label: "All statuses" }, ...statuses.map((s) => ({ value: s, label: s }))]}
         />
+        {approvalType === "PURCHASE_ORDER" && (
+          <Select
+            value={poState}
+            onChange={setPoState}
+            size="sm"
+            className="w-36"
+            options={[
+              { value: "all", label: "Any PO status" },
+              { value: "open", label: "Open" },
+              { value: "closed", label: "Closed" },
+              { value: "cancelled", label: "Cancelled" },
+            ]}
+          />
+        )}
         {approvalType && (
           <Select
             value={approvalFilter}
@@ -220,6 +241,7 @@ export function PurchaseDocumentList({
             className="w-44"
             options={[
               { value: "all", label: "Any approval" },
+              ...(poDrafts ? [{ value: "draft", label: "Draft" }] : []),
               { value: "pending", label: "Pending approval" },
               { value: "approved", label: "Approved" },
               { value: "rejected", label: "Rejected" },
@@ -383,10 +405,21 @@ export function PurchaseDocumentList({
                     >
                       {d.status ?? "—"}
                     </span>
+                    {d.docType === "PURCHASE_ORDER" && d.poClosed && !d.cancelled && (
+                      <span className="ml-1 rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-600 ring-1 ring-gray-400/20 ring-inset">
+                        Closed
+                      </span>
+                    )}
                   </td>
                   {approvalType && (
                     <td className="px-4 py-3">
-                      {approvals[d.id] ? <ApprovalBadge state={approvals[d.id]} /> : <span className="text-xs text-gray-300">—</span>}
+                      {approvals[d.id] ? (
+                        <ApprovalBadge state={approvals[d.id]} />
+                      ) : poDrafts && !d.cancelled ? (
+                        <PoDraftBadge />
+                      ) : (
+                        <span className="text-xs text-gray-300">—</span>
+                      )}
                     </td>
                   )}
                 </tr>

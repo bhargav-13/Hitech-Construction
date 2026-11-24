@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ChevronDown, ClipboardList, Download, Minus, PackageOpen, PackageSearch, Plus, Search } from "lucide-react";
+import { ChevronDown, ClipboardList, Download, Minus, PackageOpen, PackageSearch, Plus, Search, Truck } from "lucide-react";
 import { Spinner } from "@/components/Spinner";
 import { Select } from "@/components/Select";
 import { DatePicker } from "@/components/DatePicker";
@@ -9,6 +9,8 @@ import { RowMenu, RowMenuItem } from "@/components/RowMenu";
 import { ItemDialog } from "@/components/vyapar/ItemDialog";
 import { MaterialEntryDrawer, ENTRY_TITLES, type MaterialEntryKind } from "@/components/material/MaterialEntryDrawer";
 import { PendingReceiveDrawer, countPendingToReceive } from "@/components/material/PendingReceiveDrawer";
+import { MaterialItemDrawer } from "@/components/material/MaterialItemDrawer";
+import { UnbilledMaterialDrawer, countUnbilled } from "@/components/material/UnbilledMaterialDrawer";
 import { BadgeButton, MaterialRequestsDrawer, bucketOf } from "@/components/procurement/PoTrackingPanels";
 import { useCan } from "@/lib/permissions";
 import { useProjects } from "@/lib/useProjects";
@@ -88,9 +90,11 @@ export function ProjectMaterials({ projectId }: { projectId: number }) {
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [entry, setEntry] = useState<{ kind: MaterialEntryKind; itemId?: number } | null>(null);
-  const [panel, setPanel] = useState<"pending" | "requests" | null>(null);
+  const [panel, setPanel] = useState<"pending" | "requests" | "unbilled" | null>(null);
+  /** The material whose ledger is open (Onsite: click a material row). */
+  const [openItemId, setOpenItemId] = useState<number | null>(null);
   const [newItem, setNewItem] = useState(false);
-  const [badges, setBadges] = useState({ pending: 0, requests: 0 });
+  const [badges, setBadges] = useState({ pending: 0, requests: 0, unbilled: 0 });
 
   const load = useCallback(async () => {
     setError("");
@@ -109,12 +113,13 @@ export function ProjectMaterials({ projectId }: { projectId: number }) {
       setLoading(false);
     }
     // The badges are a courtesy — a failure there must not blank the page.
-    const [pending, reqs] = await Promise.all([
+    const [pending, reqs, unbilled] = await Promise.all([
       countPendingToReceive(projectId).catch(() => 0),
       wh.getProjectRequests(projectId).catch(() => []),
+      countUnbilled(projectId).catch(() => 0),
     ]);
     const open = reqs.reduce((n, r) => n + r.lines.filter((l) => ["PENDING", "APPROVED"].includes(bucketOf(r, l))).length, 0);
-    setBadges({ pending, requests: open });
+    setBadges({ pending, requests: open, unbilled });
   }, [projectId]);
 
   useEffect(() => {
@@ -265,6 +270,7 @@ export function ProjectMaterials({ projectId }: { projectId: number }) {
         )}
         <BadgeButton icon={<PackageOpen size={15} />} label="Pending to receive" count={badges.pending} onClick={() => setPanel("pending")} />
         <BadgeButton icon={<ClipboardList size={15} />} label="Requests" count={badges.requests} onClick={() => setPanel("requests")} />
+        <BadgeButton icon={<Truck size={15} />} label="Unbilled" count={badges.unbilled} onClick={() => setPanel("unbilled")} />
         {createMenu.some((c) => c.show) && (
           <RowMenu
             align="right"
@@ -361,8 +367,8 @@ export function ProjectMaterials({ projectId }: { projectId: number }) {
                   const over = r.estimated > 0 && r.received > r.estimated;
                   return (
                     <tr key={r.itemId} className="border-t border-gray-100 hover:bg-gray-50/60">
-                      <td className="px-4 py-2.5">
-                        <div className="font-medium text-gray-800">{r.name}</div>
+                      <td className="cursor-pointer px-4 py-2.5" onClick={() => setOpenItemId(r.itemId)} title="Open this material's entries">
+                        <div className="font-medium text-gray-800 hover:text-brand-accent hover:underline">{r.name}</div>
                         {r.category && <div className="text-[11px] text-gray-400">{r.category}</div>}
                       </td>
                       <td className="px-3 py-2.5 text-gray-600">{r.unit}</td>
@@ -494,6 +500,35 @@ export function ProjectMaterials({ projectId }: { projectId: number }) {
           onDone={(msg) => {
             setEntry(null);
             setNotice(msg ?? "Saved.");
+            void load();
+          }}
+        />
+      )}
+      {openItemId != null &&
+        (() => {
+          const r = rows.find((x) => x.itemId === openItemId);
+          if (!r) return null;
+          return (
+            <MaterialItemDrawer
+              item={{ itemId: r.itemId, name: r.name, unit: r.unit, estimated: r.estimated, stock: r.stock }}
+              movements={movements}
+              typeOf={entryType}
+              canMove={canMove}
+              canRequest={canRequest}
+              onClose={() => setOpenItemId(null)}
+              onSetEstimate={() => void setEstimate(r)}
+              onEntry={(kind) => {
+                setOpenItemId(null);
+                setEntry({ kind, itemId: r.itemId });
+              }}
+            />
+          );
+        })()}
+      {panel === "unbilled" && (
+        <UnbilledMaterialDrawer
+          projectId={projectId}
+          onClose={() => {
+            setPanel(null);
             void load();
           }}
         />

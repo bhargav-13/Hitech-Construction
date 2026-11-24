@@ -334,6 +334,13 @@ export const getPendingPoItems = (projectId?: number | null, all = false) => {
   return apiRequest<ApiPendingPoItem[]>(`${BASE}/pending-po-items${qs ? `?${qs}` : ""}`);
 };
 
+/**
+ * A PO line typed as free text has no item, so it can't be stocked. Links it to the catalogue (the
+ * item of that name, or a new one made from the line) and returns the item id.
+ */
+export const linkPoLine = (poId: number, itemName: string) =>
+  apiRequest<{ itemId: number }>(`${BASE}/po-items/link`, { method: "POST", body: { poId, itemName } });
+
 export const receiveAgainstPo = (body: { poId: number; itemId: number; warehouseId: number; quantity: number; movedOn?: string | null; note?: string | null }) =>
   apiRequest<ApiMovement>(`${BASE}/po-receipts`, { method: "POST", body });
 
@@ -466,3 +473,36 @@ export interface ApiCheckout {
 
 export const getCheckouts = (warehouseId?: number) =>
   apiRequest<ApiCheckout[]>(`${BASE}/checkouts${warehouseId ? `?warehouseId=${warehouseId}` : ""}`);
+
+
+// ---- Unbilled material (Onsite: Project → Transaction → Unbilled Materials) ----
+
+/** A vendor delivery on a site that no purchase bill has been made for yet. */
+export interface ApiUnbilledReceipt {
+  id: number;
+  number: string;
+  movedOn: string;
+  projectId: number;
+  projectName: string | null;
+  partyId: number;
+  partyName: string | null;
+  itemId: number;
+  itemName: string | null;
+  unit: string | null;
+  quantity: number;
+  rate: number;
+  taxPercent: number;
+  poId: number | null;
+  poNo: string | null;
+  sourceDocNo: string | null;
+}
+
+export const getUnbilled = (projectId: number) =>
+  apiRequest<ApiUnbilledReceipt[]>(`${BASE}/projects/${projectId}/unbilled`);
+
+/** Every site's unbilled deliveries (Procurement → Purchase Bills). */
+export const getUnbilledAll = () => apiRequest<ApiUnbilledReceipt[]>(`${BASE}/unbilled`);
+
+/** Create the purchase bill for ticked deliveries; they are marked billed by it. */
+export const billUnbilled = (invoice: import("./vyaparApi").InvoiceInput, receiptIds: number[]) =>
+  apiRequest<import("./vyaparApi").Invoice>(`${BASE}/unbilled/bill`, { method: "POST", body: { invoice, receiptIds } });

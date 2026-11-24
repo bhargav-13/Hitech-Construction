@@ -100,7 +100,8 @@ export function PendingReceiveDrawer({
   }, [pickedRows]);
 
   function toggle(p: ApiPendingPoItem) {
-    if (p.itemId == null) return;
+    // Free-text PO lines (no item picked when the PO was typed) are tickable too — the GRN links
+    // them to an item when it is saved.
     setPicked((s) => {
       const n = new Set(s);
       const k = keyOf(p);
@@ -215,7 +216,6 @@ export function PendingReceiveDrawer({
                             {canReceive && (
                               <input
                                 type="checkbox"
-                                disabled={p.itemId == null}
                                 checked={picked.has(keyOf(p))}
                                 onChange={() => toggle(p)}
                                 className="h-4 w-4 accent-cyan-600"
@@ -340,6 +340,13 @@ function GrnDrawer({ rows, onClose, onDone }: { rows: ApiPendingPoItem[]; onClos
     try {
       const site = await wh.getSiteStore(head.projectId!, true);
       if (!site) throw new Error("This project has no site store.");
+      // Lines typed as free text on the PO get an item first (found by name, or created from the line).
+      const ids = new Map<string, number>();
+      for (const { r } of lines) {
+        if (r.itemId != null) continue;
+        const { itemId } = await wh.linkPoLine(r.poId, r.itemName ?? "");
+        ids.set(keyOf(r), itemId);
+      }
       const moved = await wh.recordSiteEntry({
         warehouseId: site.id,
         type: "RECEIVED",
@@ -348,7 +355,7 @@ function GrnDrawer({ rows, onClose, onDone }: { rows: ApiPendingPoItem[]; onClos
         sourceDocNo: challan.trim() || null,
         vehicleNo: vehicle.trim() || null,
         note: note.trim() || null,
-        lines: lines.map(({ r, q }) => ({ itemId: r.itemId!, quantity: q, rate: r.rate, poId: r.poId })),
+        lines: lines.map(({ r, q }) => ({ itemId: r.itemId ?? ids.get(keyOf(r))!, quantity: q, rate: r.rate, poId: r.poId })),
       });
       onDone(`${moved[0]?.number ?? "GRN"} saved — ${lines.length} material(s) received at ${head.projectName ?? "the site"}.`);
     } catch (e) {

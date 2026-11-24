@@ -38,8 +38,13 @@ export const getPurchaseReturns = (projectId?: number) =>
   apiRequest<Invoice[]>(`${BASE}/returns${qs({ projectId })}`);
 
 /** Raise a purchase order from Procurement (it goes through the PO approval chain like any other). */
-export const createPurchaseOrder = (body: InvoiceInput) =>
-  apiRequest<Invoice>(`${BASE}/orders`, { method: "POST", body });
+/** `draft`: save the PO without sending it for approval (Onsite's "Save as Draft"). */
+export const createPurchaseOrder = (body: InvoiceInput, opts?: { draft?: boolean }) =>
+  apiRequest<Invoice>(`${BASE}/orders${opts?.draft ? "?draft=true" : ""}`, { method: "POST", body });
+
+/** Onsite's PO Status: close a PO nothing more will arrive against, or reopen it. */
+export const setPurchaseOrderClosed = (id: number, closed: boolean) =>
+  apiRequest<Invoice>(`${BASE}/orders/${id}/close?closed=${closed}`, { method: "POST" });
 
 export const getPurchaseDocument = (id: number) => apiRequest<Invoice>(`${BASE}/documents/${id}`);
 

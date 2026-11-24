@@ -1,6 +1,9 @@
 "use client";
 
-import { Suspense, useState } from "react";
+import { Suspense, useCallback, useEffect, useState } from "react";
+import { Truck } from "lucide-react";
+import { BadgeButton } from "@/components/procurement/PoTrackingPanels";
+import { UnbilledMaterialDrawer, countUnbilled } from "@/components/material/UnbilledMaterialDrawer";
 import { InvoiceWorkspace } from "@/components/vyapar/InvoiceWorkspace";
 import { PaymentWorkspace } from "@/components/vyapar/PaymentWorkspace";
 import type { DocType } from "@/lib/vyaparApi";
@@ -31,10 +34,20 @@ const SECTIONS: Section[] = [
 export function ProjectTransactions({ projectId }: { projectId: number }) {
   const [active, setActive] = useState(SECTIONS[0].key);
   const section = SECTIONS.find((s) => s.key === active) ?? SECTIONS[0];
+  // Onsite's truck button: material delivered to this site that no purchase bill covers yet.
+  const [unbilledOpen, setUnbilledOpen] = useState(false);
+  const [unbilled, setUnbilled] = useState(0);
+  const [reloadKey, setReloadKey] = useState(0);
+  const refreshUnbilled = useCallback(() => {
+    void countUnbilled(projectId).then(setUnbilled);
+  }, [projectId]);
+  useEffect(() => {
+    refreshUnbilled();
+  }, [refreshUnbilled]);
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap gap-1.5">
+      <div className="flex flex-wrap items-center gap-1.5">
         {SECTIONS.map((s) => (
           <button
             key={s.key}
@@ -48,13 +61,29 @@ export function ProjectTransactions({ projectId }: { projectId: number }) {
             {s.label}
           </button>
         ))}
+        <div className="ml-auto">
+          <BadgeButton icon={<Truck size={15} />} label="Unbilled material" count={unbilled} onClick={() => setUnbilledOpen(true)} />
+        </div>
       </div>
+      {unbilledOpen && (
+        <UnbilledMaterialDrawer
+          projectId={projectId}
+          onClose={() => {
+            setUnbilledOpen(false);
+            refreshUnbilled();
+          }}
+          onBilled={() => {
+            refreshUnbilled();
+            setReloadKey((k) => k + 1);
+          }}
+        />
+      )}
 
       {/* Both workspaces read query params, which needs a boundary for the production build. */}
       <Suspense fallback={<div className="h-64 animate-pulse rounded-xl border border-slate-200 bg-white" />}>
         {section.kind === "doc" ? (
           <InvoiceWorkspace
-            key={section.key}
+            key={`${section.key}-${reloadKey}`}
             docType={section.docType}
             title={section.label}
             accent={section.docType === "PURCHASE" ? "rose" : "brand"}
