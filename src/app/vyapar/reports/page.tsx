@@ -18,7 +18,7 @@ import { Spinner } from "@/components/Spinner";
 import { DatePicker } from "@/components/DatePicker";
 import { Select } from "@/components/Select";
 // `ReportDetail` is aliased: this file already has a component of that name (the report shell).
-import { ReportPeriodContext, ReportTable, type ReportColumn, type ReportDetail as ReportLineDetail } from "@/components/vyapar/ReportTable";
+import { ReportPeriodContext, ReportSearchContext, ReportTable, type ReportColumn, type ReportDetail as ReportLineDetail } from "@/components/vyapar/ReportTable";
 import { inr, qty, bookDate, toIsoDate } from "@/lib/format";
 import { useVyaparProjectId } from "@/lib/projectScope";
 import * as vyapar from "@/lib/vyaparApi";
@@ -61,6 +61,8 @@ export default function VyaparReportsPage() {
 function ReportsIndex() {
   const params = useSearchParams();
   const [open, setOpen] = useState<ReportId | null>(null);
+  /** Text from the top "Search Transactions" bar (`?q=`), pre-filled into the report's search. */
+  const query = params?.get("q") ?? "";
 
   useEffect(() => {
     const r = params?.get("r") as ReportId | null;
@@ -100,7 +102,11 @@ function ReportsIndex() {
           })}
         </div>
       ) : (
-        <ReportDetail id={open} onBack={() => setOpen(null)} />
+        // Keyed on the query so a second search from the top bar, while this report is already
+        // open, starts the table over with the new text instead of keeping the old one.
+        <ReportSearchContext.Provider value={query}>
+          <ReportDetail key={`${open}:${query}`} id={open} onBack={() => setOpen(null)} />
+        </ReportSearchContext.Provider>
       )}
     </VyaparShell>
   );
@@ -1404,6 +1410,7 @@ function ReportBody({
         rows={allInvoices.map((i) => [fmt(i.invoiceDate), vyapar.DOC_LABEL[i.docType], fullInvoiceNo(i), i.partyName ?? "—", inr(i.total), i.status])}
         links={allInvoices.map((i) => docTypeHref(i.docType, i.id))}
         alignRight={[4]}
+        selectCols={[1, 5]}
       />
     </>
   );
@@ -1649,11 +1656,14 @@ function SimpleTable({
   head,
   rows,
   alignRight = [],
+  selectCols = [],
   links,
 }: {
   head: string[];
   rows: (string | number)[][];
   alignRight?: number[];
+  /** Columns with a handful of repeating values (Type, Status), filtered by picking from a list. */
+  selectCols?: number[];
   /** The entry each row opens, by index into `rows`. Sorting reorders the rows, so the link is
    *  tied to the row itself (a WeakMap keyed on the row array), not to its position. */
   links?: (string | null)[];
@@ -1673,7 +1683,7 @@ function SimpleTable({
     label: h,
     value: (r) => r[i] ?? "",
     sortValue: (r) => sortableValue(r[i]),
-    type: alignRight.includes(i) ? "number" : "text",
+    type: alignRight.includes(i) ? "number" : selectCols.includes(i) ? "select" : "text",
     align: alignRight.includes(i) ? "right" : "left",
   }));
   return <ReportTable title={meta.title} filename={meta.filename} columns={columns} rows={rows} rowHref={hrefOf} />;
