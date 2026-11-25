@@ -25,7 +25,7 @@ import { usePaymentTypeOptions, useBankAccountResolver, useBankAccounts } from "
 import { useVyaparProjectId } from "@/lib/projectScope";
 import { useProjects } from "@/lib/useProjects";
 import { ExportDialog, type ExportColumn } from "@/components/vyapar/ExportDialog";
-import { downloadPdf } from "@/lib/vyaparExport";
+import { downloadPdf, printRows } from "@/lib/vyaparExport";
 import { ImportDialog } from "@/components/vyapar/ImportDialog";
 import { paymentInImportConfig, paymentOutImportConfig } from "@/lib/vyaparImportConfigs";
 import * as vyapar from "@/lib/vyaparApi";
@@ -159,12 +159,23 @@ export function PaymentWorkspace({
     }
   }
 
-  /** Print one receipt, the same way the list's PDF renders a row. */
+  /** Download one receipt as a PDF, the same way the list's PDF renders a row. */
   function printOne(p: Payment) {
     downloadPdf(
       `${title} · ${p.partyName ?? "—"}`,
       ["Date", "Party", "Payment Type", "Description", "Amount"],
       [[formatDate(p.paymentDate), p.partyName ?? "", p.mode, descOf(p), inr(p.amount)]],
+      { rightAlignFrom: 4 }
+    );
+  }
+
+  /** Print one receipt — the same content as its PDF, opened in the browser's print dialog. */
+  function printReceipt(p: Payment) {
+    void printRows(
+      `${title} · ${p.partyName ?? "—"}`,
+      ["Date", "Party", "Payment Type", "Description", "Amount"],
+      [[formatDate(p.paymentDate), p.partyName ?? "", p.mode, descOf(p), inr(p.amount)]],
+      undefined,
       { rightAlignFrom: 4 }
     );
   }
@@ -338,12 +349,16 @@ export function PaymentWorkspace({
                   <td className="px-4 py-2.5" onClick={(ev) => ev.stopPropagation()}>
                     <TxnRowActions
                       kind="PAYMENT"
+                      // A receipt's only output is its PDF, so the inline button says what it does:
+                      // Download, not Print.
+                      outputMode="download"
                       label={descOf(p) || `${title} ${p.id}`}
                       handlers={{
                         onEdit: () => setEditingPayment(p),
                         onLink: () => setRelinking(p),
                         onDelete: () => remove(p),
-                        onPrint: () => printOne(p),
+                        onDownload: () => printOne(p),
+                        onPrint: () => printReceipt(p),
                         onShare: () => printOne(p),
                       }}
                     />
