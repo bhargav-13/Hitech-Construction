@@ -221,7 +221,7 @@ async function main() {
 
   const existingInvoices = await api(`/api/v1/vyapar/invoices`);
   const existingPayments = await api(`/api/v1/vyapar/payments`);
-  if (existingInvoices.length > 0 || existingPayments.length > 0) {
+  if (!process.argv.includes("--force") && (existingInvoices.length > 0 || existingPayments.length > 0)) {
     console.log(`\nBooks already have ${existingInvoices.length} invoices / ${existingPayments.length} payments — skipping transaction seed.`);
     console.log("Delete existing transactions first if you want a fresh set.");
   } else {
