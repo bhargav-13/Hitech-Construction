@@ -27,6 +27,9 @@ import {
   FOLLOWUP_TONE_CLASS,
   followUpLabel,
   followUpTone,
+  DUE_TONE_CLASS,
+  dueHint,
+  dueTone,
   tdate,
   today,
   tparse,
@@ -822,10 +825,13 @@ export function TenderPipeline({ variant }: { variant: PipelineVariant }) {
         )
       ) : (
         <>
-          {/* Desktop table */}
-          <div className="hidden overflow-x-auto rounded-xl border border-gray-200 bg-white lg:block">
+          {/* Desktop table. The box scrolls both ways itself, with a height cap: `overflow-x-auto`
+              alone made it the header's scroll container without ever scrolling vertically, so the
+              sticky header scrolled away with the page on a long list. Now the header stays put. */}
+          <div className="hidden max-h-[calc(100dvh-15rem)] min-h-[320px] overflow-auto rounded-xl border border-gray-200 bg-white lg:block">
             <table className="w-full min-w-[900px] border-collapse text-sm">
-              <thead className="sticky top-0 z-10">
+              {/* Solid cell backgrounds and a bottom shadow so rows never show through or run under it. */}
+              <thead className="sticky top-0 z-10 shadow-[0_1px_0_0_rgb(229_231_235)] [&_th]:bg-gray-50">
                 <tr className="border-b border-gray-100 bg-gray-50 text-left text-gray-500">
                   <th className={`w-9 ${pad.head}`}>
                     <Checkbox checked={allChecked} onChange={toggleAll} label="Select all rows" />
@@ -1145,7 +1151,13 @@ function TenderCard({
           <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-gray-600">
             <span>Est. {tmoney(t.estimatedCost)}</span>
             {variant === "applied" ? <span>Contract {tmoney(t.contractValue)}</span> : <span>EMD {tmoney(t.emd)}</span>}
-            <span>{variant === "applied" ? `Submitted ${tdate(t.submissionDate)}` : `Due ${tdate(t.deadline)}`}</span>
+            {variant === "applied" ? (
+              <span>Submitted {tdate(t.submissionDate)}</span>
+            ) : (
+              <span className={DUE_TONE_CLASS[dueTone(t.deadline)]} title={dueHint(t.deadline)}>
+                Due {tdate(t.deadline)}
+              </span>
+            )}
           </div>
         </button>
       </div>
