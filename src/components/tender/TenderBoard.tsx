@@ -16,7 +16,7 @@ import {
   type TenderStage,
   type TenderStatus,
 } from "@/lib/tenderTypes";
-import { FOLLOWUP_TONE_CLASS, followUpLabel, followUpTone, tdate, tmoney } from "@/lib/tenderHelpers";
+import { DUE_TONE_CLASS, FOLLOWUP_TONE_CLASS, dueHint, dueTone, followUpLabel, followUpTone, tdate, tmoney } from "@/lib/tenderHelpers";
 import { stateOf, transitionsFor } from "@/lib/tenderStateMachine";
 import { todayIST } from "@/lib/datetime";
 import { TenderDetailDrawer } from "@/components/tender/TenderDetailDrawer";
@@ -461,7 +461,14 @@ function BoardCard({
       </div>
 
       <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[11px] text-gray-500">
-        {bidding ? <span>Due {tdate(t.deadline)}</span> : <span>Submitted {tdate(t.submissionDate)}</span>}
+        {bidding ? (
+          // Red under 5 days (or past), orange within 10 — a deadline coming up reads at a glance.
+          <span className={DUE_TONE_CLASS[dueTone(t.deadline)]} title={dueHint(t.deadline)}>
+            Due {tdate(t.deadline)}
+          </span>
+        ) : (
+          <span>Submitted {tdate(t.submissionDate)}</span>
+        )}
         {bidding && t.nextFollowUp && (
           <span className={`rounded-full px-1.5 py-0.5 font-medium ring-1 ring-inset ${FOLLOWUP_TONE_CLASS[tone]}`}>
             {followUpLabel(t.nextFollowUp)}

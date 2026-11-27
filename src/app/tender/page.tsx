@@ -29,7 +29,7 @@ import {
   successRate,
   upcomingDeadlines,
 } from "@/lib/tenderMetrics";
-import { DEADLINE_TONE_CLASS, deadlineLabel, deadlineTone, tdate, tmoney } from "@/lib/tenderHelpers";
+import { DEADLINE_TONE_CLASS, DUE_TONE_CLASS, deadlineLabel, deadlineTone, dueHint, dueTone, tdate, tmoney } from "@/lib/tenderHelpers";
 import { inr, inrAxis } from "@/lib/format";
 import {
   AlertTriangle,
@@ -247,8 +247,8 @@ export default function TenderDashboard() {
               title="Security by instrument"
               rows={(Object.keys(SECURITY_TYPE_META) as SecurityType[])
                 .flatMap((t) => [
-                  { label: `${SECURITY_TYPE_META[t].label} — security`, value: money.securityByType[t] },
-                  { label: `${SECURITY_TYPE_META[t].label} — additional`, value: money.additionalByType[t] },
+                  { label: `${SECURITY_TYPE_META[t].label} — security`, value: money.securityByType[t], due: money.securityDueByType[t] },
+                  { label: `${SECURITY_TYPE_META[t].label} — additional`, value: money.additionalByType[t], due: money.additionalDueByType[t] },
                 ])
                 .filter((r) => r.value > 0)}
               total={money.securityBlocked}
@@ -408,7 +408,10 @@ export default function TenderDashboard() {
               <ul className="space-y-2">
                 {losses.map((row) => {
                   const max = Math.max(...losses.map((l) => l.count));
-                  const label = row.reason === "UNSPECIFIED" ? "Not recorded" : LOSS_REASON_META[row.reason].label;
+                  // The server accepts any text here, so a reason outside the known set (imported or
+                  // seeded data) shows as itself instead of crashing the whole dashboard.
+                  const label =
+                    row.reason === "UNSPECIFIED" ? "Not recorded" : (LOSS_REASON_META[row.reason]?.label ?? String(row.reason));
                   return (
                     <li key={row.reason}>
                       <div className="flex items-baseline justify-between gap-2 text-[13px]">
@@ -617,7 +620,16 @@ function MoneyCard({
   );
 }
 
-function Breakdown({ title, rows, total }: { title: string; rows: { label: string; value: number }[]; total: number }) {
+function Breakdown({
+  title,
+  rows,
+  total,
+}: {
+  title: string;
+  /** `due`: the earliest due date behind the row (security), shown under it and coloured by urgency. */
+  rows: { label: string; value: number; due?: string | null }[];
+  total: number;
+}) {
   return (
     <div>
       <h3 className="mb-1.5 text-[11px] font-semibold tracking-wide text-gray-400 uppercase">{title}</h3>
@@ -634,6 +646,18 @@ function Breakdown({ title, rows, total }: { title: string; rows: { label: strin
               <div className="mt-0.5 h-1 overflow-hidden rounded-full bg-gray-100">
                 <div className="h-full bg-brand-accent/60" style={{ width: `${total ? (r.value / total) * 100 : 0}%` }} />
               </div>
+              {"due" in r && (
+                <div className="mt-1 text-[11px] text-gray-500">
+                  {r.due ? (
+                    // Red under 5 days (or past), orange within 10 — same rule as the tender cards.
+                    <span className={DUE_TONE_CLASS[dueTone(r.due)]} title={dueHint(r.due)}>
+                      Due {tdate(r.due)}
+                    </span>
+                  ) : (
+                    <span className="text-gray-400">No due date</span>
+                  )}
+                </div>
+              )}
             </li>
           ))}
         </ul>

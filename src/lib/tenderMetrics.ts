@@ -117,6 +117,10 @@ export interface Exposure {
    * rather than one entry per {@link SecurityType}.
    */
   additionalByType: Record<string, number>;
+  /** Earliest due date (ISO) of the security still held, per instrument — the next one to act on. */
+  securityDueByType: Partial<Record<SecurityType, string>>;
+  /** The same for additional security, keyed like {@link additionalByType}. */
+  additionalDueByType: Record<string, string>;
   securityBlocked: number;
   /** Cost of carrying bank guarantees — a real expense, not blocked capital. */
   bgCharges: number;
@@ -139,6 +143,14 @@ export const isEmdRecoverable = (t: Tender): boolean => {
   return isEmdBlocked(t) && (b === "LOST" || b === "CANCELLED_RETENDERED");
 };
 
+/** The earlier of two dates, ignoring anything that is not an ISO "yyyy-mm-dd…" date. */
+function earlierIso(a: string | undefined, b: string | null | undefined): string | undefined {
+  const ok = (v?: string | null): v is string => !!v && /^\d{4}-\d{2}-\d{2}/.test(v);
+  if (!ok(b)) return a;
+  if (!ok(a)) return b.slice(0, 10);
+  return b.slice(0, 10) < a ? b.slice(0, 10) : a;
+}
+
 export function exposure(tenders: Tender[]): Exposure {
   const e: Exposure = {
     emdBlocked: 0,
@@ -148,6 +160,8 @@ export function exposure(tenders: Tender[]): Exposure {
     emdRecoverable: 0,
     securityByType: zeroSecurity(),
     additionalByType: {},
+    securityDueByType: {},
+    additionalDueByType: {},
     securityBlocked: 0,
     bgCharges: 0,
     feeSpent: 0,
@@ -177,11 +191,14 @@ export function exposure(tenders: Tender[]): Exposure {
       if (t.securityType && t.securityAmount) {
         e.securityByType[t.securityType] += t.securityAmount;
         e.securityBlocked += t.securityAmount;
+        e.securityDueByType[t.securityType] = earlierIso(e.securityDueByType[t.securityType], t.securityDueDate);
       }
       if (t.additionalSecurityType && t.additionalSecurityAmount) {
         e.additionalByType[t.additionalSecurityType] =
           (e.additionalByType[t.additionalSecurityType] ?? 0) + t.additionalSecurityAmount;
         e.securityBlocked += t.additionalSecurityAmount;
+        const due = earlierIso(e.additionalDueByType[t.additionalSecurityType], t.additionalSecurityDueDate);
+        if (due) e.additionalDueByType[t.additionalSecurityType] = due;
       }
     }
     e.bgCharges += t.bgCharges ?? 0;
