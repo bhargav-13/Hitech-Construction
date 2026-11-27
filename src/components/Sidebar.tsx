@@ -39,6 +39,7 @@ import { useUiStore } from "@/lib/uiStore";
 import { useNotifications } from "@/lib/notifications";
 import { useCan } from "@/lib/permissions";
 import { useApprovalInboxCount } from "@/lib/approvals";
+import { useTaskStore } from "@/lib/taskStore";
 import { projectAvatarColor, projectInitials } from "@/lib/projectHelpers";
 import { CompanySwitcher } from "@/components/CompanySwitcher";
 import { useCompanies, companyAccent } from "@/lib/companyScope";
@@ -101,8 +102,28 @@ export function Sidebar() {
   const activeHref = navItems
     .filter((item) => (item.href === "/" ? pathname === "/" : pathname.startsWith(item.href)))
     .reduce<string | null>((best, item) => (!best || item.href.length > best.length ? item.href : best), null);
-  // Unread task-notification count, surfaced as a live badge on the Taskopad nav item.
+  // Unread task-notification count — the bell's number. Only the Taskopad badge's fallback now.
   const { unread: taskUnread } = useNotifications();
+  // Tasks waiting on this user's approval — the same list as Taskopad › Approvals, so the sidebar
+  // badge and that tab always agree. The badge used to show unread notifications (99+) while the
+  // tab said 5. Approve / reject update this store at once; the rest is kept fresh below.
+  const canApproveTasks = can("TASKOPAD_APPROVALS");
+  const taskApprovals = useTaskStore((s) => s.approvals.length);
+  const loadTaskApprovals = useTaskStore((s) => s.loadApprovals);
+  useEffect(() => {
+    if (!authUser || !canApproveTasks) return;
+    void loadTaskApprovals();
+    const t = window.setInterval(() => void loadTaskApprovals(), 30_000);
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void loadTaskApprovals();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.clearInterval(t);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+    // Re-read on every page change too, so moving around the app never shows a stale number.
+  }, [authUser, canApproveTasks, loadTaskApprovals, pathname]);
   // Requests waiting on this user, across every approval chain.
   const approvalCount = useApprovalInboxCount((s) => s.count);
   const refreshApprovals = useApprovalInboxCount((s) => s.refresh);
@@ -157,8 +178,16 @@ export function Sidebar() {
           {navItems.flatMap((item, idx) => {
             const Icon = ICONS[item.label] ?? LayoutGrid;
             const active = item.href === activeHref;
-            // Live unread count on Taskopad (task reminders / assignments / activity).
-            const count = item.href === "/taskopad" ? taskUnread : item.href === "/approvals" ? approvalCount : 0;
+            // Taskopad: tasks awaiting this user's approval (matches the Approvals tab). A user who
+            // can't approve has no such tab, so they keep the unread-notification count.
+            const count =
+              item.href === "/taskopad"
+                ? canApproveTasks
+                  ? taskApprovals
+                  : taskUnread
+                : item.href === "/approvals"
+                  ? approvalCount
+                  : 0;
             const link = (
               <li key={item.href}>
                 <Link
