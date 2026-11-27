@@ -10,7 +10,7 @@ import { DatePicker } from "@/components/DatePicker";
 import { ModuleAttachments, PendingAttachmentList, usePendingAttachments } from "@/components/files/ModuleAttachments";
 import { ScanButton } from "@/components/ScanButton";
 import { filledNote, isoDate, matchBankAccount, matchByNameOrGstin, type ScannedPayment } from "@/lib/docScan";
-import { SortTh } from "@/components/vyapar/SortTh";
+import { FilterTh, useColumnFilters } from "@/components/vyapar/ColumnFilter";
 import { DateRangeFilter, defaultRange, inRange, type DateRange } from "@/components/vyapar/DateRangeFilter";
 import { LinkPaymentDialog } from "@/components/vyapar/LinkPaymentDialog";
 import { TxnRowActions } from "@/components/vyapar/TxnRowActions";
@@ -120,7 +120,7 @@ export function PaymentWorkspace({
   const openId = params?.get("open");
   const highlightRef = useRef<HTMLTableRowElement>(null);
 
-  const rows = useMemo(() => {
+  const searched = useMemo(() => {
     const q = search.trim().toLowerCase();
     return payments.filter((p) => {
       if (!inRange(p.paymentDate, range)) return false;
@@ -128,6 +128,23 @@ export function PaymentWorkspace({
       return [p.partyName, p.notes, p.reference, p.paymentDate, p.mode].some((f) => f?.toLowerCase().includes(q));
     });
   }, [payments, search, range]);
+
+  // Vyapar-style per-column funnels, stacked on the search and date range — the same filters the
+  // sale and purchase lists have. Totals, count, PDF and export all follow what is filtered.
+  const filterColumns = useMemo(
+    () => ({
+      // Match what the table shows (18 Nov 2026) as well as the stored ISO date (2026-11-18).
+      date: { get: (p: Payment) => `${formatDate(p.paymentDate)} ${p.paymentDate ?? ""}`, type: "text" as const },
+      party: { get: (p: Payment) => p.partyName ?? "", type: "text" as const },
+      // A payment type is a bank / cash account name, so the choices come from the rows themselves.
+      mode: { get: (p: Payment) => p.mode, type: "select" as const },
+      reference: { get: (p: Payment) => descOf(p), type: "text" as const },
+      amount: { get: (p: Payment) => p.amount, type: "number" as const },
+      unused: { get: (p: Payment) => p.unusedAmount, type: "number" as const },
+    }),
+    []
+  );
+  const { filtered: rows, filters, setFilter, clearAll, options: filterOptions } = useColumnFilters(searched, filterColumns);
 
   const { sorted, sortKey, sortDir, toggle } = useTableSort(
     rows,
@@ -288,7 +305,7 @@ export function PaymentWorkspace({
         <div className="flex min-h-[240px] items-center justify-center gap-2 rounded-xl border border-dashed border-gray-300 bg-white text-sm text-gray-400">
           <Spinner size={16} className="text-brand-accent" /> Loading…
         </div>
-      ) : rows.length === 0 ? (
+      ) : searched.length === 0 ? (
         <VyaparEmpty
           icon={Wallet}
           title={payments.length === 0 ? `No ${title.toLowerCase()} yet` : "Nothing matches"}
@@ -306,17 +323,36 @@ export function PaymentWorkspace({
           <table className="w-full min-w-[720px] border-collapse text-sm">
             <thead>
               <tr className="border-b border-gray-100 bg-gray-50 text-left text-gray-500">
-                <SortTh label="Date" sortKey="date" activeKey={sortKey} dir={sortDir} onSort={toggle} />
-                <SortTh label="Party Name" sortKey="party" activeKey={sortKey} dir={sortDir} onSort={toggle} />
-                <SortTh label="Payment Type" sortKey="mode" activeKey={sortKey} dir={sortDir} onSort={toggle} />
-                <SortTh label="Description" sortKey="reference" activeKey={sortKey} dir={sortDir} onSort={toggle} />
-                <SortTh label="Amount" sortKey="amount" activeKey={sortKey} dir={sortDir} onSort={toggle} align="right" />
+                <FilterTh label="Date" sortKey="date" activeKey={sortKey} dir={sortDir} onSort={toggle} filterKey="date" type="text" filter={filters.date} onApply={setFilter} />
+                <FilterTh label="Party Name" sortKey="party" activeKey={sortKey} dir={sortDir} onSort={toggle} filterKey="party" type="text" filter={filters.party} onApply={setFilter} />
+                <FilterTh label="Payment Type" sortKey="mode" activeKey={sortKey} dir={sortDir} onSort={toggle} filterKey="mode" type="select" options={filterOptions.mode} filter={filters.mode} onApply={setFilter} />
+                <FilterTh label="Description" sortKey="reference" activeKey={sortKey} dir={sortDir} onSort={toggle} filterKey="reference" type="text" filter={filters.reference} onApply={setFilter} />
+                <FilterTh label="Amount" sortKey="amount" activeKey={sortKey} dir={sortDir} onSort={toggle} align="right" filterKey="amount" type="number" filter={filters.amount} onApply={setFilter} />
                 {/* What's still sitting unapplied against any bill. */}
-                <SortTh label="Unused" sortKey="unused" activeKey={sortKey} dir={sortDir} onSort={toggle} align="right" />
+                <FilterTh label="Unused" sortKey="unused" activeKey={sortKey} dir={sortDir} onSort={toggle} align="right" filterKey="unused" type="number" filter={filters.unused} onApply={setFilter} />
                 <th className="w-32 px-4 py-2 text-left font-medium">Actions</th>
               </tr>
             </thead>
             <tbody>
+              {/* A filter that matches nothing keeps the header (and its filters) on screen, so it
+                  can be changed or cleared instead of the whole table vanishing. */}
+              {sorted.length === 0 && (
+                <tr>
+                  <td colSpan={7} className="px-4 py-12 text-center">
+                    <div className="text-sm font-medium text-gray-600">Nothing matches</div>
+                    <div className="mt-1 text-xs text-gray-400">No payments for this search or filter.</div>
+                    <button
+                      onClick={() => {
+                        clearAll();
+                        setSearch("");
+                      }}
+                      className="mt-3 rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-600 hover:border-brand-accent hover:text-brand-accent"
+                    >
+                      Clear filters
+                    </button>
+                  </td>
+                </tr>
+              )}
               {sorted.map((p) => {
                 const highlighted = openId != null && String(p.id) === openId;
                 // The whole row opens the receipt, as it does on the document lists — only the
