@@ -17,6 +17,12 @@ import { exportRowsToCsv, downloadPdf, printRows, type ReportPrintDetail } from 
 export const ReportPeriodContext = createContext<string | undefined>(undefined);
 
 /**
+ * What the report's search box starts with — the text typed into Vyapar's top "Search Transactions"
+ * bar, which lands on the transactions report already searched rather than dropping the query.
+ */
+export const ReportSearchContext = createContext<string>("");
+
+/**
  * The table every Vyapar report renders through.
  *
  * Reports used to be a bare `<table>` with a single Download button: no sorting, no filtering, and
@@ -68,7 +74,8 @@ export function ReportTable<T>({
   const router = useRouter();
   const period = useContext(ReportPeriodContext);
   subtitle ??= period;
-  const [q, setQ] = useState("");
+  const initialSearch = useContext(ReportSearchContext);
+  const [q, setQ] = useState(initialSearch);
   const [picking, setPicking] = useState(false);
   const [previewing, setPreviewing] = useState(false);
   // Which columns the print-out carries. Everything except the explicitly optional ones.

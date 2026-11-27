@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { VyaparShell } from "@/components/vyapar/VyaparShell";
 import { TxnTable } from "@/app/vyapar/bank/page";
-import { CashBankEntryDialog, EditCashBankEntryDialog } from "@/components/vyapar/CashBankDialogs";
+import { CashBankEntryDialog } from "@/components/vyapar/CashBankDialogs";
 import { useCan } from "@/lib/permissions";
 import { Spinner } from "@/components/Spinner";
 import { inr } from "@/lib/format";
@@ -23,7 +23,6 @@ export default function CashInHandPage() {
   const [search, setSearch] = useState("");
   const [adjust, setAdjust] = useState(false);
   const [exporting, setExporting] = useState(false);
-  const [editingTxn, setEditingTxn] = useState<CashBankTxn | null>(null);
   const can = useCan();
 
   const load = useCallback(async () => {
@@ -112,7 +111,8 @@ This can't be undone.`)) return;
             loading={false}
             search={search}
             onSearch={setSearch}
-            onEdit={can("VYAPAR_CASH_BANK:EDIT") ? (t) => setEditingTxn(t) : undefined}
+            canEdit={can("VYAPAR_CASH_BANK:EDIT")}
+            onSaved={() => void load()}
             onDelete={can("VYAPAR_CASH_BANK:DELETE") ? (t) => void removeTxn(t) : undefined}
             onExport={() => setExporting(true)}
             onPdf={() =>
@@ -142,13 +142,6 @@ This can't be undone.`)) return;
           currentBalance={balance}
           onClose={() => setAdjust(false)}
           onDone={() => { setAdjust(false); load(); }}
-        />
-      )}
-      {editingTxn && (
-        <EditCashBankEntryDialog
-          txn={editingTxn}
-          onClose={() => setEditingTxn(null)}
-          onDone={() => { setEditingTxn(null); void load(); }}
         />
       )}
     </VyaparShell>

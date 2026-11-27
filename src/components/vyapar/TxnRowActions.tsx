@@ -38,6 +38,12 @@ export interface TxnActionHandlers {
   onDelete: () => void;
   onPreview?: () => void;
   onPrint: () => void;
+  /**
+   * With `outputMode="download"`: what the inline Download button does. Given, Print stays in the
+   * ⋮ menu and runs `onPrint` (payments). Omitted, Download runs `onPrint` and the menu has no
+   * Print (purchase orders, whose only output is the PDF).
+   */
+  onDownload?: () => void;
   onShare: () => void;
   onHistory?: () => void;
   /** Payments only — opens "Link Payment to Txns". */
@@ -118,7 +124,7 @@ export function TxnRowActions({
     <div className="flex items-center justify-end gap-0.5">
       {outputMode === "download" ? (
         <button
-          onClick={handlers.onPrint}
+          onClick={handlers.onDownload ?? handlers.onPrint}
           disabled={!!outLock}
           title={outLock ?? "Download PDF"}
           aria-label={`Download ${label}`}
@@ -190,7 +196,7 @@ export function TxnRowActions({
             {can.preview && handlers.onPreview && (
               <RowMenuItem icon={Eye} label="Preview" onClick={() => { close(); handlers.onPreview?.(); }} />
             )}
-            {can.print && outputMode === "print" && !outLock && (
+            {can.print && (outputMode === "print" || !!handlers.onDownload) && !outLock && (
               <RowMenuItem icon={Printer} label="Print" onClick={() => { close(); handlers.onPrint(); }} />
             )}
             {can.previewAsChallan && (

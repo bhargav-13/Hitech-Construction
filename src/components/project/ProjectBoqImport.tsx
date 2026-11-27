@@ -10,6 +10,15 @@ import { inr } from "@/lib/format";
 import * as api from "@/lib/projectTargetApi";
 import type { ApiBoqFamily } from "@/lib/projectTargetApi";
 
+/** What each BOQ column holds on the server (project_boq_items / project_boq_families). */
+const MAX = { srNo: 40, unit: 40, description: 2000, title: 120 } as const;
+
+/** Trimmed, and cut to `max` characters — with an ellipsis so a cut value reads as cut. */
+function clip(value: string | null | undefined, max: number): string {
+  const s = (value ?? "").trim();
+  return s.length <= max ? s : `${s.slice(0, max - 1).trimEnd()}…`;
+}
+
 /**
  * KAN-113: upload a BOQ into a project — from Excel / CSV (read directly), or from a PDF or a photo
  * of the schedule (PDF text, or OCR with AI for a scan). The rows are shown before anything is
@@ -92,19 +101,28 @@ export function ProjectBoqImport({
       let added = 0;
       for (const r of rows) {
         if (r.heading) {
-          if (headingsAsTitles) currentKey = await titleKey(r.description.slice(0, 120));
+          if (headingsAsTitles) currentKey = await titleKey(clip(r.description, MAX.title));
           continue;
         }
-        if (currentKey == null) currentKey = await titleKey(newTitle.trim() || "Imported BOQ");
+        if (currentKey == null) currentKey = await titleKey(clip(newTitle.trim() || "Imported BOQ", MAX.title));
         setSaving(`Adding item ${added + 1} of ${items.length}…`);
-        await api.addBoqItem(projectId, {
-          groupKey: currentKey,
-          srNo: r.srNo || null,
-          description: r.description,
-          unit: r.unit || null,
-          qty: r.qty || 0,
-          saleRate: r.rate || (r.amount && r.qty ? r.amount / r.qty : 0),
-        });
+        try {
+          // Department sheets put long text anywhere — a unit like "Per running metre including
+          // jointing…", an SOR description past 2,000 characters. One such cell used to stop the
+          // whole import with "longer than allowed"; each value is now cut to what its column holds.
+          await api.addBoqItem(projectId, {
+            groupKey: currentKey,
+            srNo: clip(r.srNo, MAX.srNo) || null,
+            description: clip(r.description, MAX.description),
+            unit: clip(r.unit, MAX.unit) || null,
+            qty: r.qty || 0,
+            saleRate: r.rate || (r.amount && r.qty ? r.amount / r.qty : 0),
+          });
+        } catch (e) {
+          // Say which line, so the row in the file can be found — "added" lines stay added.
+          const where = `item ${added + 1} of ${items.length}${r.srNo ? ` (Sr. ${r.srNo})` : ""}`;
+          throw new Error(`Stopped at ${where}: ${e instanceof Error ? e.message : "it could not be saved."}`);
+        }
         added++;
       }
       onDone(added);

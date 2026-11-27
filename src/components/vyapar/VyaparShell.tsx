@@ -207,11 +207,18 @@ export function VyaparShell({ children }: { children: React.ReactNode }) {
           <div className="flex flex-wrap items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 py-2">
             <div className="flex min-w-[200px] flex-1 items-center gap-2 rounded-lg px-2 py-1.5 transition-colors duration-150 focus-within:bg-gray-50">
               <Search size={15} className="text-gray-400" />
+              {/* Enter opens the All Transactions report with this text already in its search box —
+                  it used to open the report and drop what was typed. */}
               <input
+                type="search"
                 placeholder="Search Transactions"
+                aria-label="Search Transactions"
+                title="Type and press Enter"
                 className="w-full bg-transparent text-sm outline-none"
                 onKeyDown={(e) => {
-                  if (e.key === "Enter") router.push("/vyapar/reports?r=transactions");
+                  if (e.key !== "Enter") return;
+                  const q = e.currentTarget.value.trim();
+                  router.push(`/vyapar/reports?r=transactions${q ? `&q=${encodeURIComponent(q)}` : ""}`);
                 }}
               />
             </div>

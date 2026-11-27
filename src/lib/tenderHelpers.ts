@@ -144,6 +144,33 @@ export const FOLLOWUP_TONE_CLASS: Record<FollowUpTone, string> = {
   none: "bg-gray-50 text-gray-400 ring-gray-200",
 };
 
+/**
+ * How close a bid deadline is: under 5 days (or past) is red, 5–10 days is orange, anything further
+ * out — or no parsable date — stays plain.
+ */
+export type DueTone = "red" | "orange" | "none";
+
+export function dueTone(value?: string | null): DueTone {
+  const n = tdays(value);
+  if (n == null || n > 10) return "none";
+  return n < 5 ? "red" : "orange";
+}
+
+export const DUE_TONE_CLASS: Record<DueTone, string> = {
+  red: "rounded-full bg-rose-50 px-1.5 py-0.5 font-semibold text-rose-700 ring-1 ring-inset ring-rose-600/20",
+  orange: "rounded-full bg-orange-50 px-1.5 py-0.5 font-semibold text-orange-700 ring-1 ring-inset ring-orange-600/20",
+  none: "",
+};
+
+/** Tooltip for a deadline: "3 days left", "Due today", "Overdue by 2 days". */
+export function dueHint(value?: string | null): string | undefined {
+  const n = tdays(value);
+  if (n == null) return undefined;
+  if (n < 0) return `Overdue by ${-n} day${n === -1 ? "" : "s"}`;
+  if (n === 0) return "Due today";
+  return `${n} day${n === 1 ? "" : "s"} left`;
+}
+
 /** "Overdue 3d" / "Today" / "In 8d" / "—". */
 export function followUpLabel(value?: string | null): string {
   const n = tdays(value);

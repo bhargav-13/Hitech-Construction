@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { VyaparShell, VyaparEmpty } from "@/components/vyapar/VyaparShell";
-import { BankAccountDialog, CashBankEntryDialog, EditCashBankEntryDialog } from "@/components/vyapar/CashBankDialogs";
+import { BankAccountDialog, CashBankEntryDialog } from "@/components/vyapar/CashBankDialogs";
 import { RowMenu, RowMenuDivider, RowMenuItem } from "@/components/RowMenu";
 import { SortTh } from "@/components/vyapar/SortTh";
 import { Spinner } from "@/components/Spinner";
@@ -21,6 +21,7 @@ import type { BankAccount, CashBankTxn } from "@/lib/vyaparApi";
 import {
   ArrowLeftRight,
   Building2,
+  Check,
   ChevronDown,
   FileSpreadsheet,
   FileText,
@@ -30,6 +31,7 @@ import {
   Search,
   Trash2,
   Upload,
+  X,
 } from "lucide-react";
 import { isBackgroundRefresh, useAutoRefresh } from "@/lib/autoRefresh";
 
@@ -56,7 +58,6 @@ export default function BankAccountsPage() {
   // header's project. A bank account is one pot of money however many sites pay from it, and two
   // people looking at the same account must see the same balance.
   const can = useCan();
-  const [editingTxn, setEditingTxn] = useState<CashBankTxn | null>(null);
   const [accounts, setAccounts] = useState<BankAccount[]>([]);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [txns, setTxns] = useState<CashBankTxn[]>([]);
@@ -355,7 +356,8 @@ export default function BankAccountsPage() {
                 <TxnTable
                   rows={rows}
                   loading={txnLoading}
-                  onEdit={can("VYAPAR_CASH_BANK:EDIT") ? (t) => setEditingTxn(t) : undefined}
+                  canEdit={can("VYAPAR_CASH_BANK:EDIT")}
+                  onSaved={refreshAll}
                   onDelete={can("VYAPAR_CASH_BANK:DELETE") ? (t) => void removeTxn(t) : undefined}
                   search={txnSearch}
                   onSearch={setTxnSearch}
@@ -387,13 +389,6 @@ export default function BankAccountsPage() {
           onDone={() => { setEntry(null); refreshAll(); }}
         />
       )}
-      {editingTxn && (
-        <EditCashBankEntryDialog
-          txn={editingTxn}
-          onClose={() => setEditingTxn(null)}
-          onDone={() => { setEditingTxn(null); refreshAll(); }}
-        />
-      )}
       {exporting && (
         <ExportDialog
           title="bank accounts"
@@ -423,7 +418,8 @@ export function TxnTable({
   onSearch,
   onExport,
   onPdf,
-  onEdit,
+  canEdit,
+  onSaved,
   onDelete,
 }: {
   rows: CashBankTxn[];
@@ -433,15 +429,19 @@ export function TxnTable({
   onExport: () => void;
   onPdf: () => void;
   /**
-   * Edit a row. Transfers and adjustments made here open the edit form; a payment, bill or invoice
-   * opens its own screen, where it is edited. Omit to hide the Actions column.
+   * Show the edit button. Transfers and adjustments made here are edited right in their row; a
+   * payment, bill or invoice opens its own screen, where it is edited.
    */
-  onEdit?: (t: CashBankTxn) => void;
+  canEdit?: boolean;
+  /** Called after a row edited in place is saved, so balances and the statement reload. */
+  onSaved?: () => void;
   /** Delete a transfer / adjustment or a payment. Bills and invoices are deleted on their own screen. */
   onDelete?: (t: CashBankTxn) => void;
 }) {
   const router = useRouter();
-  const showActions = !!(onEdit || onDelete);
+  const showActions = !!(canEdit || onDelete);
+  /** The row being edited in place, by the same `${type}-${id}` identity the rows are keyed on. */
+  const [editingKey, setEditingKey] = useState<string | null>(null);
   const { sorted, sortKey, sortDir, toggle } = useTableSort<CashBankTxn>(
     rows,
     {
@@ -489,7 +489,18 @@ export function TxnTable({
               </tr>
             </thead>
             <tbody>
-              {sorted.map((t) => (
+              {sorted.map((t) =>
+                editingKey === `${t.type}-${t.id}` ? (
+                  <EditTxnRow
+                    key={`${t.type}-${t.id}`}
+                    txn={t}
+                    onCancel={() => setEditingKey(null)}
+                    onSaved={() => {
+                      setEditingKey(null);
+                      onSaved?.();
+                    }}
+                  />
+                ) : (
                 <LinkedRow
                   // The ledger merges three tables — manual entries, payments and documents — and
                   // each keeps its own id so the row can still deep-link to the record behind it.
@@ -509,13 +520,13 @@ export function TxnTable({
                   </td>
                   {showActions && (
                     <td className="px-3 py-1.5 text-right whitespace-nowrap">
-                      {onEdit && (
+                      {canEdit && (
                         <button
                           type="button"
                           title={isEntry(t) ? "Edit" : `Open the ${t.type} to edit it`}
                           aria-label={`Edit ${t.type}`}
                           onClick={() => {
-                            if (isEntry(t)) onEdit(t);
+                            if (isEntry(t)) setEditingKey(`${t.type}-${t.id}`);
                             else {
                               const href = txnHref(t.type, t.id);
                               if (href) router.push(href);
@@ -540,12 +551,133 @@ export function TxnTable({
                     </td>
                   )}
                 </LinkedRow>
-              ))}
+                ),
+              )}
             </tbody>
           </table>
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * A transfer or adjustment edited right in the statement: description, date and amount become
+ * fields in place. Enter saves, Escape cancels. Editing one side of a transfer changes the other
+ * account's side with it (the server keeps both legs in step).
+ */
+function EditTxnRow({ txn, onCancel, onSaved }: { txn: CashBankTxn; onCancel: () => void; onSaved: () => void }) {
+  const isAdjust = /adjustment/i.test(txn.type);
+  const isTransfer = !isAdjust;
+  const [amount, setAmount] = useState(String(txn.amount));
+  const [date, setDate] = useState(txn.date ?? new Date().toISOString().slice(0, 10));
+  const [description, setDescription] = useState(txn.note ?? txn.name ?? "");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  async function save() {
+    const value = Number(amount);
+    if (!value || value <= 0) {
+      setError("Enter an amount greater than zero.");
+      return;
+    }
+    setSaving(true);
+    setError("");
+    try {
+      await vyapar.updateCashBankEntry(txn.id, {
+        amount: value,
+        date,
+        description: description.trim(),
+        mode: isAdjust ? (txn.direction === "out" ? "REDUCE" : "ADD") : undefined,
+      });
+      onSaved();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't save this entry.");
+      setSaving(false);
+    }
+  }
+
+  function onKeyDown(e: React.KeyboardEvent) {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      void save();
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      onCancel();
+    }
+  }
+
+  const field =
+    "w-full rounded-md border border-gray-200 bg-white px-2 py-1 text-sm outline-none transition-colors duration-150 focus:border-cyan-500 disabled:bg-gray-50";
+
+  return (
+    <>
+      <tr className="border-b border-cyan-100 bg-cyan-50/50" onKeyDown={onKeyDown}>
+        <td className="px-4 py-2 font-medium text-gray-700">{txn.type}</td>
+        <td className="px-2 py-1.5">
+          <input
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder="Description"
+            aria-label="Description"
+            disabled={saving}
+            className={field}
+          />
+        </td>
+        <td className="px-2 py-1.5">
+          <input
+            type="date"
+            value={date}
+            onChange={(e) => setDate(e.target.value)}
+            aria-label="Date"
+            disabled={saving}
+            className={field}
+          />
+        </td>
+        <td className="px-2 py-1.5">
+          <input
+            type="number"
+            min={0}
+            step="0.01"
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+            aria-label="Amount"
+            disabled={saving}
+            autoFocus
+            className={`${field} text-right`}
+          />
+        </td>
+        <td className="px-3 py-1.5 text-right whitespace-nowrap">
+          <button
+            type="button"
+            title="Save (Enter)"
+            aria-label="Save"
+            onClick={() => void save()}
+            disabled={saving}
+            className="rounded-md p-1.5 text-emerald-600 transition-colors duration-150 hover:bg-emerald-50 disabled:opacity-50"
+          >
+            {saving ? <Spinner size={14} /> : <Check size={14} />}
+          </button>
+          <button
+            type="button"
+            title="Cancel (Esc)"
+            aria-label="Cancel"
+            onClick={onCancel}
+            disabled={saving}
+            className="rounded-md p-1.5 text-gray-400 transition-colors duration-150 hover:bg-gray-100 hover:text-gray-600 disabled:opacity-50"
+          >
+            <X size={14} />
+          </button>
+        </td>
+      </tr>
+      {(error || isTransfer) && (
+        <tr className="border-b border-cyan-100 bg-cyan-50/50">
+          <td colSpan={5} className={`px-4 pb-2 text-xs ${error ? "text-rose-600" : "text-cyan-800"}`}>
+            {error || "This is one side of a transfer — the other account's entry changes with it."}
+          </td>
+        </tr>
+      )}
+    </>
   );
 }
 
