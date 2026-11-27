@@ -312,3 +312,29 @@ body {
   font-size: 12px;
   border-top: 1px dashed #e5e9f0;
 }
+
+/* Scrolls as usual, without drawing a scrollbar — the sidebar menu and other narrow strips where
+   the operating system's bar (Windows' arrowed one especially) looks out of place. */
+.no-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+/* The collapsed sidebar's item name sliding out from the rail. */
+@keyframes rail-pop {
+  from {
+    opacity: 0;
+    transform: translateX(-10px) scaleX(0.7);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.animate-rail-pop {
+  transform-origin: left center;
+  animation: rail-pop 0.18s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}

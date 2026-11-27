@@ -29,6 +29,7 @@ import { useProjectScope } from "@/lib/projectScope";
 import { useTaskStore } from "@/lib/taskStore";
 import { PRIORITY_STYLE, formatTaskDate, formatTaskDateTime, isDueToday, isOverdue, toIso } from "@/lib/taskTypes";
 import type { Task } from "@/lib/taskTypes";
+import { FitText } from "@/components/FitText";
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
@@ -496,9 +497,9 @@ function Kpi({
 }) {
   const body = (
     <>
-      <div>
+      <div className="min-w-0 flex-1">
         <div className="text-xs text-gray-500">{label}</div>
-        <div className={`mt-1 text-2xl font-semibold ${valueClass}`}>{value}</div>
+        <FitText className={`mt-1 text-2xl font-semibold ${valueClass}`}>{value}</FitText>
       </div>
       <div className={`flex h-11 w-11 items-center justify-center rounded-full ${tint}`}>
         <Icon size={20} />

@@ -17,6 +17,7 @@ import { bookDate } from "@/lib/format";
 import { useVyaparProjectId } from "@/lib/projectScope";
 import { exportRowsToCsv } from "@/lib/vyaparExport";
 import { Clock, FileSpreadsheet, Plus, Search, Tractor, Truck } from "lucide-react";
+import { FitText } from "@/components/FitText";
 
 const SORT = {
   name: (e: Equipment) => e.name.toLowerCase(),
@@ -220,7 +221,7 @@ function Stat({ label, value, hint, icon: Icon }: { label: string; value: string
         <div className="text-xs text-gray-500">{label}</div>
         {Icon && <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-cyan-50 text-brand-accent"><Icon size={14} /></span>}
       </div>
-      <div className="mt-1 text-lg font-semibold text-gray-900">{value}</div>
+      <FitText className="mt-1 text-lg font-semibold text-gray-900">{value}</FitText>
       {hint && <div className="text-[11px] text-gray-400">{hint}</div>}
     </div>
   );

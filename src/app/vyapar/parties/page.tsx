@@ -10,11 +10,12 @@ import { FilterTh, useColumnFilters } from "@/components/vyapar/ColumnFilter";
 import { RowMenu, RowMenuDivider, RowMenuItem } from "@/components/RowMenu";
 import { Spinner } from "@/components/Spinner";
 import { Select } from "@/components/Select";
-import { inr } from "@/lib/format";
+import { inr, bookDate } from "@/lib/format";
 import { useTableSort } from "@/lib/useTableSort";
 import { partyLedgerHref } from "@/lib/vyaparLinks";
 import { LinkedRow } from "@/components/vyapar/LinkedRow";
 import { exportRowsToCsv, printRows, downloadPdf } from "@/lib/vyaparExport";
+import { partyStatementSheet } from "@/lib/partyStatementSheet";
 import { ExportDialog, type ExportColumn } from "@/components/vyapar/ExportDialog";
 import { DateRangeFilter, defaultRange, inRange, type DateRange } from "@/components/vyapar/DateRangeFilter";
 import * as vyapar from "@/lib/vyaparApi";
@@ -307,6 +308,69 @@ export default function PartiesPage() {
       }
     : undefined;
 
+  /**
+   * The party list on paper, as Vyapar's "Party Report": numbered, the balance split into what is
+   * receivable and what is payable, a grey Total row, and no letterhead.
+   */
+  const partyReport = {
+    title: "Party Report",
+    head: ["", "Name", "Phone No.", "GSTIN", "Receivable Balance", "Payable Balance"],
+    rows: parties.map((p, i) => [
+      i + 1,
+      p.name,
+      p.phone ?? "",
+      p.gstin ?? "",
+      p.balance >= 0 ? inr(p.balance) : "",
+      p.balance < 0 ? inr(Math.abs(p.balance)) : "",
+    ]),
+    extras: {
+      rightAlignFrom: 4,
+      letterhead: false,
+      totals: [["", "Total", "", "", inr(totals.receivable), inr(totals.payable)]],
+    },
+  };
+
+  /**
+   * One party's ledger on paper, as Vyapar's "Party statement": the party and contact number under
+   * the title, then the period, then Date · Txn Type · Ref No. · Payment Status · Total · Txn
+   * Balance, closed by what the party owes or is owed.
+   */
+  const statement = selected
+    ? {
+        title: "Party statement",
+        subtitle: [
+          `Party name: ${selected.name}`,
+          selected.phone ? `~Contact No.: ${selected.phone}` : null,
+          selected.gstin ? `~GSTIN: ${selected.gstin}` : null,
+          range.from || range.to ? `Duration: From ${range.from ? bookDate(range.from) : "the start"} to ${range.to ? bookDate(range.to) : "today"}` : null,
+        ]
+          .filter(Boolean)
+          .join("\n"),
+        head: ["Date", "Txn Type", "Ref No.", "Payment Status", "Total", "Txn Balance"],
+        rows: sortedLedger.map((r) => [bookDate(r.date), r.type, r.number ?? "", r.status ?? "", inr(r.total), inr(r.balance)]),
+        extras: {
+          rightAlignFrom: 4,
+          grandTotal:
+            selected.balance === 0 ? undefined : `${selected.balance > 0 ? "Receivable" : "Payable"} Balance: ${inr(Math.abs(selected.balance))}`,
+        },
+      }
+    : null;
+
+  /**
+   * Print or download the selected party's statement in Vyapar's full layout — beginning balance,
+   * each bill with its items, running Receivable / Payable balance. If the books behind it cannot be
+   * read, the plain ledger above goes out instead, so the button never does nothing.
+   */
+  async function statementOut(kind: "print" | "pdf") {
+    if (!selected || !statement) return;
+    // The print window is opened straight away, while the click still counts as the user's: one
+    // opened after the data has loaded is a pop-up the browser blocks.
+    const target = kind === "print" ? window.open("", "_blank", "width=980,height=720") : null;
+    const sheet = await partyStatementSheet(selected, range, projectId).catch(() => statement);
+    if (kind === "print") await printRows(sheet.title, sheet.head, sheet.rows, sheet.subtitle, { ...sheet.extras, target });
+    else await downloadPdf(sheet.title, sheet.head, sheet.rows, { subtitle: sheet.subtitle, ...sheet.extras });
+  }
+
   const ledgerHead = ["Type", "Number", "Date", "Total", "Balance/Unused", "Status"];
   const ledgerData = sortedLedger.map((r) => [
     r.type,
@@ -350,12 +414,7 @@ export default function PartiesPage() {
                     label="Download PDF"
                     onClick={() => {
                       close();
-                      downloadPdf(
-                        "All Parties",
-                        ["Name", "Phone", "GSTIN", "Balance"],
-                        parties.map((p) => [p.name, p.phone ?? "", p.gstin ?? "", inr(p.balance)]),
-                        { rightAlignFrom: 3 }
-                      );
+                      downloadPdf(partyReport.title, partyReport.head, partyReport.rows, partyReport.extras);
                     }}
                   />
                   <RowMenuItem
@@ -363,11 +422,7 @@ export default function PartiesPage() {
                     label="Print"
                     onClick={() => {
                       close();
-                      printRows(
-                        "All Parties",
-                        ["Name", "Phone", "GSTIN", "Balance"],
-                        parties.map((p) => [p.name, p.phone ?? "", p.gstin ?? "", inr(p.balance)])
-                      );
+                      printRows(partyReport.title, partyReport.head, partyReport.rows, undefined, partyReport.extras);
                     }}
                   />
                   <RowMenuDivider />
@@ -704,12 +759,7 @@ export default function PartiesPage() {
                               label="Print"
                               onClick={() => {
                                 close();
-                                printRows(
-                                  `${selected.name} — Statement`,
-                                  ledgerHead,
-                                  sortedLedger.map((r) => [r.type, r.number ?? "", r.date ?? "", inr(r.total), inr(r.balance)]),
-                                  selected.gstin ? `GSTIN ${selected.gstin}` : undefined
-                                );
+                                void statementOut("print");
                               }}
                             />
                             <RowMenuDivider />
@@ -746,27 +796,14 @@ export default function PartiesPage() {
                         />
                       </div>
                       <button
-                        onClick={() =>
-                          printRows(
-                            `${selected.name} — Statement`,
-                            ledgerHead,
-                            sortedLedger.map((r) => [r.type, r.number ?? "", r.date ?? "", inr(r.total), inr(r.balance)])
-                          )
-                        }
+                        onClick={() => void statementOut("print")}
                         title="Print"
                         className="rounded-lg p-1.5 text-gray-400 transition-colors duration-150 hover:bg-gray-100 hover:text-gray-600"
                       >
                         <Printer size={15} />
                       </button>
                       <button
-                        onClick={() =>
-                          downloadPdf(
-                            `${selected.name} — Statement`,
-                            ledgerHead,
-                            sortedLedger.map((r) => [r.type, r.number ?? "", r.date ?? "", inr(r.total), inr(r.balance)]),
-                            { subtitle: `Balance ${inr(selected.balance)}`, rightAlignFrom: 3 }
-                          )
-                        }
+                        onClick={() => void statementOut("pdf")}
                         title="Download PDF"
                         className="rounded-lg p-1.5 text-rose-600 transition-colors duration-150 hover:bg-rose-50"
                       >

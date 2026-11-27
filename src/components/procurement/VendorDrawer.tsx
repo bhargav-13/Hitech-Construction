@@ -8,6 +8,7 @@ import { Spinner } from "@/components/Spinner";
 import { getVendorLedger } from "@/lib/purchaseApi";
 import { inr } from "@/lib/format";
 import type { Party, PartyLedgerRow } from "@/lib/vyaparApi";
+import { FitText } from "@/components/FitText";
 
 /**
  * A vendor's card and full history.
@@ -157,7 +158,7 @@ function Stat({ label, value, tone = "text-gray-800", hint }: { label: string; v
   return (
     <div className="rounded-xl border border-gray-200 bg-white p-3">
       <div className="text-[11px] tracking-wide text-gray-400 uppercase">{label}</div>
-      <div className={`mt-0.5 text-lg font-semibold tabular-nums ${tone}`}>{value}</div>
+      <FitText className={`mt-0.5 text-lg font-semibold tabular-nums ${tone}`}>{value}</FitText>
       {hint && <div className="text-[11px] text-gray-400">{hint}</div>}
     </div>
   );

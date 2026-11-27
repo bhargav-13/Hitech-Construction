@@ -8,6 +8,7 @@ import { staffFinancials } from "@/lib/staffLedger";
 import type { UserResponse } from "@/lib/api";
 import { Spinner } from "@/components/Spinner";
 import { CreditCard, ExternalLink, Mail, Phone } from "lucide-react";
+import { FitText } from "@/components/FitText";
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 function fmtDate(iso: string | null): string {
@@ -173,7 +174,7 @@ function Stat({ label, value, tone }: { label: string; value: string; tone?: "em
   return (
     <div className="rounded-xl border border-gray-200 bg-white p-3">
       <div className="text-[11px] tracking-wide text-gray-400 uppercase">{label}</div>
-      <div className={`mt-0.5 text-base font-semibold ${color}`}>{value}</div>
+      <FitText className={`mt-0.5 text-base font-semibold ${color}`}>{value}</FitText>
     </div>
   );
 }

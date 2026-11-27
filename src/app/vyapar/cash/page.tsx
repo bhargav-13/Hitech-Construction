@@ -7,7 +7,7 @@ import { CashBankEntryDialog } from "@/components/vyapar/CashBankDialogs";
 import { useCan } from "@/lib/permissions";
 import { Spinner } from "@/components/Spinner";
 import { inr } from "@/lib/format";
-import { downloadPdf } from "@/lib/vyaparExport";
+import { downloadPdf, bankStatementSheet } from "@/lib/vyaparExport";
 import { ExportDialog, type ExportColumn } from "@/components/vyapar/ExportDialog";
 import * as vyapar from "@/lib/vyaparApi";
 import type { BankAccount, CashBankTxn } from "@/lib/vyaparApi";
@@ -81,8 +81,6 @@ This can't be undone.`)) return;
     { key: "note", label: "Note", value: (t) => t.note ?? "" },
   ];
 
-  const head = ["Type", "Name", "Date", "Amount"];
-
   return (
     <VyaparShell>
       <div className="animate-fade-in space-y-4">
@@ -115,12 +113,11 @@ This can't be undone.`)) return;
             onSaved={() => void load()}
             onDelete={can("VYAPAR_CASH_BANK:DELETE") ? (t) => void removeTxn(t) : undefined}
             onExport={() => setExporting(true)}
-            onPdf={() =>
-              downloadPdf("Cash In Hand", head, rows.map((r) => [r.type, r.name ?? "", r.date ?? "", inr(r.amount)]), {
-                subtitle: `Balance ${inr(balance)}`,
-                rightAlignFrom: 3,
-              })
-            }
+            onPdf={() => {
+              // Cash is an account like any other, so its PDF is Vyapar's bank-statement sheet.
+              const sheet = bankStatementSheet("Cash In Hand", rows, balance);
+              void downloadPdf(sheet.title, sheet.head, sheet.rows, { subtitle: sheet.subtitle, ...sheet.extras });
+            }}
           />
         )}
       </div>

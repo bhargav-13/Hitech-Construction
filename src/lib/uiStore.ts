@@ -32,7 +32,9 @@ interface UiState {
 export const useUiStore = create<UiState>()(
   persist(
     (set) => ({
-      sidebarCollapsed: false,
+      // Collapsed by default: the rail of icons leaves the page its full width, and hovering an
+      // icon names it. Anyone who prefers the wide menu opens it once and it stays open.
+      sidebarCollapsed: true,
       toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
       vyaparRailCollapsed: false,
       toggleVyaparRail: () => set((s) => ({ vyaparRailCollapsed: !s.vyaparRailCollapsed })),
@@ -46,6 +48,10 @@ export const useUiStore = create<UiState>()(
     {
       name: "hitech.ui.v1",
       storage: createJSONStorage(() => localStorage),
+      // v2: the main sidebar starts collapsed. Browsers that already saved "expanded" under the
+      // old default are moved over once; whatever is chosen after that is kept as before.
+      version: 2,
+      migrate: (saved, version) => (version < 2 ? { ...(saved as Partial<UiState>), sidebarCollapsed: true } : saved) as UiState,
     }
   )
 );

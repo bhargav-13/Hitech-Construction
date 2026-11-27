@@ -34,6 +34,7 @@ import {
   useTargetTotals,
   workingDays,
 } from "@/lib/useProjectTargets";
+import { FitText } from "@/components/FitText";
 
 /**
  * Targets — what is actually being built, line by line.
@@ -100,7 +101,7 @@ function Stat({ label, value, sub }: { label: string; value: string; sub: string
   return (
     <div className="px-4 py-3">
       <div className="text-[10px] font-semibold tracking-wide text-gray-400 uppercase">{label}</div>
-      <div className="mt-1 text-base font-semibold tabular-nums text-gray-800">{value}</div>
+      <FitText className="mt-1 text-base font-semibold tabular-nums text-gray-800">{value}</FitText>
       <div className="mt-0.5 text-[11px] text-gray-400">{sub}</div>
     </div>
   );

@@ -36,6 +36,7 @@ import type { ProjectResponse, ProjectSummary } from "@/lib/api";
 import { projectInitials } from "@/lib/projectHelpers";
 import { useCan, type Need } from "@/lib/permissions";
 import { inr, pct } from "@/lib/format";
+import { FitText } from "@/components/FitText";
 
 // Deliberately NOT `runtime = "edge"`. This page is a client component, so edge bought nothing —
 // it only governs the server-rendered shell — while capping the bundle at Vercel's 1 MB edge
@@ -441,7 +442,7 @@ function StatCard({
   return (
     <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
       <span className={`flex h-8 w-8 items-center justify-center rounded-lg ${tint}`}>{icon}</span>
-      <div className="mt-3 text-xl font-semibold tracking-tight text-slate-900">{value}</div>
+      <FitText className="mt-3 text-xl font-semibold tracking-tight text-slate-900">{value}</FitText>
       <div className="mt-0.5 text-xs text-slate-500">{label}</div>
       {note && <div className={`mt-1 text-[11px] ${warn ? "text-amber-600" : "text-slate-400"}`}>{note}</div>}
     </div>

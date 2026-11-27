@@ -12,6 +12,7 @@ import { useProjects } from "@/lib/useProjects";
 import { WORK_ORDER_STATUS_CLS } from "@/lib/procurementConfig";
 import { WORK_ORDER_STATUSES } from "@/lib/workOrderApi";
 import { inr } from "@/lib/format";
+import { FitText } from "@/components/FitText";
 
 /**
  * Work orders — subcontracts out to labour contractors.
@@ -297,7 +298,7 @@ function Stat({
   return (
     <div className={`rounded-xl border p-3 ${ring}`}>
       <div className="text-[11px] font-medium tracking-wide text-gray-500 uppercase">{label}</div>
-      <div className="mt-0.5 text-lg font-semibold text-gray-900 tabular-nums">{value}</div>
+      <FitText className="mt-0.5 text-lg font-semibold text-gray-900 tabular-nums">{value}</FitText>
       {hint && <div className="text-[11px] text-gray-500">{hint}</div>}
     </div>
   );

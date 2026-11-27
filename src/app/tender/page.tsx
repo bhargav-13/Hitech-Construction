@@ -44,6 +44,7 @@ import {
   Undo2,
   Users,
 } from "lucide-react";
+import { FitText } from "@/components/FitText";
 
 /** Which pipeline screen each reporting bucket drills into. */
 const BUCKET_ROUTE: Record<TenderBucket, string> = {
@@ -545,7 +546,7 @@ function StatCard({
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           <div className="text-xs text-gray-500">{label}</div>
-          <div className={`mt-1 text-2xl font-semibold ${tone[accent]}`}>{value}</div>
+          <FitText className={`mt-1 text-2xl font-semibold ${tone[accent]}`}>{value}</FitText>
           {hint && <div className="mt-0.5 text-[11px] text-gray-400">{hint}</div>}
         </div>
         <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full ${bg[accent]}`}>
@@ -609,7 +610,7 @@ function MoneyCard({
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           <div className="text-[11px] text-gray-500">{label}</div>
-          <div className="mt-0.5 text-lg font-semibold text-gray-800">{inr(value)}</div>
+          <FitText className="mt-0.5 text-lg font-semibold text-gray-800">{inr(value)}</FitText>
         </div>
         <div className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full ${bg[tone]}`}>
           <Icon size={14} />

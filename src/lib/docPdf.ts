@@ -3,13 +3,16 @@
  * orders. Callers describe *what* is on the document as a {@link PrintModel}; the company's saved
  * {@link DocTemplate} decides *how* it looks. Real vector text through jsPDF + autotable.
  *
- * The default ("classic") reproduces the client's Onsite documents: logo + firm block top-left,
- * title and number top-right, a hairline, two grey detail panels, a dark-headed item table, then
- * totals, words, bank, terms and the signature over "Authorised Signatory".
+ * Three looks. "vyapar" — the default for Vyapar's own documents, the purchase order and the work
+ * order — follows Vyapar's print-outs: logo left, firm right-aligned over a rule, the title centred
+ * and underlined, grey-headed ruled tables. "classic" reproduces the client's Onsite documents: logo
+ * + firm block top-left, title and number top-right, a hairline, two grey detail panels, a
+ * dark-headed item table, then totals, words, bank, terms and the signature over "Authorised
+ * Signatory". "band" is classic under a colour band.
  */
 
 import type { jsPDF as JsPdf } from "jspdf";
-import { amountInWords, getAppLogo, getCachedFirmProfile, imageSize } from "./vyaparExport";
+import { amountInWords, drawVyaparLetterhead, getAppLogo, getCachedFirmProfile, imageSize, registerReportFont } from "./vyaparExport";
 import { getTemplate, type DocKind, type DocTemplate } from "./docTemplates";
 import type { FirmProfile } from "./vyaparApi";
 import { todayIST } from "@/lib/datetime";
@@ -255,6 +258,17 @@ export async function renderDocPdf(
   const M = 40;
   const contentW = pageW - M * 2;
   const bottomLimit = pageH - 56;
+
+  const saveIfAsked = () => {
+    if (!opts.save) return;
+    const safe = (model.number || tpl.title || "document").replace(/[\\/:*?"<>|\s]+/g, "-");
+    doc.save(`${safe}-${todayIST()}.pdf`);
+  };
+  if (tpl.style === "vyapar") {
+    await drawVyaparDocument(doc, model, tpl, firm, autoTable);
+    saveIfAsked();
+    return doc;
+  }
 
   const firmName = tpl.companyName.trim() || firm?.businessName || "";
   const ink = () => doc.setTextColor(33, 37, 41);
@@ -509,10 +523,7 @@ export async function renderDocPdf(
     if (tpl.show.pageNumbers && pages > 1) doc.text(`Page ${p} of ${pages}`, pageW - M, pageH - 24, { align: "right" });
   }
 
-  if (opts.save) {
-    const safe = (model.number || tpl.title || "document").replace(/[\\/:*?"<>|\s]+/g, "-");
-    doc.save(`${safe}-${todayIST()}.pdf`);
-  }
+  saveIfAsked();
   return doc;
 }
 
@@ -686,4 +697,359 @@ export async function renderLetterPdf(
     doc.save(`${safe}.pdf`);
   }
   return doc;
+}
+
+// ============================================================================================
+// The "vyapar" style — documents drawn in the look of Vyapar's own print-outs.
+// ============================================================================================
+
+/** Vyapar's headings over the party block and the details block, per document. */
+const VYAPAR_BLOCK_HEADINGS: Partial<Record<DocKind, [string, string]>> = {
+  SALE: ["Bill To", "Invoice Details"],
+  PROFORMA: ["Bill To", "Invoice Details"],
+  SALE_RETURN: ["Return From", "Credit Note Details"],
+  ESTIMATE: ["Estimate For", "Estimate Details"],
+  SALE_ORDER: ["Order From", "Order Details"],
+  DELIVERY_CHALLAN: ["Delivery Challan For", "Challan Details"],
+  PURCHASE: ["Bill From", "Bill Details"],
+  PURCHASE_RETURN: ["Return To", "Debit Note Details"],
+  PURCHASE_ORDER: ["Order To", "Order Details"],
+  EXPENSE: ["Expense For", "Expense Details"],
+  WORK_ORDER: ["Order To", "Work Order Details"],
+  RFQ: ["Enquiry Details", "RFQ Details"],
+};
+
+/** Column headings the way Vyapar words them. Anything else prints as the document names it. */
+const VYAPAR_COLUMN_LABEL: Record<string, string> = {
+  "s.no.": "#",
+  "sr. no.": "#",
+  "item name": "Item name",
+  "hsn/sac": "HSN/ SAC",
+  "hsn code": "HSN/ SAC",
+  qty: "Quantity",
+  rate: "Price/ Unit",
+  tax: "GST",
+};
+
+const VYAPAR_GREY: [number, number, number] = [211, 211, 211];
+
+/**
+ * A document in Vyapar's look, matched to its report print-outs: the logo on the left with the firm
+ * right-aligned beside it over a rule, the title centred and underlined, the party and the
+ * document's details side by side under a grey strip, a grey-headed ruled item table, the amounts
+ * ruled down the right with the words, bank and tax summary on the left, then terms and
+ * "For: <firm>" over the signature. What prints is still the template's call.
+ */
+async function drawVyaparDocument(
+  doc: JsPdf,
+  model: PrintModel,
+  tpl: DocTemplate,
+  firm: FirmProfile | null,
+  autoTable: (doc: unknown, o: unknown) => void,
+) {
+  const lastY = () => (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY;
+  const fs = FONT[tpl.fontScale] ?? 1;
+  const face = await registerReportFont(doc);
+  const txt = (s: string | null | undefined) => (face === "Roboto" ? String(s ?? "") : clean(s));
+  const pageW = doc.internal.pageSize.getWidth();
+  const pageH = doc.internal.pageSize.getHeight();
+  const M = 40;
+  const contentW = pageW - M * 2;
+  const bottomLimit = pageH - 52;
+  const font = (style: "normal" | "bold", size: number) => {
+    doc.setFont(face, style);
+    doc.setFontSize(size * fs);
+    doc.setTextColor(0);
+  };
+  const rule = (x1: number, y: number, x2: number, tone = 105, w = 0.7) => {
+    doc.setDrawColor(tone);
+    doc.setLineWidth(w);
+    doc.line(x1, y, x2, y);
+  };
+  const ensure = (y: number, need: number) => {
+    if (y + need <= bottomLimit) return y;
+    doc.addPage();
+    return 44;
+  };
+  // Vyapar's grey unless the company picked its own colour in Templates.
+  const customAccent = tpl.accent.trim().toLowerCase() !== "#212529";
+  const headFill = customAccent ? hexToRgb(tpl.accent) : VYAPAR_GREY;
+  const headText: [number, number, number] = customAccent ? [255, 255, 255] : [0, 0, 0];
+  const strip = (y: number, h = 17) => {
+    doc.setFillColor(headFill[0], headFill[1], headFill[2]);
+    doc.rect(M, y, contentW, h, "F");
+    doc.setTextColor(headText[0], headText[1], headText[2]);
+  };
+  const firmName = tpl.companyName.trim() || firm?.businessName || "";
+
+  // ================= Letterhead =================
+  const logo = tpl.showLogo ? firm?.logoDataUrl || (await getAppLogo()) : null;
+  let y =
+    (await drawVyaparLetterhead(
+      doc,
+      face,
+      {
+        businessName: firmName,
+        address: tpl.companyAddress.trim() || firm?.address,
+        phone: tpl.showContact ? firm?.phone : null,
+        email: tpl.showContact ? firm?.email : null,
+        gstin: tpl.showGstin ? firm?.gstin : null,
+        state: tpl.showGstin ? firm?.state : null,
+        logoDataUrl: logo,
+      },
+      { margin: M, top: 34, clean: (c) => txt(c == null ? "" : String(c)) },
+    )) + 8;
+  if (tpl.headerNote.trim()) {
+    font("normal", 8.5);
+    doc.setTextColor(90);
+    const note = doc.splitTextToSize(txt(tpl.headerNote), contentW) as string[];
+    doc.text(note, M, y + 4);
+    y += note.length * 11 + 2;
+  }
+
+  // ================= Title, centred and underlined =================
+  const title = txt(tpl.title || "");
+  if (title) {
+    font("bold", 17);
+    y += 20;
+    doc.text(title, pageW / 2, y, { align: "center" });
+    const tw = doc.getTextWidth(title);
+    rule(pageW / 2 - tw / 2, y + 3.5, pageW / 2 + tw / 2, 0, 1.1);
+    y += 18;
+  } else {
+    y += 10;
+  }
+
+  // ================= Party (left) and details (right) under a grey strip =================
+  const panels = tpl.show.partyPanel ? model.panels.filter((p) => p.rows.length) : [];
+  const [leftHead, rightHead] = VYAPAR_BLOCK_HEADINGS[model.kind] ?? ["Details", "Details"];
+  const leftW = contentW * 0.54;
+  const rightW = contentW * 0.4;
+  const blank = (v: string) => !v.trim() || /^(n\/a|—|-)$/i.test(v.trim());
+  type Line = { text: string; bold?: boolean };
+  const left: Line[] = [];
+  const right: Line[] = [];
+  const first = panels[0];
+  const isParty = !!first && /party|vendor|customer|supplier/i.test(first.rows[0]?.[0] ?? "");
+  font("normal", 9);
+  if (first) {
+    first.rows.forEach(([label, value], i) => {
+      if (blank(value)) return;
+      if (isParty && i === 0) {
+        (doc.splitTextToSize(txt(value), leftW) as string[]).forEach((t) => left.push({ text: t, bold: true }));
+        return;
+      }
+      // Vyapar's own wording for the party lines; the address prints bare under the name.
+      const l = /^address/i.test(label) && isParty ? "" : /^mobile/i.test(label) ? "Contact No.:" : /^gst/i.test(label) ? "GSTIN:" : label;
+      (doc.splitTextToSize(txt(`${l} ${value}`.trim()), leftW) as string[]).forEach((t) => left.push({ text: t }));
+    });
+  }
+  for (const [label, value] of [...model.meta, ...(panels[1]?.rows ?? [])]) {
+    if (blank(value)) continue;
+    (doc.splitTextToSize(txt(`${label} ${value}`), rightW) as string[]).forEach((t) => right.push({ text: t }));
+  }
+  if (left.length || right.length) {
+    y = ensure(y, 30 + Math.max(left.length, right.length) * 12.5);
+    strip(y);
+    doc.setFont(face, "bold");
+    doc.setFontSize(9.5 * fs);
+    if (left.length) doc.text(leftHead, M + 4, y + 12);
+    if (right.length) doc.text(rightHead, pageW - M - 4, y + 12, { align: "right" });
+    y += 17;
+    rule(M, y, pageW - M, 85, 0.8);
+    let ly = y + 14;
+    for (const l of left) {
+      font(l.bold ? "bold" : "normal", l.bold ? 10 : 9);
+      doc.text(l.text, M + 4, ly);
+      ly += 12.5;
+    }
+    let ry = y + 14;
+    for (const r of right) {
+      font("normal", 9);
+      doc.text(r.text, pageW - M - 4, ry, { align: "right" });
+      ry += 12.5;
+    }
+    y = Math.max(ly, ry) - 4;
+    rule(M, y, pageW - M);
+    y += 12;
+  }
+
+  // ================= Bill To / Ship To =================
+  const addresses = tpl.show.addresses ? (model.addresses ?? []).filter((a) => a.lines.length) : [];
+  if (addresses.length) {
+    const gap = 16;
+    const w = addresses.length === 1 ? contentW : (contentW - gap) / 2;
+    font("normal", 9);
+    const wrapped = addresses.map((a) => a.lines.flatMap((l) => doc.splitTextToSize(txt(l), w - 8) as string[]));
+    const h = 16 + Math.max(...wrapped.map((l) => l.length)) * 12;
+    y = ensure(y, h);
+    addresses.forEach((a, i) => {
+      const x = M + i * (w + gap);
+      font("bold", 9.5);
+      doc.text(txt(a.title), x + 4, y + 8);
+      font("normal", 9);
+      wrapped[i].forEach((l, j) => doc.text(l, x + 4, y + 21 + j * 12));
+    });
+    y += h + 4;
+    rule(M, y, pageW - M);
+    y += 12;
+  }
+
+  // ================= Item table: grey head, ruled rows =================
+  const keep = model.columns.map((c) => (c.key === "hsn" ? tpl.show.hsn : c.key === "tax" ? tpl.show.tax : true));
+  const cols = model.columns.filter((_, i) => keep[i]);
+  const rows = model.rows.map((r) =>
+    r.filter((_, i) => keep[i]).map((cell) => (tpl.show.itemDescription ? txt(cell) : txt(cell).split("\n")[0])),
+  );
+  const columnStyles: Record<number, { halign?: Align; cellWidth?: number }> = {};
+  cols.forEach((c, i) => {
+    columnStyles[i] = { halign: c.align ?? "left", ...(c.width ? { cellWidth: c.width } : {}) };
+  });
+  type Drawn = { section: string; column: { index: number }; cell: { x: number; y: number; width: number; height: number; styles: { halign: string } } };
+  autoTable(doc, {
+    head: [cols.map((c) => VYAPAR_COLUMN_LABEL[c.label.trim().toLowerCase()] ?? txt(c.label))],
+    body: rows,
+    startY: ensure(y, 60),
+    theme: "plain",
+    styles: { font: face, fontSize: 9 * fs, cellPadding: { top: 5, bottom: 5, left: 4, right: 4 }, textColor: [0, 0, 0], valign: "middle" },
+    headStyles: { fillColor: headFill, textColor: headText, fontStyle: "bold" },
+    didParseCell: (data: Drawn) => {
+      if (data.section === "head") data.cell.styles.halign = cols[data.column.index]?.align ?? "left";
+    },
+    didDrawCell: (data: Drawn) => {
+      const yy = data.cell.y + data.cell.height;
+      if (data.section === "head") rule(data.cell.x, yy, data.cell.x + data.cell.width, 85, 0.8);
+      else rule(data.cell.x, yy, data.cell.x + data.cell.width);
+    },
+    columnStyles,
+    margin: { left: M, right: M, top: 44, bottom: 52 },
+  });
+  y = lastY() + 14;
+
+  // ================= Amounts (right) · words, bank and tax summary (left) =================
+  const totals = tpl.show.totals ? (model.totals ?? []) : [];
+  const summary = tpl.show.taxSummary ? model.taxSummary : undefined;
+  const amountsW = 215;
+  const sideW = contentW - amountsW - 22;
+  const words = tpl.show.amountInWords && model.amountForWords != null ? amountInWords(model.amountForWords) : "";
+  const bank = tpl.show.bank ? (model.bank ?? []) : [];
+  if (totals.length || summary || words || bank.length) {
+    const top = ensure(y, Math.min(240, 24 + totals.length * 17));
+    let ry = top;
+    if (totals.length) {
+      const x0 = pageW - M - amountsW;
+      font("bold", 9.5);
+      doc.text("Amounts", x0 + 4, ry + 9);
+      ry += 14;
+      rule(x0, ry, pageW - M, 85, 0.8);
+      for (const t of totals) {
+        if (t.strong) {
+          doc.setFillColor(headFill[0], headFill[1], headFill[2]);
+          doc.rect(x0, ry, amountsW, 17, "F");
+        }
+        font(t.strong ? "bold" : "normal", 9);
+        if (t.strong) doc.setTextColor(headText[0], headText[1], headText[2]);
+        doc.text(txt(t.label), x0 + 4, ry + 12);
+        doc.text(txt(t.value), pageW - M - 4, ry + 12, { align: "right" });
+        ry += 17;
+        rule(x0, ry, pageW - M);
+      }
+    }
+    let ly = top;
+    if (words) {
+      font("bold", 9.5);
+      doc.text("Amount In Words", M + 4, ly + 9);
+      font("normal", 9);
+      const w = doc.splitTextToSize(words, sideW) as string[];
+      doc.text(w, M + 4, ly + 23);
+      ly += 23 + w.length * 12 + 4;
+    }
+    if (bank.length) {
+      font("bold", 9.5);
+      doc.text("Pay To", M + 4, ly + 9);
+      ly += 23;
+      for (const [label, value] of bank) {
+        font("normal", 9);
+        const v = doc.splitTextToSize(txt(`${label}: ${value}`), sideW) as string[];
+        doc.text(v, M + 4, ly);
+        ly += v.length * 12.5;
+      }
+      ly += 4;
+    }
+    if (summary) {
+      autoTable(doc, {
+        head: [summary.head.map(txt)],
+        body: summary.body.map((r) => r.map(txt)),
+        ...(summary.foot ? { foot: [summary.foot.map(txt)] } : {}),
+        startY: ly + 4,
+        tableWidth: sideW,
+        theme: "plain",
+        styles: { font: face, fontSize: 8 * fs, cellPadding: 3.5, halign: "right", textColor: [0, 0, 0] },
+        headStyles: { fillColor: VYAPAR_GREY, textColor: [0, 0, 0], fontStyle: "bold", halign: "right" },
+        footStyles: { fillColor: VYAPAR_GREY, textColor: [0, 0, 0], fontStyle: "bold", halign: "right" },
+        columnStyles: { 0: { halign: "left" } },
+        didDrawCell: (data: Drawn) => rule(data.cell.x, data.cell.y + data.cell.height, data.cell.x + data.cell.width),
+        margin: { left: M, right: M },
+      });
+      ly = lastY() + 6;
+    }
+    y = Math.max(ly, ry) + 14;
+  }
+
+  // ================= Description + terms, full width =================
+  const terms = (model.terms && model.terms.trim()) || tpl.defaultTerms.trim();
+  const blocks: [string, string][] = [];
+  if (model.notes?.trim()) blocks.push(["Description", model.notes.trim()]);
+  if (tpl.show.terms && terms) blocks.push(["Terms And Conditions", terms]);
+  for (const [heading, body] of blocks) {
+    y = ensure(y, 40);
+    font("bold", 9.5);
+    doc.text(heading, M + 4, y);
+    y += 14;
+    font("normal", 9);
+    if (NON_LATIN.test(body)) {
+      // Hindi / Gujarati wording is shaped by the browser and placed line by line as images.
+      for (const img of scriptLines(body, contentW - 8, 9 * fs, 13)) {
+        y = ensure(y, 12);
+        doc.addImage(img.data, "PNG", M + 4, y - 9 * fs * 0.95, img.w, img.h);
+        y += 13;
+      }
+    } else {
+      for (const line of doc.splitTextToSize(txt(body), contentW - 8) as string[]) {
+        y = ensure(y, 12);
+        doc.text(line, M + 4, y);
+        y += 12;
+      }
+    }
+    y += 10;
+  }
+
+  // ================= "For: <firm>" over the signature, bottom right =================
+  if (tpl.show.signature) {
+    const sigW = 190;
+    const sigX = pageW - M - sigW;
+    let sy = ensure(y + 6, 104);
+    if (firmName) {
+      font("normal", 9);
+      doc.text(`For: ${txt(firmName)}`, pageW - M - 4, sy, { align: "right" });
+      sy += 6;
+    }
+    if (tpl.stampImage) await drawImageFit(doc, tpl.stampImage, sigX - 6, sy, 70, 64);
+    if (tpl.signatureImage) await drawImageFit(doc, tpl.signatureImage, sigX + 30, sy, sigW - 30, 64, true);
+    const lineY = sy + 70;
+    font("bold", 9);
+    doc.text(txt(tpl.signatory || "Authorized Signatory"), pageW - M - 4, lineY + 2, { align: "right" });
+  }
+
+  // ================= Footer on every page =================
+  const pages = doc.getNumberOfPages();
+  const footer = tpl.footerNote.trim() || firm?.footerNote || "";
+  for (let p = 1; p <= pages; p++) {
+    doc.setPage(p);
+    doc.setFont(face, "normal");
+    doc.setFontSize(7.5 * fs);
+    doc.setTextColor(120);
+    if (footer) doc.text(doc.splitTextToSize(txt(footer), contentW - 70) as string[], M, pageH - 24);
+    if (tpl.show.pageNumbers && pages > 1) doc.text(`Page ${p} of ${pages}`, pageW - M, pageH - 24, { align: "right" });
+  }
 }

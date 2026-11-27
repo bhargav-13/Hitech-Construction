@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
@@ -25,19 +25,20 @@ import {
   MapPin,
   ListTodo,
   LocateFixed,
-  PanelLeftClose,
-  PanelLeftOpen,
   LogOut,
   BadgeCheck,
   LifeBuoy,
   LayoutTemplate,
+  ChevronDown,
+  ChevronRight,
+  ChevronUp,
 } from "lucide-react";
 import { NAV_ITEMS, NAV_BREAK_AFTER, NAV_MODULE, NAV_ANY_MODULE } from "@/lib/nav";
 import { useAppStore } from "@/lib/store";
 import { useAuthStore } from "@/lib/authStore";
-import { useUiStore } from "@/lib/uiStore";
 import { useNotifications } from "@/lib/notifications";
 import { useCan } from "@/lib/permissions";
+import { activeChild, childrenFor, type NavChild } from "@/lib/navChildren";
 import { useApprovalInboxCount } from "@/lib/approvals";
 import { useTaskStore } from "@/lib/taskStore";
 import { projectAvatarColor, projectInitials } from "@/lib/projectHelpers";
@@ -71,9 +72,20 @@ const ICONS: Record<string, React.ComponentType<{ size?: number; className?: str
 
 export function Sidebar() {
   const pathname = usePathname();
-  // Persisted so collapsing survives navigation — AppShell (and this sidebar) remount per route.
-  const collapsed = useUiStore((s) => s.sidebarCollapsed);
-  const toggleSidebar = useUiStore((s) => s.toggleSidebar);
+  // The sidebar is a rail of icons that takes 76px of the page. Resting the pointer on it slides
+  // the whole menu open *over* the page — names, sub-menus and all — and moving away folds it
+  // back, so the page never jumps sideways (the way a browser's vertical tab strip behaves). There
+  // is no button to expand or collapse it: hovering is the only way in, and it is always enough.
+  const [peek, setPeek] = useState(false);
+  const peekTimer = useRef<number | null>(null);
+  const setPeekSoon = (open: boolean) => {
+    if (peekTimer.current) window.clearTimeout(peekTimer.current);
+    // A short wait both ways: brushing past the rail does not open it, and slipping off the edge
+    // for a moment does not close it.
+    peekTimer.current = window.setTimeout(() => setPeek(open), open ? 140 : 240);
+  };
+  /** Showing as the icon rail right now. Everything below draws from this. */
+  const collapsed = !peek;
   const currentUserId = useAppStore((s) => s.currentUserId);
   const users = useAppStore((s) => s.users);
   const logout = useAppStore((s) => s.logout);
@@ -138,6 +150,44 @@ export function Sidebar() {
   const { active: activeCompany } = useCompanies();
   const accentBar = companyAccent(activeCompany).bar;
 
+  // ---- "There is more" hints -------------------------------------------------------------
+  // The menu scrolls without a scrollbar (the operating system's bar looked out of place on the
+  // dark rail), so something else has to say there is more above or below: a fade over the edge
+  // and a small arrow that scrolls a screenful when pressed.
+  const navRef = useRef<HTMLElement>(null);
+  const [more, setMore] = useState({ up: false, down: false });
+  const measureMore = useCallback(() => {
+    const el = navRef.current;
+    if (!el) return;
+    const up = el.scrollTop > 4;
+    const down = el.scrollTop + el.clientHeight < el.scrollHeight - 4;
+    setMore((m) => (m.up === up && m.down === down ? m : { up, down }));
+  }, []);
+  useEffect(() => {
+    const el = navRef.current;
+    if (!el) return;
+    // Fires once on observe and again whenever the rail or the window changes height.
+    const watch = new ResizeObserver(measureMore);
+    watch.observe(el);
+    if (el.firstElementChild) watch.observe(el.firstElementChild);
+    // And once on arrival, without waiting for a paint: a tab opened in the background draws no
+    // frames, so the observer alone would leave the hint off until the first scroll.
+    const first = window.setTimeout(measureMore, 0);
+    return () => {
+      watch.disconnect();
+      window.clearTimeout(first);
+    };
+    // Measured again when the menu changes: the rail collapsing, or a role's modules arriving.
+  }, [measureMore, collapsed, navItems.length]);
+  const scrollNav = (by: number) => navRef.current?.scrollBy({ top: by, behavior: "smooth" });
+
+  // ---- Sub-menus --------------------------------------------------------------------------
+  // Expanded: a module with screens of its own opens in place, its screens hanging off a tree
+  // line. The module being worked in starts open; the arrow opens or closes any of them.
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
+  const isOpen = (href: string) => openGroups[href] ?? href === activeHref;
+  const toggleGroup = (href: string) => setOpenGroups((g) => ({ ...g, [href]: !(g[href] ?? href === activeHref) }));
+
   async function handleLogout() {
     await authLogout();
     logout();
@@ -148,10 +198,21 @@ export function Sidebar() {
   }
 
   return (
+    // The outer box is what the page is laid out against: 76px while collapsed, however wide the
+    // menu inside it is being shown. The sidebar itself floats in it, so opening on hover covers
+    // the page instead of shoving it across.
+    <div
+      className="relative z-40 h-full w-[76px] flex-shrink-0"
+      onMouseEnter={() => setPeekSoon(true)}
+      // Keyboard: tabbing into the rail opens it, tabbing out closes it.
+      onFocus={() => setPeekSoon(true)}
+      onBlur={() => setPeekSoon(false)}
+      onMouseLeave={() => setPeekSoon(false)}
+    >
     <aside
-      className={`relative flex h-full flex-shrink-0 flex-col border-r border-sidebar-border bg-sidebar-bg text-sidebar-text transition-all duration-200 ${
+      className={`absolute inset-y-0 left-0 flex flex-col overflow-hidden border-r border-sidebar-border bg-sidebar-bg text-sidebar-text transition-[width,box-shadow] duration-200 ease-out ${
         collapsed ? "w-[76px]" : "w-64"
-      }`}
+      } ${peek ? "shadow-[8px_0_32px_rgba(0,0,0,0.35)]" : ""}`}
     >
       {/* Per-company accent down the outer edge. Cheap, always visible, and the thing that stops
           someone raising one firm's invoice while looking at the other's books. */}
@@ -159,21 +220,18 @@ export function Sidebar() {
       {/* The firm's name used to be printed here. It's now the company switcher — the subtitle
           carries GSTIN/city rather than the user's role, which the user card at the foot of this
           sidebar already shows. */}
-      <div className={`flex items-center px-3 py-4 ${collapsed ? "flex-col gap-2" : "gap-2"}`}>
-        <div className="min-w-0 flex-1">
-          <CompanySwitcher collapsed={collapsed} />
-        </div>
-        <button
-          type="button"
-          onClick={toggleSidebar}
-          className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md border border-sidebar-border text-sidebar-text transition-all duration-150 hover:bg-white/10 hover:text-white active:scale-90"
-          aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-        >
-          {collapsed ? <PanelLeftOpen size={15} /> : <PanelLeftClose size={15} />}
-        </button>
+      <div className="px-3 py-4">
+        <CompanySwitcher collapsed={collapsed} />
       </div>
 
-      <nav className="flex-1 overflow-y-auto px-3 py-2">
+      <div className="relative flex min-h-0 flex-1 flex-col">
+      <nav
+        ref={navRef}
+        onScroll={() => {
+          measureMore();
+        }}
+        className="no-scrollbar flex-1 overflow-y-auto px-3 py-2"
+      >
         <ul className="space-y-1">
           {navItems.flatMap((item, idx) => {
             const Icon = ICONS[item.label] ?? LayoutGrid;
@@ -188,36 +246,72 @@ export function Sidebar() {
                 : item.href === "/approvals"
                   ? approvalCount
                   : 0;
-            const link = (
-              <li key={item.href}>
+            const target = item.landing && can(item.landingFeature) ? item.landing : item.href;
+            const kids = childrenFor(item.href, can);
+            const open = kids.length > 0 && isOpen(item.href);
+            const link = collapsed ? (
+              // Collapsed rail: one rounded square per module, lit when it is the current one or
+              // the one being hovered.
+              <li key={item.href} className="flex justify-center">
                 <Link
-                  href={item.landing && can(item.landingFeature) ? item.landing : item.href}
-                  title={collapsed ? item.label : undefined}
-                  className={`relative flex items-center gap-3 rounded-r-lg border-l-[3px] py-2.5 pl-[9px] pr-3 text-sm transition-all duration-150 ease-out active:scale-[0.98] ${
+                  href={target}
+                  aria-label={item.label}
+                  title={item.label}
+                  className={`group relative flex h-11 w-11 items-center justify-center rounded-xl transition-all duration-150 ease-out active:scale-95 ${
                     active
-                      ? "border-sidebar-active bg-sidebar-active/10 font-medium text-sidebar-active"
-                      : "border-transparent text-sidebar-text hover:border-sidebar-active/30 hover:bg-white/5 hover:text-white"
+                      ? "bg-sidebar-active/15 text-sidebar-active"
+                      : "text-sidebar-text hover:bg-white/10 hover:text-white"
                   }`}
                 >
-                  <Icon size={18} className="flex-shrink-0" />
-                  {/* Collapsed rail: show a small count bubble on the icon corner. */}
-                  {collapsed && count > 0 && (
-                    <span className="absolute left-6 top-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-rose-500 px-1 text-[9px] font-semibold text-white">
+                  <Icon size={19} className="flex-shrink-0 transition-transform duration-200 ease-out group-hover:scale-110" />
+                  {count > 0 && (
+                    <span className="absolute -top-0.5 -right-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-rose-500 px-1 text-[9px] font-semibold text-white">
                       {count > 9 ? "9+" : count}
                     </span>
                   )}
-                  {!collapsed && <span className="truncate">{item.label}</span>}
-                  {!collapsed && count > 0 && (
-                    <span className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-rose-500 px-1.5 text-[10px] font-semibold text-white">
-                      {count > 99 ? "99+" : count}
-                    </span>
-                  )}
-                  {!collapsed && !count && item.badge && (
-                    <span className="ml-auto rounded-full bg-amber-400/20 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-amber-300">
-                      {item.badge}
-                    </span>
-                  )}
                 </Link>
+              </li>
+            ) : (
+              <li key={item.href}>
+                <div
+                  className={`group flex items-center rounded-xl transition-colors duration-150 ${
+                    active ? "bg-sidebar-active/10 text-white" : "text-sidebar-text hover:bg-white/5 hover:text-white"
+                  }`}
+                >
+                  <Link href={target} className="flex min-w-0 flex-1 items-center gap-3 py-2.5 pr-2 pl-3 text-sm transition-transform duration-150 active:scale-[0.98]">
+                    <Icon size={18} className={`flex-shrink-0 ${active ? "text-sidebar-active" : ""}`} />
+                    <span className={`truncate ${active ? "font-medium" : ""}`}>{item.label}</span>
+                    {count > 0 && (
+                      <span className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-md bg-rose-500 px-1.5 text-[10px] font-semibold text-white">
+                        {count > 99 ? "99+" : count}
+                      </span>
+                    )}
+                    {!count && item.badge && (
+                      <span className="ml-auto rounded-full bg-amber-400/20 px-1.5 py-0.5 text-[9px] font-semibold tracking-wide text-amber-300 uppercase">
+                        {item.badge}
+                      </span>
+                    )}
+                  </Link>
+                  {kids.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => toggleGroup(item.href)}
+                      aria-expanded={open}
+                      aria-label={`${open ? "Hide" : "Show"} ${item.label} screens`}
+                      className="mr-1.5 flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg text-sidebar-text transition-colors duration-150 hover:bg-white/10 hover:text-white"
+                    >
+                      <ChevronDown size={15} className={`transition-transform duration-200 ${open ? "rotate-180" : ""}`} />
+                    </button>
+                  )}
+                </div>
+                {kids.length > 0 && (
+                  // Opens by growing its row from nothing to its natural height, so it eases open.
+                  <div className={`grid transition-[grid-template-rows] duration-200 ease-out ${open ? "grid-rows-[1fr]" : "grid-rows-[0fr]"}`}>
+                    <div className="overflow-hidden">
+                      <SubMenu items={kids} current={activeChild(kids, pathname, item.href)} inert={!open} />
+                    </div>
+                  </div>
+                )}
               </li>
             );
             const next = navItems[idx + 1];
@@ -225,13 +319,44 @@ export function Sidebar() {
             if (NAV_BREAK_AFTER.has(item.label) && next && !nextInGroup) {
               return [
                 link,
-                <li key={`${item.href}-divider`} aria-hidden className="my-2 border-t border-sidebar-border" />,
+                <li key={`${item.href}-divider`} aria-hidden className={`my-2 border-t border-sidebar-border ${collapsed ? "mx-2" : ""}`} />,
               ];
             }
             return [link];
           })}
         </ul>
       </nav>
+        {/* More above / below: a fade over the edge and an arrow to get there. */}
+        <div
+          aria-hidden={!more.up}
+          className={`pointer-events-none absolute inset-x-0 top-0 flex h-9 items-start justify-center bg-gradient-to-b from-sidebar-bg via-sidebar-bg/80 to-transparent transition-opacity duration-200 ${more.up ? "opacity-100" : "opacity-0"}`}
+        >
+          <button
+            type="button"
+            tabIndex={more.up ? 0 : -1}
+            onClick={() => scrollNav(-220)}
+            title="More above"
+            className={`mt-0.5 flex h-5 w-8 items-center justify-center rounded-full bg-white/10 text-white/80 transition-colors hover:bg-white/20 hover:text-white ${more.up ? "pointer-events-auto" : ""}`}
+          >
+            <ChevronUp size={14} />
+          </button>
+        </div>
+        <div
+          aria-hidden={!more.down}
+          className={`pointer-events-none absolute inset-x-0 bottom-0 flex h-11 items-end justify-center bg-gradient-to-t from-sidebar-bg via-sidebar-bg/85 to-transparent transition-opacity duration-200 ${more.down ? "opacity-100" : "opacity-0"}`}
+        >
+          <button
+            type="button"
+            tabIndex={more.down ? 0 : -1}
+            onClick={() => scrollNav(220)}
+            title="More below"
+            className={`mb-1 flex h-5 items-center justify-center gap-1 rounded-full bg-white/10 px-2 text-[10px] font-medium text-white/80 transition-colors hover:bg-white/20 hover:text-white ${more.down ? "pointer-events-auto" : ""}`}
+          >
+            {!collapsed && <span>More</span>}
+            <ChevronDown size={14} className="animate-bounce" />
+          </button>
+        </div>
+      </div>
 
       {/* Self-service actions every signed-in person gets, not just admins: Punch, and a private
           To-Do list (board, calendar, reminders) that nobody else can read — Taskopad stays the
@@ -276,6 +401,55 @@ export function Sidebar() {
         </div>
       )}
     </aside>
+    </div>
+  );
+}
+
+/**
+ * A module's screens, hanging off a tree line: a rule down the left with a short branch to each
+ * screen, the current one on a lit pill with an arrow. Used under an open module in the expanded
+ * sidebar and on the hover card of the collapsed one.
+ */
+function SubMenu({
+  items,
+  current,
+  onNavigate,
+  inert = false,
+  flush = false,
+}: {
+  items: NavChild[];
+  current: string | null;
+  onNavigate?: () => void;
+  /** Closed and out of sight: keep its links out of the tab order. */
+  inert?: boolean;
+  /** No indent — on the hover card, where there is no icon column to line up under. */
+  flush?: boolean;
+}) {
+  return (
+    <ul className={`relative my-1 space-y-0.5 border-l border-white/10 ${flush ? "ml-2.5" : "ml-[21px]"}`}>
+      {items.map((c, i) =>
+        c.heading || !c.href ? (
+          <li key={`h-${i}-${c.label}`} className="px-4 pt-2 pb-0.5 text-[10px] font-semibold tracking-wider text-white/35 uppercase">
+            {c.label}
+          </li>
+        ) : (
+          <li key={c.href} className="relative pl-3">
+            <span aria-hidden className="absolute top-1/2 left-0 h-px w-2.5 bg-white/10" />
+            <Link
+              href={c.href}
+              onClick={onNavigate}
+              tabIndex={inert ? -1 : undefined}
+              className={`flex items-center justify-between gap-2 rounded-lg px-3 py-2 text-[13px] transition-colors duration-150 ${
+                current === c.href ? "bg-sidebar-active/15 font-medium text-white" : "text-sidebar-text hover:bg-white/5 hover:text-white"
+              }`}
+            >
+              <span className="truncate">{c.label}</span>
+              {current === c.href && <ChevronRight size={14} className="flex-shrink-0 text-sidebar-active" />}
+            </Link>
+          </li>
+        ),
+      )}
+    </ul>
   );
 }
 
@@ -285,25 +459,37 @@ function QuickAction({
   href,
   collapsed,
   active = false,
+  onTip,
+  offTip,
 }: {
-  icon: React.ComponentType<{ size?: number }>;
+  icon: React.ComponentType<{ size?: number; className?: string }>;
   label: string;
   href?: string;
   collapsed: boolean;
   active?: boolean;
+  /** Collapsed rail: slide this action's name out beside it while it is hovered. */
+  onTip?: (el: HTMLElement, label: string) => void;
+  offTip?: () => void;
 }) {
-  const cls = `flex flex-col items-center gap-1 rounded-lg border px-2 py-2 text-[11px] transition-all duration-150 hover:border-sidebar-active/40 hover:bg-sidebar-active/5 hover:text-sidebar-active active:scale-95 ${
+  const cls = `group flex flex-col items-center gap-1 rounded-lg border px-2 py-2 text-[11px] transition-all duration-150 hover:border-sidebar-active/40 hover:bg-sidebar-active/5 hover:text-sidebar-active active:scale-95 ${
     active ? "border-sidebar-active/50 bg-sidebar-active/10 text-sidebar-active" : "border-sidebar-border text-sidebar-text"
   }`;
   const content = (
     <>
-      <Icon size={16} />
+      <Icon size={16} className={`transition-transform duration-200 ease-out ${collapsed ? "group-hover:scale-[1.3]" : ""}`} />
       {!collapsed && <span>{label}</span>}
     </>
   );
   if (href) {
     return (
-      <Link href={href} className={cls} title={collapsed ? label : undefined}>
+      <Link
+        href={href}
+        className={cls}
+        aria-label={collapsed ? label : undefined}
+        onMouseEnter={(e) => onTip?.(e.currentTarget, label)}
+        onMouseLeave={offTip}
+        onClick={offTip}
+      >
         {content}
       </Link>
     );

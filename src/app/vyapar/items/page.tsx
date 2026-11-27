@@ -40,6 +40,7 @@ import {
   Share2,
 } from "lucide-react";
 import { isBackgroundRefresh, useAutoRefresh } from "@/lib/autoRefresh";
+import { FitText } from "@/components/FitText";
 
 const TABS = ["PRODUCTS", "SERVICES", "CATEGORY", "UNITS"] as const;
 type Tab = (typeof TABS)[number];
@@ -1100,9 +1101,9 @@ function Meta({ label, value, mono }: { label: string; value: string | null | un
 function Stat({ label, value, hint, tone }: { label: string; value: string; hint?: string; tone?: "warn" | "danger" }) {
   const color = tone === "danger" ? "text-rose-600" : tone === "warn" ? "text-amber-600" : "text-gray-800";
   return (
-    <div>
+    <div className="min-w-0 flex-1">
       <div className="text-[11px] tracking-wide text-gray-400 uppercase">{label}</div>
-      <div className={`mt-0.5 text-base font-semibold ${color}`}>{value}</div>
+      <FitText className={`mt-0.5 text-base font-semibold ${color}`}>{value}</FitText>
       {hint && <div className="text-[11px] text-gray-400">{hint}</div>}
     </div>
   );

@@ -43,6 +43,8 @@ export interface ReportColumn<T> {
   sortValue?: (row: T) => string | number | null | undefined;
   type?: FilterType;
   align?: "left" | "right";
+  /** The heading on paper when it differs from the one on screen (Vyapar leaves the serial column's blank). */
+  printLabel?: string;
   /** Off by default in the print picker. Everything is shown on screen regardless. */
   printOptional?: boolean;
 }
@@ -60,6 +62,16 @@ export function ReportTable<T>({
   rowHref,
   /** Grey total rows under the table in the print-out and PDF ("Total", "Money In - Money Out"). */
   totals,
+  /** Bold lines printed above the period — "Bank: Jevin", "Party name: All parties". */
+  metaBefore,
+  /** Bold lines printed under the period — "User: All Users". */
+  metaAfter,
+  /** One bold line under the whole print-out, on the right — "Total Sale: ₹ 17,27,450.00". */
+  grandTotal,
+  /** `false` prints no firm letterhead, as Vyapar does on its summary reports. */
+  letterhead,
+  /** Print the column headings in capitals, as Vyapar's Sale / Purchase / Expense reports do. */
+  upperHead,
 }: {
   title: string;
   subtitle?: string;
@@ -69,11 +81,18 @@ export function ReportTable<T>({
   detail?: ReportDetail<T>;
   minWidth?: number;
   rowHref?: (row: T) => string | null;
-  totals?: (string | number)[][];
+  totals?: (string | number)[][] | ((printKeys: string[]) => (string | number)[][]);
+  metaBefore?: string[];
+  metaAfter?: string[];
+  /** Given the rows as filtered and sorted on screen, so the line always totals what is printed. */
+  grandTotal?: string | ((rows: T[]) => string);
+  letterhead?: boolean;
+  upperHead?: boolean;
 }) {
   const router = useRouter();
   const period = useContext(ReportPeriodContext);
-  subtitle ??= period;
+  // One line each, in Vyapar's order: who/which account, then the period, then the user.
+  const heading = [...(metaBefore ?? []), subtitle ?? period, ...(metaAfter ?? [])].filter(Boolean).join("\n") || undefined;
   const initialSearch = useContext(ReportSearchContext);
   const [q, setQ] = useState(initialSearch);
   const [picking, setPicking] = useState(false);
@@ -108,7 +127,7 @@ export function ReportTable<T>({
   const { sorted, sortKey, sortDir, toggle } = useTableSort(filtered, sortAccessors);
 
   const printCols = columns.filter((c) => printKeys.includes(c.key));
-  const head = printCols.map((c) => c.label);
+  const head = printCols.map((c) => c.printLabel ?? (upperHead ? c.label.toUpperCase() : c.label));
   const body = sorted.map((r) => printCols.map((c) => c.value(r)));
   const rightFrom = printCols.findIndex((c) => c.align === "right");
 
@@ -121,19 +140,33 @@ export function ReportTable<T>({
           footer: sorted.map((r) => detail.footer?.(r) ?? []),
           notes: sorted.map((r) => detail.note?.(r) ?? null),
           alignRightFrom: detail.alignRightFrom,
+          indentCol: detail.indentCol,
+          noteBelow: detail.noteBelow,
         }
       : undefined;
+  // Total rows follow the columns actually being printed, so they stay under the right headings
+  // when the print picker drops one.
+  const totalRows = typeof totals === "function" ? totals(printCols.map((c) => c.key)) : totals;
+  const grandLine = typeof grandTotal === "function" ? grandTotal(sorted) : grandTotal;
   const asPdf = () =>
     downloadPdf(title, head, body, {
-      subtitle,
-      // Wide reports go landscape rather than squeezing eleven columns onto a portrait page.
-      landscape: printCols.length > 7,
+      subtitle: heading,
+      // Vyapar prints even its eleven-column Sale Report upright; only something wider turns.
+      landscape: printCols.length > 11,
       rightAlignFrom: rightFrom >= 0 ? rightFrom : undefined,
       detail: printDetail,
-      totals,
+      totals: totalRows,
+      grandTotal: grandLine,
+      letterhead,
     });
   const asPrint = () =>
-    printRows(title, head, body, subtitle, { rightAlignFrom: rightFrom >= 0 ? rightFrom : undefined, detail: printDetail, totals });
+    printRows(title, head, body, heading, {
+      rightAlignFrom: rightFrom >= 0 ? rightFrom : undefined,
+      detail: printDetail,
+      totals: totalRows,
+      grandTotal: grandLine,
+      letterhead,
+    });
   const asCsv = () => exportRowsToCsv(filename, head, body);
 
   return (
@@ -253,11 +286,12 @@ export function ReportTable<T>({
       {previewing && (
         <ReportPreview
           title={title}
-          subtitle={subtitle}
+          subtitle={heading}
           columns={printCols}
           rows={sorted}
           detail={withDetail ? detail : undefined}
-          totals={totals}
+          totals={totalRows}
+          grandTotal={grandLine}
           onPrint={asPrint}
           onPdf={asPdf}
           onCsv={asCsv}
@@ -279,6 +313,10 @@ export interface ReportDetail<T> {
   /** "Description: …" printed under the row, as Vyapar does. */
   note?: (row: T) => string | null | undefined;
   alignRightFrom?: number;
+  /** The report column the item table hangs under on paper (default: the second). */
+  indentCol?: number;
+  /** Print the description on the line under its label rather than beside it. */
+  noteBelow?: boolean;
 }
 
 function ToolButton({
@@ -398,6 +436,7 @@ function ReportPreview<T>({
   rows,
   detail,
   totals,
+  grandTotal,
   onPrint,
   onPdf,
   onCsv,
@@ -409,6 +448,7 @@ function ReportPreview<T>({
   rows: T[];
   detail?: ReportDetail<T>;
   totals?: (string | number)[][];
+  grandTotal?: string;
   onPrint: () => void;
   onPdf: () => void;
   onCsv: () => void;
@@ -428,11 +468,18 @@ function ReportPreview<T>({
 
         <div className="flex-1 overflow-auto px-6 py-5">
           <h3 className="text-center text-lg font-bold text-gray-900 underline">{title}</h3>
-          {subtitle && <p className="mt-2 text-sm font-bold text-gray-900">{subtitle}</p>}
+          {subtitle &&
+            subtitle.split("\n").map((line, li) =>
+              line.startsWith("~") ? (
+                <p key={li} className="mt-1 text-xs text-gray-900">{line.slice(1).trim()}</p>
+              ) : (
+                <p key={li} className="mt-2 text-sm font-bold text-gray-900">{line}</p>
+              ),
+            )}
 
           <table className="mt-5 w-full border-collapse text-xs">
             <thead>
-              <tr className="border-y border-gray-300 bg-gray-100 text-left">
+              <tr className="border-b border-gray-500 bg-[#d3d3d3] text-left">
                 {columns.map((c) => (
                   <th key={c.key} className={`px-2 py-1.5 font-semibold ${c.align === "right" ? "text-right" : ""}`}>
                     {c.label}
@@ -446,7 +493,7 @@ function ReportPreview<T>({
               ))}
               {rows.length <= shown.length &&
                 (totals ?? []).map((t, ti) => (
-                  <tr key={`t${ti}`} className="bg-gray-200 font-bold">
+                  <tr key={`t${ti}`} className="border-b border-gray-400 bg-[#d3d3d3] font-bold">
                     {t.map((c, ci) => (
                       <td key={ci} className={`px-2 py-1.5 ${columns[ci]?.align === "right" ? "text-right tabular-nums" : ""}`}>
                         {c}
@@ -456,6 +503,10 @@ function ReportPreview<T>({
                 ))}
             </tbody>
           </table>
+
+          {grandTotal && rows.length <= shown.length && (
+            <p className="mt-6 text-right text-base font-bold text-gray-900">{grandTotal}</p>
+          )}
 
           {rows.length > shown.length && (
             <p className="mt-3 text-center text-xs text-gray-400">
@@ -511,22 +562,22 @@ function ReportPreviewRow<T>({
 
   return (
     <>
-      <tr className="border-b border-gray-200">
+      <tr className={lines.length > 0 || note ? "font-semibold" : "border-b border-gray-400"}>
         {columns.map((c) => (
-          <td key={c.key} className={`px-2 py-1.5 align-top ${c.align === "right" ? "text-right tabular-nums" : ""}`}>
+          <td key={c.key} className={`px-2 py-1.5 align-middle ${c.align === "right" ? "text-right tabular-nums" : ""}`}>
             {c.value(row)}
           </td>
         ))}
       </tr>
       {(lines.length > 0 || note) && (
-        <tr className="border-b border-gray-200">
-          <td colSpan={columns.length} className="px-2 pb-2">
+        <tr className="border-b border-gray-400">
+          <td colSpan={columns.length} className="pb-2 pl-10 pr-2">
             {lines.length > 0 && (
             <table className="w-full border-collapse text-[11px]">
               <thead>
-                <tr className="bg-gray-50 text-left text-gray-500">
+                <tr className="border-y border-gray-500 bg-[#d3d3d3] text-left text-gray-900">
                   {detail!.head.map((h, i) => (
-                    <th key={h} className={`px-2 py-1 font-medium ${i >= right ? "text-right" : ""}`}>
+                    <th key={h} className={`px-2 py-1 font-semibold ${i >= right ? "text-right" : ""}`}>
                       {h}
                     </th>
                   ))}
@@ -534,7 +585,7 @@ function ReportPreviewRow<T>({
               </thead>
               <tbody>
                 {lines.map((l, li) => (
-                  <tr key={li}>
+                  <tr key={li} className={`border-b border-gray-400 ${l.some((c) => /^total$/i.test(String(c))) ? "font-bold" : ""}`}>
                     {l.map((cell, ci) => (
                       <td key={ci} className={`px-2 py-1 ${ci >= right ? "text-right tabular-nums" : ""}`}>
                         {cell}
@@ -548,7 +599,7 @@ function ReportPreviewRow<T>({
             {footer.length > 0 && (
               <div className="mt-1 flex flex-col items-end gap-0.5 text-[11px] text-gray-600">
                 {footer.map(([label, value]) => (
-                  <div key={label} className="flex w-56 justify-between">
+                  <div key={label} className="flex w-56 justify-between border-b border-gray-400 py-0.5">
                     <span>{label}</span>
                     <span className="tabular-nums">{value}</span>
                   </div>

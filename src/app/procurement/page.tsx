@@ -7,6 +7,7 @@ import { ProcurementShell } from "@/components/procurement/ProcurementShell";
 import { useRfqs } from "@/lib/useRfqs";
 import { RFQ_STATUS_CLS } from "@/lib/procurementConfig";
 import { inr } from "@/lib/format";
+import { FitText } from "@/components/FitText";
 
 /**
  * Procurement dashboard.
@@ -126,7 +127,7 @@ function Tile({ label, value, hint }: { label: string; value: string; hint: stri
   return (
     <div className="rounded-xl border border-gray-200 bg-white p-4">
       <div className="text-[11px] font-medium tracking-wide text-gray-400 uppercase">{label}</div>
-      <div className="mt-1 text-2xl font-semibold text-gray-900 tabular-nums">{value}</div>
+      <FitText className="mt-1 text-2xl font-semibold text-gray-900 tabular-nums">{value}</FitText>
       <div className="mt-0.5 text-xs text-gray-400">{hint}</div>
     </div>
   );

@@ -45,7 +45,10 @@ const PRESETS: DatePreset[] = [
   "Custom",
 ];
 
-const iso = (d: Date) => d.toISOString().slice(0, 10);
+// The calendar date as the user's clock has it. `toISOString()` reads the same instant in UTC, which
+// in India is the previous day for a local midnight — so "This Year" came out as 31 Dec to 30 Dec
+// and "Today" as yesterday.
+const iso = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 
 /** The from/to a preset resolves to, evaluated against today. */
 export function rangeForPreset(preset: DatePreset, today = new Date()): { from: string; to: string } {

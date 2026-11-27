@@ -26,6 +26,7 @@ import { useAppStore } from "@/lib/store";
 import { formatRupee, projectAvatarColor, projectInitials } from "@/lib/projectHelpers";
 import { txnStyle } from "@/lib/txnDisplay";
 import type { TxnType } from "@/lib/types";
+import { FitText } from "@/components/FitText";
 
 const TABS = ["Party", "Transaction", "Payment Requests", "Accounts"] as const;
 type Tab = (typeof TABS)[number];
@@ -424,9 +425,9 @@ function SummaryCard({
 }) {
   return (
     <div className="flex items-start justify-between rounded-xl border border-gray-200 bg-white p-4">
-      <div>
+      <div className="min-w-0 flex-1">
         <div className="text-sm text-gray-500">{label}</div>
-        <div className="mt-1 text-xl font-semibold text-gray-800">{value}</div>
+        <FitText className="mt-1 text-xl font-semibold text-gray-800">{value}</FitText>
         <div className="mt-0.5 text-xs text-gray-400">{sub}</div>
       </div>
       <div className={tint}>{icon}</div>

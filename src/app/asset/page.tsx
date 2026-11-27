@@ -15,6 +15,7 @@ import { useTableSort } from "@/lib/useTableSort";
 import { inr } from "@/lib/format";
 import { exportRowsToCsv } from "@/lib/vyaparExport";
 import { Boxes, FileSpreadsheet, Plus, Search, Tags, Wrench, TriangleAlert, UserCheck } from "lucide-react";
+import { FitText } from "@/components/FitText";
 
 const SORT = {
   code: (a: Asset) => a.codePrefix + String(a.codeNumber).padStart(6, "0"),
@@ -248,7 +249,7 @@ function Stat({ label, value, hint, icon: Icon, tone }: {
         <div className="text-xs text-gray-500">{label}</div>
         {Icon && <span className={`flex h-7 w-7 items-center justify-center rounded-lg ${TONES[tone]}`}><Icon size={14} /></span>}
       </div>
-      <div className="mt-1 text-lg font-semibold text-gray-900">{value}</div>
+      <FitText className="mt-1 text-lg font-semibold text-gray-900">{value}</FitText>
       {hint && <div className="text-[11px] text-gray-400">{hint}</div>}
     </div>
   );

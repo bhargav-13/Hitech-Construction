@@ -12,7 +12,7 @@ import { useRouter } from "next/navigation";
 import { useCan } from "@/lib/permissions";
 import { LinkedRow } from "@/components/vyapar/LinkedRow";
 import { inr } from "@/lib/format";
-import { exportRowsToCsv, printRows, downloadPdf } from "@/lib/vyaparExport";
+import { exportRowsToCsv, printRows, downloadPdf, bankStatementSheet } from "@/lib/vyaparExport";
 import { ExportDialog, type ExportColumn } from "@/components/vyapar/ExportDialog";
 import { ImportDialog } from "@/components/vyapar/ImportDialog";
 import { bankAccountImportConfig } from "@/lib/vyaparImportConfigs";
@@ -161,6 +161,12 @@ export default function BankAccountsPage() {
 
   const total = accounts.reduce((s, a) => s + a.balance, 0);
   const head = ["Type", "Name", "Date", "Amount"];
+  /** The selected account's statement as a PDF, in Vyapar's bank-statement layout. */
+  const statementPdf = () => {
+    if (!selected) return;
+    const sheet = bankStatementSheet(selected.name, rows, selected.balance);
+    void downloadPdf(sheet.title, sheet.head, sheet.rows, { subtitle: sheet.subtitle, ...sheet.extras });
+  };
   const data = rows.map((r) => [r.type, r.name ?? "", r.date ?? "", r.amount]);
 
   async function remove(a: BankAccount) {
@@ -343,7 +349,7 @@ export default function BankAccountsPage() {
                             icon={FileText}
                             iconClassName="text-rose-600"
                             label="Download PDF"
-                            onClick={() => { close(); downloadPdf(`${selected.name} — Statement`, head, rows.map((r) => [r.type, r.name ?? "", r.date ?? "", inr(r.amount)]), { rightAlignFrom: 3 }); }}
+                            onClick={() => { close(); statementPdf(); }}
                           />
                           <RowMenuDivider />
                           <RowMenuItem icon={Trash2} label="Delete account" tone="danger" onClick={() => { close(); remove(selected); }} />
@@ -362,7 +368,7 @@ export default function BankAccountsPage() {
                   search={txnSearch}
                   onSearch={setTxnSearch}
                   onExport={() => exportRowsToCsv(`${selected.name}-statement`, head, data)}
-                  onPdf={() => downloadPdf(`${selected.name} — Statement`, head, rows.map((r) => [r.type, r.name ?? "", r.date ?? "", inr(r.amount)]), { rightAlignFrom: 3 })}
+                  onPdf={() => statementPdf()}
                 />
               </div>
             ) : (

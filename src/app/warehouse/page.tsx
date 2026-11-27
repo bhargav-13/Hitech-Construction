@@ -14,6 +14,7 @@ import { bookDate } from "@/lib/format";
 import * as vyapar from "@/lib/vyaparApi";
 import type { Item } from "@/lib/vyaparApi";
 import { AlertTriangle, ArrowRight, ClipboardList, Handshake, IndianRupee, Warehouse as WarehouseIcon } from "lucide-react";
+import { FitText } from "@/components/FitText";
 
 /**
  * The store at a glance.
@@ -205,7 +206,7 @@ function Tile({
     <div className="flex h-full items-start justify-between gap-3 rounded-xl border border-gray-200 bg-white p-4 transition-all duration-150 hover:border-brand-accent">
       <div className="min-w-0">
         <div className="text-xs text-gray-500">{label}</div>
-        <div className="mt-0.5 truncate text-xl font-semibold text-gray-900 tabular-nums">{value}</div>
+        <FitText className="mt-0.5 text-xl font-semibold text-gray-900 tabular-nums">{value}</FitText>
         <div className="mt-0.5 truncate text-[11px] text-gray-400">{hint}</div>
       </div>
       <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full ${ACCENTS[accent] ?? ACCENTS.gray}`}>

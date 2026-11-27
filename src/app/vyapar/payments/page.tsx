@@ -15,6 +15,7 @@ import type { Party, Payment } from "@/lib/vyaparApi";
 import { ArrowDownLeft, ArrowUpRight, Plus, Search, Trash2, Wallet } from "lucide-react";
 import { isBackgroundRefresh, useAutoRefresh } from "@/lib/autoRefresh";
 import { todayIST } from "@/lib/datetime";
+import { FitText } from "@/components/FitText";
 
 export default function VyaparPaymentsPage() {
   const [payments, setPayments] = useState<Payment[]>([]);
@@ -192,9 +193,9 @@ function Kpi({ label, value, tone }: { label: string; value: string; tone: "in" 
   const Icon = tone === "in" ? ArrowDownLeft : ArrowUpRight;
   return (
     <div className="flex items-center justify-between rounded-xl border border-gray-200 bg-white p-4">
-      <div>
+      <div className="min-w-0 flex-1">
         <div className="text-xs text-gray-500">{label}</div>
-        <div className="mt-1 text-xl font-semibold text-gray-800">{value}</div>
+        <FitText className="mt-1 text-xl font-semibold text-gray-800">{value}</FitText>
       </div>
       <span className={`flex h-10 w-10 items-center justify-center rounded-full ${tone === "in" ? "bg-emerald-50 text-emerald-600" : "bg-rose-50 text-rose-600"}`}>
         <Icon size={18} />

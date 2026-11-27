@@ -33,6 +33,7 @@ import {
 } from "@/lib/projectBillingStore";
 import { todayIST } from "@/lib/datetime";
 import { ProjectBoqImport } from "@/components/project/ProjectBoqImport";
+import { FitText } from "@/components/FitText";
 
 /** KAN-113: the files a BOQ can be imported from — Excel / CSV, or a PDF / photo read with OCR. */
 const BOQ_FILE_TYPES = ".xlsx,.xls,.csv,.pdf,image/*";
@@ -576,7 +577,7 @@ function Stat({ label, value, sub }: { label: string; value: string; sub: string
   return (
     <div className="px-4 py-3">
       <div className="text-[10px] font-semibold tracking-wide text-gray-400 uppercase">{label}</div>
-      <div className="mt-1 text-base font-semibold tabular-nums text-gray-800">{value}</div>
+      <FitText className="mt-1 text-base font-semibold tabular-nums text-gray-800">{value}</FitText>
       <div className="mt-0.5 text-[11px] text-gray-400">{sub}</div>
     </div>
   );

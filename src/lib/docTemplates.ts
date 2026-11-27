@@ -34,8 +34,11 @@ export type DocKind =
 export type TemplateModule = "VYAPAR" | "PROCUREMENT" | "PAYROLL";
 
 export interface DocTemplate {
-  /** classic = Onsite's white letterhead; band = coloured header band (the old invoice look). */
-  style: "classic" | "band";
+  /**
+   * vyapar = Vyapar's own print look (logo left, firm right-aligned over a rule, centred underlined
+   * title, grey ruled tables); classic = Onsite's white letterhead; band = coloured header band.
+   */
+  style: "vyapar" | "classic" | "band";
   title: string;
   /** Table header and band colour. */
   accent: string;
@@ -127,19 +130,40 @@ const TITLES: Record<Exclude<DocKind, LetterKind>, string> = {
   PAYSLIP: "SALARY SLIP",
 };
 
-/** The default design for a kind — Onsite's layout, in the same dark table header. */
+/**
+ * Documents that print in Vyapar's look unless a company has saved its own design: everything the
+ * Vyapar module produces, plus the purchase order and the work order. The RFQ and the HR letters
+ * keep the Onsite layout.
+ */
+const VYAPAR_STYLE_KINDS = new Set<DocKind>([
+  "SALE",
+  "SALE_ORDER",
+  "ESTIMATE",
+  "PROFORMA",
+  "DELIVERY_CHALLAN",
+  "SALE_RETURN",
+  "PURCHASE",
+  "PURCHASE_RETURN",
+  "EXPENSE",
+  "PURCHASE_ORDER",
+  "WORK_ORDER",
+]);
+
+/** The default design for a kind — Vyapar's look for its documents, Onsite's layout for the rest. */
 export function defaultTemplate(kind: DocKind): DocTemplate {
   const isRfq = kind === "RFQ";
   const letter = isLetterKind(kind) ? letterDef(kind) : null;
+  const vyaparLook = VYAPAR_STYLE_KINDS.has(kind);
   return {
-    style: "classic",
+    style: vyaparLook ? "vyapar" : "classic",
     title: letter ? letter.title : TITLES[kind as Exclude<DocKind, LetterKind>],
     accent: "#212529",
     companyName: "",
     companyAddress: "",
     showLogo: true,
     showGstin: true,
-    showContact: false,
+    // Vyapar's letterhead carries "Phone no.: … Email: …"; Onsite's does not.
+    showContact: vyaparLook,
     show: {
       partyPanel: true,
       addresses: true,

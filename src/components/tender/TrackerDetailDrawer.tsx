@@ -7,6 +7,7 @@ import { useTenderStore } from "@/lib/tenderStore";
 import type { Tender, TenderMilestones } from "@/lib/tenderTypes";
 import { tdate, tval } from "@/lib/tenderHelpers";
 import { ArrowUpRight, CalendarDays, Check, ListChecks, Pencil, Trash2 } from "lucide-react";
+import { FitText } from "@/components/FitText";
 
 /**
  * Status-tracker detail for a single tender's milestone checklist.
@@ -172,7 +173,7 @@ function Stat({ label, value, tone }: { label: string; value: string; tone: "eme
   const text: Record<string, string> = { emerald: "text-emerald-600", amber: "text-amber-600", gray: "text-gray-800" };
   return (
     <div className="rounded-xl border border-gray-200 bg-white p-3 text-center">
-      <div className={`text-lg font-semibold ${text[tone]}`}>{value}</div>
+      <FitText className={`text-lg font-semibold ${text[tone]}`}>{value}</FitText>
       <div className="mt-0.5 text-[11px] text-gray-400">{label}</div>
     </div>
   );

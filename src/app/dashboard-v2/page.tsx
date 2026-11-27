@@ -36,6 +36,7 @@ import {
   Users,
   Wallet,
 } from "lucide-react";
+import { FitText } from "@/components/FitText";
 
 /* ---------- palette ---------- */
 const BRAND = "#0891b2";
@@ -419,7 +420,7 @@ function StatCard({
           </span>
         )}
       </div>
-      <div className="mt-3 text-2xl font-semibold tracking-tight text-slate-800">{value}</div>
+      <FitText className="mt-3 text-2xl font-semibold tracking-tight text-slate-800">{value}</FitText>
       <div className="mt-0.5 text-sm font-medium text-slate-600">{label}</div>
       <div className="mt-1 text-xs text-slate-400">{sub}</div>
     </div>

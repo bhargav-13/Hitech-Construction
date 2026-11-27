@@ -10,6 +10,7 @@ import { addPartyToProject, getParties, getProjectPartyMembers, removePartyFromP
 import type { Party, PartyType } from "@/lib/vyaparApi";
 import { inr } from "@/lib/format";
 import { useAuthStore } from "@/lib/authStore";
+import { FitText } from "@/components/FitText";
 
 /**
  * Project → Party tab.
@@ -342,7 +343,7 @@ function Tile({ icon, tint, label, value }: { icon: React.ReactNode; tint: strin
   return (
     <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
       <span className={`flex h-8 w-8 items-center justify-center rounded-lg ${tint}`}>{icon}</span>
-      <div className="mt-3 text-xl font-semibold tracking-tight text-slate-900">{value}</div>
+      <FitText className="mt-3 text-xl font-semibold tracking-tight text-slate-900">{value}</FitText>
       <div className="mt-0.5 text-xs text-slate-500">{label}</div>
     </div>
   );

@@ -28,6 +28,7 @@ import type { CashBankTxn, Invoice, InvoiceLine, Item, Party, Payment } from "@/
 import { ChevronLeft, ChevronRight, Download } from "lucide-react";
 import { isBackgroundRefresh, useAutoRefresh } from "@/lib/autoRefresh";
 import { todayIST } from "@/lib/datetime";
+import { FitText } from "@/components/FitText";
 
 type ReportId = string;
 
@@ -318,7 +319,11 @@ function ReportDetail({ id, onBack }: { id: ReportId; onBack: () => void }) {
           }
         >
         <ReportMetaContext.Provider
-          value={{ title: meta.title, filename: meta.title.toLowerCase().replace(/[^a-z0-9]+/g, "-") }}
+          value={{
+            title: meta.title,
+            filename: meta.title.toLowerCase().replace(/[^a-z0-9]+/g, "-"),
+            user: userOptions.find((o) => o.value === user)?.label ?? "All Users",
+          }}
         >
           <ReportBody
             id={id}
@@ -361,6 +366,8 @@ function ReportBody({
 }) {
   const TOOLTIP = { borderRadius: 8, border: "1px solid #eee", fontSize: 12 } as const;
   const itemById = useMemo(() => new Map(items.map((i) => [i.id, i])), [items]);
+  // "User: All Users" — the line Vyapar prints under the period on its transaction reports.
+  const userLine = `User: ${useContext(ReportMetaContext).user}`;
 
   /** Flatten documents into priced lines joined to the catalogue — the basis of most reports. */
   const lineRows = useCallback(
@@ -430,8 +437,11 @@ function ReportBody({
           minWidth={1100}
           columns={txnReportColumns(id, parties)}
           rows={rows}
-          detail={txnReportDetail(itemById)}
+          detail={txnReportDetail(itemById, rows.some((i) => i.lines.some((l) => l.taxPercent)))}
           rowHref={(i) => docTypeHref(i.docType, i.id)}
+          upperHead
+          metaAfter={[userLine]}
+          grandTotal={(shown) => `Total ${id === "sale" ? "Sale" : "Purchase"}: ${inr(sum(shown.map((i) => i.total)))}`}
         />
       </>
     );
@@ -444,6 +454,7 @@ function ReportBody({
       key: string;
       date: string | null;
       name: string;
+      refNo: string;
       type: string;
       paymentType: string;
       total: number;
@@ -464,7 +475,8 @@ function ReportBody({
           date: i.invoiceDate,
           // An expense is listed under its category, the way Vyapar's Day Book shows it.
           name: (i.docType === "EXPENSE" ? i.lines[0]?.itemName : null) ?? i.partyName ?? i.billingName ?? "—",
-          type: vyapar.DOC_LABEL[i.docType],
+          refNo: fullInvoiceNo(i),
+          type: DAYBOOK_TYPE[i.docType] ?? vyapar.DOC_LABEL[i.docType],
           paymentType: i.paidAmount > 0 || i.isCash ? i.paymentType : "Credit",
           total: i.total,
           received: moneyIn(i.docType) ? i.paidAmount : null,
@@ -478,7 +490,8 @@ function ReportBody({
         key: `p${p.id}`,
         date: p.paymentDate,
         name: p.partyName ?? "—",
-        type: p.direction === "IN" ? "Payment-in" : "Payment-out",
+        refNo: "",
+        type: p.direction === "IN" ? "Payment-In" : "Payment-Out",
         paymentType: p.mode,
         total: p.amount,
         received: p.direction === "IN" ? p.amount : null,
@@ -494,19 +507,23 @@ function ReportBody({
     const money = (v: number | null) => (v == null ? "" : inr(v));
     const columns: ReportColumn<Entry>[] = [
       { key: "date", label: "Date", value: (e) => fmt(e.date), sortValue: (e) => toIsoDate(e.date ?? ""), printOptional: true },
+      // Vyapar's printed Day Book: Name · Ref No. · Type · Payment Type · Total · Money in · Money out.
       { key: "name", label: "Name", value: (e) => e.name },
-      { key: "type", label: "Txn Type", value: (e) => e.type, type: "select" },
+      { key: "refNo", label: "Ref No.", value: (e) => e.refNo },
+      { key: "type", label: "Type", value: (e) => e.type, type: "select" },
       { key: "paymentType", label: "Payment Type", value: (e) => e.paymentType, type: "select" },
-      { key: "total", label: "Total Amount", value: (e) => inr(e.total), sortValue: (e) => e.total, type: "number", align: "right" },
-      { key: "received", label: "Received Amount", value: (e) => money(e.received), sortValue: (e) => e.received, type: "number", align: "right" },
-      { key: "paid", label: "Paid Amount", value: (e) => money(e.paid), sortValue: (e) => e.paid, type: "number", align: "right" },
-      { key: "balance", label: "Balance Amount", value: (e) => money(e.balance), sortValue: (e) => e.balance, type: "number", align: "right" },
+      { key: "total", label: "Total", value: (e) => inr(e.total), sortValue: (e) => e.total, type: "number", align: "right" },
+      { key: "received", label: "Money in", value: (e) => money(e.received), sortValue: (e) => e.received, type: "number", align: "right" },
+      { key: "paid", label: "Money out", value: (e) => money(e.paid), sortValue: (e) => e.paid, type: "number", align: "right" },
+      // Not on Vyapar's print-out; on screen, and one tick away in Print options.
+      { key: "balance", label: "Balance Amount", value: (e) => money(e.balance), sortValue: (e) => e.balance, type: "number", align: "right", printOptional: true },
     ];
     const detail: ReportLineDetail<Entry> = {
       label: "Item details and descriptions",
       defaultOn: true,
-      head: ["#", "Item Name", "HSN/ SAC", "Quantity", "Price/ Unit", "Amount"],
+      head: ["#", "Item name", "HSN/ SAC", "Quantity", "Unit", "Price/ Unit", "Amount"],
       alignRightFrom: 3,
+      indentCol: 1,
       rows: (e) => {
         const lines = e.invoice?.lines ?? [];
         if (!lines.length) return [];
@@ -516,17 +533,27 @@ function ReportBody({
             l.itemName,
             l.hsn?.trim() || (l.itemId != null ? (itemById.get(l.itemId)?.hsn ?? "") : ""),
             qty(l.quantity),
+            l.unit ?? "",
             inr(l.rate),
             inr(l.amount),
           ]),
-          ["", "Total", "", qty(sum(lines.map((l) => l.quantity))), "", inr(sum(lines.map((l) => l.amount)))],
+          ["", "Total", "", qty(sum(lines.map((l) => l.quantity))), "", "", inr(sum(lines.map((l) => l.amount)))],
         ];
       },
-      footer: (e) => (e.invoice?.lines.length ? [["Sub Total:", inr(e.invoice.subTotal)]] : []),
+      footer: (e) => (e.invoice?.lines.length ? [["Sub Total", inr(e.invoice.subTotal)]] : []),
       note: (e) => e.note,
     };
-    // The print-out carries Name … Balance; Date is on screen only (the period is in the heading).
-    const blank = (n: number) => Array<string>(n).fill("");
+    // The print-out carries Name … Money out; Date is on screen only (the period is in the heading).
+    // The two closing rows are built against whichever columns are being printed, so the figures
+    // stay under Money in / Money out when the print picker adds or drops a column.
+    const closing = (keys: string[]) => {
+      const line = (label: string, at: Record<string, string>) => keys.map((k, i) => (i === 0 ? label : (at[k] ?? "")));
+      const last = keys.includes("paid") ? "paid" : keys[keys.length - 1];
+      return [
+        line("Total", { received: inr(inSum), paid: inr(outSum) }),
+        line("Total Money In - Total Money Out", { [last]: inr(inSum - outSum) }),
+      ];
+    };
     return (
       <>
         <SummaryStrip
@@ -544,17 +571,14 @@ function ReportBody({
           }
         />
         <ReportTable
-          title="Day Book Report"
+          title="DayBook Report"
           filename="day-book"
           minWidth={1000}
           columns={columns}
           rows={entries}
           detail={detail}
           rowHref={(e) => e.href}
-          totals={[
-            ["Total", ...blank(3), inr(inSum), inr(outSum), ""],
-            ["Money In - Money Out", ...blank(5), inr(inSum - outSum)],
-          ]}
+          totals={closing}
         />
       </>
     );
@@ -741,13 +765,16 @@ function ReportBody({
     }
 
     if (id === "expense-item") {
-      const map = new Map<string, { qty: number; amount: number }>();
+      // Unit Price is the item's latest price, as Vyapar shows it — an item booked at different
+      // prices has no single one, which is why Quantity × Unit Price need not equal Amount.
+      const map = new Map<string, { qty: number; amount: number; rate: number }>();
       expenses.forEach((e) =>
         e.lines.forEach((l) => {
           const k = l.itemName?.trim() || "—";
-          const cur = map.get(k) ?? { qty: 0, amount: 0 };
+          const cur = map.get(k) ?? { qty: 0, amount: 0, rate: 0 };
           cur.qty += l.quantity;
           cur.amount += l.amount;
+          cur.rate = l.rate;
           map.set(k, cur);
         })
       );
@@ -762,9 +789,12 @@ function ReportBody({
             onDownload={() => onDownload(rows.map(([k, v]) => [k, v.qty, v.amount]), ["Expense Item", "Qty", "Amount"])}
           />
           <SimpleTable
-            head={["Expense Item", "Qty", "Amount"]}
-            rows={rows.map(([k, v]) => [k, String(v.qty), inr(v.amount)])}
-            alignRight={[1, 2]}
+            head={["Expense Item", "Unit Price", "Quantity", "Amount"]}
+            rows={rows.map(([k, v]) => [k, qty(v.rate), qty(v.qty), inr(v.amount)])}
+            alignRight={[1, 2, 3]}
+            letterhead={false}
+            metaAfter={[userLine]}
+            totals={[["Total", "", qty(sum(rows.map(([, v]) => v.qty))), inr(sum(rows.map(([, v]) => v.amount)))]]}
           />
         </>
       );
@@ -806,11 +836,45 @@ function ReportBody({
             </BarChart>
           </ChartCard>
         )}
-        <SimpleTable
-          head={["Date", "Category", "Exp No.", "Party", "Total", "Balance", "Status"]}
-          rows={expenses.map((e) => [fmt(e.invoiceDate), catOf(e), fullInvoiceNo(e) || "—", e.partyName ?? "—", inr(e.total), inr(e.balance), e.status])}
-          links={expenses.map((e) => docTypeHref(e.docType, e.id))}
-          alignRight={[4, 5]}
+        <ReportTable<Invoice>
+          title="Expense Report"
+          filename="expense-report"
+          minWidth={1100}
+          upperHead
+          metaAfter={[userLine]}
+          rows={expenses}
+          rowHref={(e) => docTypeHref(e.docType, e.id)}
+          // Vyapar's Expense Report, column for column.
+          columns={[
+            { key: "date", label: "Date", value: (e) => fmt(e.invoiceDate), sortValue: (e) => toIsoDate(e.invoiceDate ?? "") },
+            { key: "invoiceNo", label: "Invoice No.", value: (e) => fullInvoiceNo(e) },
+            { key: "party", label: "Party Name", value: (e) => e.partyName ?? "" },
+            { key: "category", label: "Category Name", value: (e) => catOf(e), type: "select" },
+            { key: "paymentType", label: "Payment Type", value: (e) => (e.paidAmount > 0 || e.isCash ? e.paymentType : "Credit"), type: "select" },
+            { key: "total", label: "Total", value: (e) => inr(e.total), sortValue: (e) => e.total, type: "number", align: "right" },
+            { key: "paid", label: "Received / Paid", value: (e) => inr(e.paidAmount), sortValue: (e) => e.paidAmount, type: "number", align: "right" },
+            { key: "balance", label: "Balance Due", value: (e) => inr(e.balance), sortValue: (e) => e.balance, type: "number", align: "right" },
+            { key: "dueDate", label: "Due Date", value: (e) => (e.dueDate ? fmt(e.dueDate) : ""), sortValue: (e) => toIsoDate(e.dueDate ?? "") },
+            { key: "status", label: "Status", value: (e) => dueStatus(e), sortValue: (e) => e.status, type: "select" },
+          ]}
+          detail={{
+            label: "Item Details",
+            defaultOn: true,
+            head: ["#", "Item name", "Quantity", "Price/ Unit", "Amount"],
+            alignRightFrom: 2,
+            indentCol: 2,
+            noteBelow: true,
+            rows: (e) =>
+              e.lines.length
+                ? [
+                    ...e.lines.map((l, n) => [n + 1, l.itemName, qty(l.quantity), inr(l.rate), inr(l.amount)]),
+                    ["", "Total", qty(sum(e.lines.map((l) => l.quantity))), "", inr(sum(e.lines.map((l) => l.amount)))],
+                  ]
+                : [],
+            footer: (e) => (e.lines.length ? [["Sub Total", inr(e.subTotal)]] : []),
+            note: (e) => e.description?.trim() || null,
+          }}
+          grandTotal={(shown) => `Total Expense: ${inr(sum(shown.map((e) => e.total)))}`}
         />
       </>
     );
@@ -833,18 +897,43 @@ function ReportBody({
           ]}
           onDownload={() => onDownload(rows.map((p) => [p.name, p.partyType, p.phone ?? "", p.gstin ?? "", p.city ?? "", p.balance]), ["Party", "Type", "Phone", "GSTIN", "City", "Balance"])}
         />
-        <SimpleTable
-          head={["Party", "Type", "Phone", "GSTIN", "City", "Balance"]}
-          rows={rows.map((p) => [
-            p.name,
-            p.partyType === "CUSTOMER" ? "Customer" : "Supplier",
-            p.phone ?? "—",
-            p.gstin ?? "—",
-            p.city ?? "—",
-            p.balance === 0 ? "—" : `${inr(Math.abs(p.balance))} ${p.balance > 0 ? "to receive" : "to pay"}`,
-          ])}
-          links={rows.map((p) => `/vyapar/parties?open=${p.id}`)}
-          alignRight={[5]}
+        <ReportTable<{ p: Party; n: number }>
+          // Vyapar's "Party Report": # · Name · Phone No. · Receivable Balance · Payable Balance,
+          // with no letterhead and a grey Total row. Type, GSTIN and City stay on screen.
+          title="Party Report"
+          filename={id === "party" ? "party-report" : "all-parties"}
+          letterhead={false}
+          rows={rows.map((p, i) => ({ p, n: i + 1 }))}
+          rowHref={(r) => `/vyapar/parties?open=${r.p.id}`}
+          columns={[
+            { key: "n", label: "#", printLabel: "", value: (r) => r.n, sortValue: (r) => r.n },
+            { key: "name", label: "Name", value: (r) => r.p.name },
+            { key: "type", label: "Type", value: (r) => (r.p.partyType === "CUSTOMER" ? "Customer" : "Supplier"), type: "select", printOptional: true },
+            { key: "phone", label: "Phone No.", value: (r) => r.p.phone ?? "" },
+            { key: "gstin", label: "GSTIN", value: (r) => r.p.gstin ?? "", printOptional: true },
+            { key: "city", label: "City", value: (r) => r.p.city ?? "", printOptional: true },
+            {
+              key: "receivable",
+              label: "Receivable Balance",
+              value: (r) => (r.p.balance >= 0 ? inr(r.p.balance) : ""),
+              sortValue: (r) => Math.max(0, r.p.balance),
+              type: "number",
+              align: "right",
+            },
+            {
+              key: "payable",
+              label: "Payable Balance",
+              value: (r) => (r.p.balance < 0 ? inr(Math.abs(r.p.balance)) : ""),
+              sortValue: (r) => Math.max(0, -r.p.balance),
+              type: "number",
+              align: "right",
+            },
+          ]}
+          totals={(keys) => [
+            keys.map((k, i) =>
+              k === "receivable" ? inr(receivable) : k === "payable" ? inr(payable) : (keys[0] === "n" ? i === 1 : i === 0) ? "Total" : "",
+            ),
+          ]}
         />
       </>
     );
@@ -920,9 +1009,12 @@ function ReportBody({
     );
   }
 
-  if (id === "party-by-item" || id === "item-by-party") {
-    // Same join, pivoted the other way round.
-    const byParty = id === "party-by-item";
+  if (id === "item-by-party") {
+    return <ItemByPartyReport saleLines={saleLines} purchaseLines={purchaseLines} />;
+  }
+
+  if (id === "party-by-item") {
+    const byParty = true;
     const map = new Map<string, { qty: number; value: number }>();
     [...saleLines, ...purchaseLines].forEach((l) => {
       const k = byParty
@@ -1458,30 +1550,33 @@ function BankStatementReport({ txns }: { txns: BankLedgerRow[] }) {
 
   const columns: ReportColumn<(typeof rows)[number]>[] = [
     { key: "date", label: "Date", value: (t) => fmt(t.date), sortValue: (t) => toIsoDate(t.date ?? "") },
-    { key: "account", label: "Bank", value: (t) => t.accountName, type: "select" },
+    // One account is named in the heading ("Bank: Jevin"); the column only earns its place on paper
+    // when every account is listed together.
+    { key: "account", label: "Bank", value: (t) => t.accountName, type: "select", printOptional: picked !== "all" },
     { key: "type", label: "Transaction Details", value: (t) => `[${t.type}] ${t.name ?? ""}`.trim() },
     // The free-text note against the entry — "NAVAGAM AGREEMENT", "ONLINE" — which is what tells
-    // one ₹5,000 withdrawal from another when reconciling.
-    { key: "description", label: "Description", value: (t) => t.note ?? "—" },
+    // one ₹5,000 withdrawal from another when reconciling. On paper it sits under the entry as
+    // "Description: …", the way Vyapar's bank statement prints it, rather than in a column.
+    { key: "description", label: "Description", value: (t) => t.note ?? "—", printOptional: true },
     {
       key: "withdrawal",
-      label: "Withdrawal",
-      value: (t) => (t.direction === "out" ? inr(t.amount) : "—"),
+      label: "Withdrawal Amount",
+      value: (t) => (t.direction === "out" ? inr(t.amount) : ""),
       sortValue: (t) => (t.direction === "out" ? t.amount : 0),
       type: "number",
       align: "right",
     },
     {
       key: "deposit",
-      label: "Deposit",
-      value: (t) => (t.direction === "in" ? inr(t.amount) : "—"),
+      label: "Deposit Amount",
+      value: (t) => (t.direction === "in" ? inr(t.amount) : ""),
       sortValue: (t) => (t.direction === "in" ? t.amount : 0),
       type: "number",
       align: "right",
     },
     {
       key: "balance",
-      label: "Balance",
+      label: "Balance Amount",
       value: (t) => inr(t.balance),
       sortValue: (t) => t.balance,
       type: "number",
@@ -1512,13 +1607,106 @@ function BankStatementReport({ txns }: { txns: BankLedgerRow[] }) {
         </label>
       </div>
       <ReportTable
-        title={picked === "all" ? "Bank Statement" : `Bank Statement — ${picked}`}
-        subtitle={picked === "all" ? "Every cash and bank account" : undefined}
+        // Remounted per account so the print picker starts from that view's own columns.
+        key={picked}
+        title="Bank statement"
+        metaBefore={[`Bank: ${picked === "all" ? "All accounts" : picked}`]}
+        letterhead={false}
         filename="bank-statement"
         minWidth={980}
         columns={columns}
         rows={rows}
         rowHref={(t) => txnHref(t.type, t.id)}
+        detail={{
+          label: "Descriptions",
+          defaultOn: true,
+          head: [],
+          rows: () => [],
+          note: (t) => t.note?.trim() || null,
+        }}
+        // The closing balance of a single account; across accounts the running figure is their sum.
+        totals={(keys) => [
+          keys.map((k, i) => (k === "balance" ? inr(rows[rows.length - 1]?.balance ?? 0) : i === keys.length - 2 ? "Balance" : "")),
+        ]}
+      />
+    </>
+  );
+}
+
+/**
+ * Item Report By Party, in Vyapar's shape: one row per item with what was sold and what was bought,
+ * for one party or for all of them, closed by a Total row.
+ */
+function ItemByPartyReport({ saleLines, purchaseLines }: { saleLines: LineRow[]; purchaseLines: LineRow[] }) {
+  const [party, setParty] = useState("all");
+  const names = useMemo(
+    () => [...new Set([...saleLines, ...purchaseLines].map((l) => l.inv.partyName ?? "—"))].sort((a, b) => a.localeCompare(b)),
+    [saleLines, purchaseLines],
+  );
+  const picked = party !== "all" && names.includes(party) ? party : "all";
+  const rows = useMemo(() => {
+    const map = new Map<string, { saleQty: number; sale: number; buyQty: number; buy: number }>();
+    const add = (lines: LineRow[], side: "sale" | "buy") =>
+      lines.forEach((l) => {
+        if (picked !== "all" && (l.inv.partyName ?? "—") !== picked) return;
+        const cur = map.get(l.line.itemName) ?? { saleQty: 0, sale: 0, buyQty: 0, buy: 0 };
+        if (side === "sale") {
+          cur.saleQty += l.line.quantity;
+          cur.sale += l.line.amount;
+        } else {
+          cur.buyQty += l.line.quantity;
+          cur.buy += l.line.amount;
+        }
+        map.set(l.line.itemName, cur);
+      });
+    add(saleLines, "sale");
+    add(purchaseLines, "buy");
+    return [...map.entries()].map(([name, v]) => ({ name, ...v })).sort((a, b) => a.name.localeCompare(b.name));
+  }, [saleLines, purchaseLines, picked]);
+  type Row = (typeof rows)[number];
+  const total = (pick: (r: Row) => number) => rows.reduce((t, r) => t + pick(r), 0);
+
+  const columns: ReportColumn<Row>[] = [
+    { key: "name", label: "Item Name", value: (r) => r.name },
+    { key: "saleQty", label: "Sale Quantity", value: (r) => qty(r.saleQty), sortValue: (r) => r.saleQty, type: "number", align: "right" },
+    { key: "sale", label: "Sale Amount", value: (r) => inr(r.sale), sortValue: (r) => r.sale, type: "number", align: "right" },
+    { key: "buyQty", label: "Purchase Quantity", value: (r) => qty(r.buyQty), sortValue: (r) => r.buyQty, type: "number", align: "right" },
+    { key: "buy", label: "Purchase Amount", value: (r) => inr(r.buy), sortValue: (r) => r.buy, type: "number", align: "right" },
+  ];
+  const closing: Record<string, string> = {
+    name: "Total",
+    saleQty: qty(total((r) => r.saleQty)),
+    sale: inr(total((r) => r.sale)),
+    buyQty: qty(total((r) => r.buyQty)),
+    buy: inr(total((r) => r.buy)),
+  };
+
+  return (
+    <>
+      <div className="flex flex-wrap items-end justify-between gap-3 rounded-xl border border-gray-200 bg-white p-4">
+        <div className="flex flex-wrap gap-6">
+          <Stat label="Items" value={String(rows.length)} />
+          <Stat label="Sale amount" value={inr(total((r) => r.sale))} />
+          <Stat label="Purchase amount" value={inr(total((r) => r.buy))} />
+        </div>
+        <label className="block">
+          <span className="mb-1 block text-[11px] font-medium tracking-wide text-gray-400 uppercase">Party name</span>
+          <Select
+            value={picked}
+            onChange={setParty}
+            className="min-w-[220px]"
+            options={[{ value: "all", label: "All parties" }, ...names.map((n) => ({ value: n, label: n }))]}
+          />
+        </label>
+      </div>
+      <ReportTable
+        title="Item By Party Report"
+        metaBefore={[`Party name: ${picked === "all" ? "All parties" : picked}`]}
+        letterhead={false}
+        filename="item-report-by-party"
+        columns={columns}
+        rows={rows}
+        totals={(keys) => [keys.map((k) => closing[k] ?? "")]}
       />
     </>
   );
@@ -1526,9 +1714,9 @@ function BankStatementReport({ txns }: { txns: BankLedgerRow[] }) {
 
 function Stat({ label, value }: { label: string; value: string }) {
   return (
-    <div>
+    <div className="min-w-0 flex-1">
       <div className="text-xs text-gray-500">{label}</div>
-      <div className="mt-0.5 text-lg font-semibold text-gray-800">{value}</div>
+      <FitText className="mt-0.5 text-lg font-semibold text-gray-800">{value}</FitText>
     </div>
   );
 }
@@ -1550,42 +1738,80 @@ function txnReportColumns(id: "sale" | "purchase", parties: Party[]): ReportColu
     { key: "date", label: "Date", value: (i) => fmt(i.invoiceDate), sortValue: (i) => toIsoDate(i.invoiceDate ?? "") },
     { key: "invoiceNo", label: "Invoice No.", value: (i) => fullInvoiceNo(i) },
     { key: "party", label: "Party Name", value: (i) => i.partyName ?? "—" },
-    { key: "gstin", label: "GSTIN", value: (i) => partyOf(i)?.gstin ?? "—" },
-    { key: "phone", label: "Party Phone No.", value: (i) => partyOf(i)?.phone ?? "—" },
+    { key: "gstin", label: "GSTIN", value: (i) => partyOf(i)?.gstin ?? "" },
+    // On screen and in the print picker; Vyapar's own Sale Report print-out has no phone column.
+    { key: "phone", label: "Party Phone No.", value: (i) => partyOf(i)?.phone ?? "—", printOptional: true },
+    { key: "txnType", label: "Transaction Type", value: () => (id === "sale" ? "Sale" : "Purchase") },
     { key: "total", label: "Total", value: (i) => inr(i.total), sortValue: (i) => i.total, type: "number", align: "right" },
     { key: "paymentType", label: "Payment Type", value: (i) => i.paymentType, type: "select" },
     {
       key: "received",
-      label: id === "sale" ? "Received" : "Paid",
+      label: "Received / Paid",
       value: (i) => inr(i.paidAmount),
       sortValue: (i) => i.paidAmount,
       type: "number",
       align: "right",
     },
     { key: "balance", label: "Balance Due", value: (i) => inr(i.balance), sortValue: (i) => i.balance, type: "number", align: "right" },
-    { key: "status", label: "Payment Status", value: (i) => i.status, type: "select" },
+    { key: "dueDate", label: "Due Date", value: (i) => (i.dueDate ? fmt(i.dueDate) : ""), sortValue: (i) => toIsoDate(i.dueDate ?? "") },
+    { key: "status", label: "Status", value: (i) => dueStatus(i), sortValue: (i) => i.status, type: "select" },
     { key: "user", label: "Entered By", value: (i) => i.createdByName ?? "—", type: "select", printOptional: true },
     { key: "description", label: "Description", value: (i) => i.description ?? "—", printOptional: true },
   ];
 }
 
+/**
+ * The Status cell as Vyapar prints it: a bill with money still due past its due date reads
+ * "Overdue" over the number of days, anything else its plain status. Filtering and sorting still go
+ * by the plain status.
+ */
+function dueStatus(i: Invoice): string {
+  if (i.cancelled || i.balance <= 0 || !i.dueDate) return i.status;
+  const due = toIsoDate(i.dueDate);
+  const today = todayIST();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(due) || due >= today) return i.status;
+  const days = Math.round((Date.parse(`${today}T00:00:00Z`) - Date.parse(`${due}T00:00:00Z`)) / 86400000);
+  return `Overdue\n${days} Days`;
+}
+
+/** The Day Book's Type column in Vyapar's own words. */
+const DAYBOOK_TYPE: Record<string, string> = {
+  SALE: "Sale",
+  PURCHASE: "Purchase",
+  SALE_RETURN: "Credit Note",
+  PURCHASE_RETURN: "Debit Note",
+  EXPENSE: "Expense",
+};
+
 /** The item lines printed under each document, with its sub-total and round-off beneath them. */
-function txnReportDetail(itemById: Map<number, Item>): ReportLineDetail<Invoice> {
+function txnReportDetail(itemById: Map<number, Item>, withGst: boolean): ReportLineDetail<Invoice> {
+  // Vyapar's own item table: # · Item name · HSN/ SAC · Quantity · Unit · Price/ Unit · Amount,
+  // closed by a bold Total line. A GST column joins it only when a bill in the report carries tax.
+  const gst = <V,>(v: V): V[] => (withGst ? [v] : []);
   return {
     label: "Item Details",
     defaultOn: true,
-    head: ["#", "Item Name", "HSN / SAC", "Quantity", "Price / Unit", "GST", "Amount"],
+    head: ["#", "Item name", "HSN/ SAC", "Quantity", "Unit", "Price/ Unit", ...gst("GST"), "Amount"],
     alignRightFrom: 3,
+    indentCol: 2,
+    noteBelow: true,
     rows: (i) =>
-      i.lines.map((l, n) => [
-        n + 1,
-        l.itemName,
-        l.hsn?.trim() || (l.itemId != null ? (itemById.get(l.itemId)?.hsn ?? "—") : "—"),
-        qty(l.quantity),
-        inr(l.rate),
-        l.taxPercent ? `${inr(l.taxAmount)} (${l.taxPercent}%)` : "—",
-        inr(l.amount),
-      ]),
+      i.lines.length
+        ? [
+            ...i.lines.map((l, n) => [
+              n + 1,
+              l.itemName,
+              l.hsn?.trim() || (l.itemId != null ? (itemById.get(l.itemId)?.hsn ?? "") : ""),
+              qty(l.quantity),
+              l.unit ?? "",
+              inr(l.rate),
+              ...gst(l.taxPercent ? `${inr(l.taxAmount)} (${l.taxPercent}%)` : ""),
+              inr(l.amount),
+            ]),
+            ["", "Total", "", qty(i.lines.reduce((t, l) => t + l.quantity, 0)), "", "", ...gst(""), inr(i.lines.reduce((t, l) => t + l.amount, 0))],
+          ]
+        : [],
+    note: (i) => i.description?.trim() || null,
     footer: (i) => {
       const out: [string, string][] = [["Sub Total", inr(i.subTotal)]];
       if (i.discount) out.push(["Discount", `- ${inr(i.discount)}`]);
@@ -1603,7 +1829,7 @@ function SummaryStrip({ stats, onDownload }: { stats: { label: string; value: st
         {stats.map((s) => (
           <div key={s.label}>
             <div className="text-xs text-gray-500">{s.label}</div>
-            <div className="mt-0.5 text-lg font-semibold text-gray-800">{s.value}</div>
+            <FitText className="mt-0.5 text-lg font-semibold text-gray-800">{s.value}</FitText>
           </div>
         ))}
       </div>
@@ -1636,9 +1862,10 @@ function ChartCard({ title, children }: { title: string; children: React.ReactEl
  * `SimpleTable` is called from twenty-odd places with nothing but a head and rows; threading a
  * title through every one of them to feed the print-out would be churn for no reading benefit.
  */
-const ReportMetaContext = createContext<{ title: string; filename: string }>({
+const ReportMetaContext = createContext<{ title: string; filename: string; user: string }>({
   title: "Report",
   filename: "report",
+  user: "All Users",
 });
 
 /**
@@ -1658,10 +1885,18 @@ function SimpleTable({
   alignRight = [],
   selectCols = [],
   links,
+  letterhead,
+  metaBefore,
+  metaAfter,
+  totals,
 }: {
   head: string[];
   rows: (string | number)[][];
   alignRight?: number[];
+  letterhead?: boolean;
+  metaBefore?: string[];
+  metaAfter?: string[];
+  totals?: (string | number)[][];
   /** Columns with a handful of repeating values (Type, Status), filtered by picking from a list. */
   selectCols?: number[];
   /** The entry each row opens, by index into `rows`. Sorting reorders the rows, so the link is
@@ -1686,7 +1921,19 @@ function SimpleTable({
     type: alignRight.includes(i) ? "number" : selectCols.includes(i) ? "select" : "text",
     align: alignRight.includes(i) ? "right" : "left",
   }));
-  return <ReportTable title={meta.title} filename={meta.filename} columns={columns} rows={rows} rowHref={hrefOf} />;
+  return (
+    <ReportTable
+      title={meta.title}
+      filename={meta.filename}
+      columns={columns}
+      rows={rows}
+      rowHref={hrefOf}
+      letterhead={letterhead}
+      metaBefore={metaBefore}
+      metaAfter={metaAfter}
+      totals={totals}
+    />
+  );
 }
 
 /** "₹1,23,456.78" → 123456.78; "- ₹500" → -500; anything not a number is left as text. */

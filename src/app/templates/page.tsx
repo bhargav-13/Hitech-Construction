@@ -205,7 +205,7 @@ function DesignerForm({
         <div>
           <h3 className="text-base font-semibold text-gray-800">{label}</h3>
           <p className="text-xs text-gray-500">
-            {hint} · {customised ? "custom design" : "default design (Onsite layout)"}
+            {hint} · {customised ? "custom design" : `default design (${t.style === "vyapar" || isReport ? "Vyapar" : "Onsite"} layout)`}
             {!editable && " · view only — you need edit rights on this module to change it"}
           </p>
         </div>
@@ -241,6 +241,7 @@ function DesignerForm({
                   <label className="block">
                     <span className="mb-1 block text-xs text-gray-500">Style</span>
                     <select value={t.style} onChange={(e) => set({ style: e.target.value as DocTemplate["style"] })} className="input">
+                      <option value="vyapar">Vyapar</option>
                       <option value="classic">Classic (Onsite)</option>
                       <option value="band">Colour band</option>
                     </select>

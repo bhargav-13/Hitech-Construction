@@ -21,6 +21,7 @@ import { useCan } from "@/lib/permissions";
 import { useAuthStore } from "@/lib/authStore";
 import { inr, bookDate } from "@/lib/format";
 import { todayIST, formatDateTimeIST } from "@/lib/datetime";
+import { FitText } from "@/components/FitText";
 
 /**
  * Vyapar → Payment Request (KAN-68).
@@ -357,7 +358,7 @@ function Tile({ label, value, tone }: { label: string; value: string; tone: stri
   return (
     <div className="rounded-xl border border-gray-200 bg-white px-4 py-3">
       <div className="text-xs text-gray-500">{label}</div>
-      <div className={`mt-1 text-lg font-semibold tabular-nums ${tone}`}>{value}</div>
+      <FitText className={`mt-1 text-lg font-semibold tabular-nums ${tone}`}>{value}</FitText>
     </div>
   );
 }
