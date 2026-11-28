@@ -2,6 +2,103 @@
 // Base URL points at the local backend by default — override with NEXT_PUBLIC_API_BASE_URL.
 export const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8080";
 
+// ---- Same-origin fallback ----
+// Some office networks reach this site but not the API's own host (an ISP that doesn't route to
+// the server's IP range, a firewall ban on the office's address, a router DNS that can't resolve
+// the API name). next.config.ts forwards `/backend/*` on this site to the API, so when the direct
+// host is unreachable from this browser the calls go through the site instead. Direct stays the
+// default: it is one hop shorter and has no body-size cap for uploads.
+const PROXY_BASE = "/backend";
+const PROXY_KEY = "hitech.apiViaProxy.v1";
+const DIRECT_OK_KEY = "hitech.apiDirectOk.v1";
+/** How long a browser keeps using the fallback before trying the direct host again. */
+const PROXY_TTL_MS = 12 * 60 * 60 * 1000;
+const HEALTH_PATH = "/actuator/health";
+
+let viaProxy = false;
+if (typeof window !== "undefined") {
+  try {
+    const since = Number(localStorage.getItem(PROXY_KEY));
+    viaProxy = Number.isFinite(since) && since > 0 && Date.now() - since < PROXY_TTL_MS;
+    if (!viaProxy) localStorage.removeItem(PROXY_KEY);
+  } catch {
+    // Storage blocked: decide again on every page load.
+  }
+}
+
+/** Where API calls go from this browser right now: the API host, or this site's `/backend`. */
+export function apiBase(): string {
+  return viaProxy ? PROXY_BASE : API_BASE_URL;
+}
+
+async function reachable(url: string, timeoutMs: number): Promise<boolean> {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, { cache: "no-store", signal: ctrl.signal });
+    return res.ok;
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+let proxyCheck: Promise<boolean> | null = null;
+
+/**
+ * Called after a request failed at the network level. Switches to the fallback only when the API
+ * host really is unreachable from here *and* the fallback answers — a request that merely dropped
+ * mid-flight on a working connection is left to fail as before, so it is never sent twice.
+ */
+function switchToProxyIfBlocked(): Promise<boolean> {
+  if (typeof window === "undefined" || !/^https?:\/\//i.test(API_BASE_URL)) return Promise.resolve(false);
+  return (proxyCheck ??= (async () => {
+    if (await reachable(`${API_BASE_URL}${HEALTH_PATH}`, 4000)) return false;
+    if (!(await reachable(`${PROXY_BASE}${HEALTH_PATH}`, 10000))) return false;
+    viaProxy = true;
+    try {
+      localStorage.setItem(PROXY_KEY, String(Date.now()));
+    } catch {
+      // Storage blocked: the switch still holds for this page.
+    }
+    return true;
+  })().finally(() => {
+    proxyCheck = null;
+  }));
+}
+
+/** `fetch` against the API, falling back to this site's `/backend` when the API host is blocked. */
+export async function apiFetch(path: string, init?: RequestInit): Promise<Response> {
+  try {
+    return await fetch(`${apiBase()}${path}`, init);
+  } catch (err) {
+    if (viaProxy || init?.signal?.aborted || !(await switchToProxyIfBlocked())) throw err;
+    return fetch(`${PROXY_BASE}${path}`, init);
+  }
+}
+
+// Find out on page load rather than on the first click: a blocked host can take 20 seconds to
+// fail, which would otherwise be spent staring at the Sign in button. Once per tab.
+if (typeof window !== "undefined" && !viaProxy) {
+  let checked = false;
+  try {
+    checked = sessionStorage.getItem(DIRECT_OK_KEY) === "1";
+  } catch {
+    // Storage blocked: check on every load.
+  }
+  if (!checked) {
+    void reachable(`${API_BASE_URL}${HEALTH_PATH}`, 5000).then((ok) => {
+      if (!ok) return void switchToProxyIfBlocked();
+      try {
+        sessionStorage.setItem(DIRECT_OK_KEY, "1");
+      } catch {
+        // Nothing to remember it in.
+      }
+    });
+  }
+}
+
 const ACCESS_TOKEN_KEY = "hitech_access_token";
 const REFRESH_TOKEN_KEY = "hitech_refresh_token";
 /**
@@ -200,7 +297,7 @@ async function refreshTokens(): Promise<boolean> {
   const refreshToken = getRefreshToken();
   if (!refreshToken) return false;
   try {
-    const res = await fetch(`${API_BASE_URL}/api/v1/auth/refresh`, {
+    const res = await apiFetch("/api/v1/auth/refresh", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ refreshToken }),
@@ -247,7 +344,7 @@ async function request<T>(
       const companyId = getActiveCompanyId();
       if (companyId != null) headers["X-Company-Id"] = String(companyId);
     }
-    return fetch(`${API_BASE_URL}${path}`, {
+    return apiFetch(path, {
       method,
       headers,
       body: body !== undefined ? JSON.stringify(body) : undefined,

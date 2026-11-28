@@ -1,4 +1,4 @@
-import { API_BASE_URL, apiRequest } from "./api";
+import { apiBase, apiRequest } from "./api";
 
 /**
  * Mirrors file-service (com.hitech.erp.files) — the project Files tab, and the upload path every
@@ -230,7 +230,7 @@ interface InitResponse {
  * back by the API means "relative to the API", so that is what it is resolved against.
  */
 export function resolveStorageUrl(url: string): string {
-  return /^https?:\/\//i.test(url) ? url : `${API_BASE_URL}${url}`;
+  return /^https?:\/\//i.test(url) ? url : `${apiBase()}${url}`;
 }
 
 export interface UploadHandle {
